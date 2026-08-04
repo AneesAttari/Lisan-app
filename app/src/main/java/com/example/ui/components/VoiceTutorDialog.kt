@@ -224,12 +224,22 @@ fun VoiceTutorDialog(
             override fun onError(error: Int) {
                 Log.e("VoiceTutor", "Speech recognizer error: $error")
                 rmsVolume = 0f
+
+                // If partial speech was already recognized, submit it directly to the AI tutor instead of failing
+                if (userSpeechText.isNotBlank() && userSpeechText != "سن رہا ہے...") {
+                    Log.d("VoiceTutor", "Error $error occurred but partial speech was captured: '$userSpeechText'. Sending to tutor.")
+                    val capturedText = userSpeechText
+                    voiceState = VoiceState.THINKING
+                    viewModel.sendChatMessage(capturedText)
+                    return
+                }
+
                 if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                     voiceState = VoiceState.INACTIVE
                     if (userSpeechText == "سن رہا ہے...") {
                         userSpeechText = ""
                     }
-                    errorMessage = "لم يتم سماع الصوت بشكل واضح. يرجى المحاولة مجدداً أو الكتابة أدناه.\n(آواز سنائی نہیں دی۔ دوبارہ کوشش کریں یا نیچے لکھیں۔)"
+                    errorMessage = "لم يتم سماع الصوت بشكل واضح. يرجى المحاولة مجدداً، أو اضغط زر گوگل وائس پاپ اپ، أو اكتب أدناه.\n(آواز سنائی نہیں دی۔ دوبارہ کوشش کریں یا نیچے لکھیں۔)"
                 } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT) {
                     voiceState = VoiceState.INACTIVE
                     errorMessage = "الخدمة الصوتية مشغولة حالياً (Busy/Client Error #$error).\nيرجى الضغط على زر الميكروفون مجدداً أو الكتابة أدناه.\n(وائس سروس مصروف یا ری سیٹ درکار ہے۔ مائیک دوبارہ دبائیں یا نیچے لکھیں۔)"
@@ -256,7 +266,7 @@ fun VoiceTutorDialog(
             override fun onResults(results: Bundle?) {
                 rmsVolume = 0f
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull()
+                val text = matches?.firstOrNull() ?: if (userSpeechText.isNotBlank() && userSpeechText != "سن رہا ہے...") userSpeechText else null
                 if (!text.isNullOrBlank()) {
                     userSpeechText = text
                     voiceState = VoiceState.THINKING
