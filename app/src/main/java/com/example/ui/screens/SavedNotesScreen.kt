@@ -52,6 +52,9 @@ fun SavedNotesScreen(
     modifier: Modifier = Modifier
 ) {
     val notes by viewModel.savedNotes.collectAsState()
+    val savedIdiomIds by viewModel.savedIdiomIds.collectAsState()
+    val allIdioms = com.example.data.repository.IdiomRepository.idioms
+    val savedIdioms = allIdioms.filter { savedIdiomIds.contains(it.id) }
 
     Column(
         modifier = modifier
@@ -59,38 +62,27 @@ fun SavedNotesScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        EditorialSectionTitle("Saved Grammar Notes • محفوظ نوٹس اور مطالعہ ڈائری")
-
-        if (notes.isEmpty()) {
-            EditorialCard {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "ابھی تک کوئی نوٹ محفوظ نہیں کیا گیا ہے",
-                        fontSize = 16.sp,
-                        fontFamily = FontFamily.Serif,
-                        fontStyle = FontStyle.Italic,
-                        color = EditorialPrimary
-                    )
-                    Text(
-                        text = "آپ کسی بھی سبق کو محفوظ کر سکتے ہیں تاکہ بعد میں آسانی سے دیکھ سکیں۔",
-                        fontSize = 13.sp,
-                        color = EditorialTextSecondary
-                    )
-                }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // Grammar Notes Section
+            item {
+                EditorialSectionTitle("Saved Grammar Notes")
+                Spacer(modifier = Modifier.height(8.dp))
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
+
+            if (notes.isEmpty()) {
+                item {
+                    EditorialCard {
+                        Text(
+                            text = "No grammar notes saved yet.",
+                            modifier = Modifier.padding(16.dp),
+                            color = EditorialTextMuted
+                        )
+                    }
+                }
+            } else {
                 items(notes, key = { it.id }) { note ->
                     EditorialCard {
                         Row(
@@ -159,6 +151,29 @@ fun SavedNotesScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // Saved Idioms Section
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                EditorialSectionTitle("Saved Idioms")
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (savedIdioms.isEmpty()) {
+                item {
+                    EditorialCard {
+                        Text(
+                            text = "No idioms saved yet.",
+                            modifier = Modifier.padding(16.dp),
+                            color = EditorialTextMuted
+                        )
+                    }
+                }
+            } else {
+                items(savedIdioms, key = { it.id }) { idiom ->
+                    IdiomCard(idiom, viewModel)
                 }
             }
         }

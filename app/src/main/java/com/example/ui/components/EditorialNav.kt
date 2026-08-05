@@ -15,8 +15,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -26,16 +29,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.EditorialBorder
-import com.example.ui.theme.EditorialContainer
-import com.example.ui.theme.EditorialPillBg
-import com.example.ui.theme.EditorialPrimary
-import com.example.ui.theme.EditorialTextPrimary
+import com.example.ui.theme.*
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 
 data class EditorialTabItem(
     val title: String,
@@ -48,20 +49,21 @@ fun EditorialBottomNav(
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = EditorialTheme.colors
     val tabs = listOf(
         EditorialTabItem("Learn", Icons.AutoMirrored.Filled.MenuBook),
-        EditorialTabItem("Tutor", Icons.Default.ChatBubbleOutline),
         EditorialTabItem("Analyze", Icons.Default.AutoAwesome),
-        EditorialTabItem("Idioms", Icons.Default.Search),
-        EditorialTabItem("Saved", Icons.Default.Bookmark)
+        EditorialTabItem("Tutor", Icons.Default.ChatBubbleOutline),
+        EditorialTabItem("Idioms", Icons.Default.Bookmark),
+        EditorialTabItem("Library", Icons.Default.LibraryBooks)
     )
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(80.dp),
-        color = EditorialContainer,
-        border = BorderStroke(1.dp, EditorialBorder)
+            .height(84.dp),
+        color = colors.container,
+        border = BorderStroke(1.dp, colors.border)
     ) {
         Row(
             modifier = Modifier
@@ -72,53 +74,65 @@ fun EditorialBottomNav(
         ) {
             tabs.forEachIndexed { index, tabItem ->
                 val isSelected = selectedTabIndex == index
-                Column(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onTabSelected(index) }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .alpha(if (isSelected) 1f else 0.6f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    if (isSelected) {
+                val isCenter = index == 2 // Middle item "Tutor"
+
+                if (isCenter) {
+                    Column(
+                        modifier = Modifier
+                            .padding(bottom = 8.dp)
+                            .clip(CircleShape)
+                            .clickable { onTabSelected(index) }
+                            .padding(horizontal = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Surface(
                             modifier = Modifier
-                                .width(56.dp)
-                                .height(32.dp),
+                                .size(56.dp)
+                                .shadow(8.dp, CircleShape),
                             shape = CircleShape,
-                            color = EditorialPillBg
+                            color = if (isSelected) colors.accentPurple else colors.surface,
+                            border = BorderStroke(2.dp, colors.accentPurple)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = tabItem.icon,
                                     contentDescription = tabItem.title,
-                                    tint = EditorialPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = if (isSelected) Color.White else colors.primary,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                         }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .width(56.dp)
-                                .height(32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = tabItem.icon,
-                                contentDescription = tabItem.title,
-                                tint = EditorialTextPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        Text(
+                            text = tabItem.title,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
-                    Text(
-                        text = tabItem.title,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = EditorialPrimary
-                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { onTabSelected(index) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .alpha(if (isSelected) 1f else 0.7f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = tabItem.icon,
+                            contentDescription = tabItem.title,
+                            tint = if (isSelected) colors.accentPurple else colors.textSecondary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = tabItem.title,
+                            fontSize = 10.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) colors.accentPurple else colors.textSecondary
+                        )
+                    }
                 }
             }
         }

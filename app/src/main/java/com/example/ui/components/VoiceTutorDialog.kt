@@ -5,11 +5,14 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -50,6 +54,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -78,7 +83,7 @@ fun VoiceTutorDialog(
     val chatError by viewModel.chatError.collectAsState()
 
     var voiceState by remember { mutableStateOf(VoiceState.INACTIVE) }
-    var selectedLanguage by remember { mutableStateOf("ur-PK") }
+    var selectedLanguage by remember { mutableStateOf("ar-SA") }
     var userSpeechText by remember { mutableStateOf("") }
     var tutorSpeechText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
@@ -88,11 +93,18 @@ fun VoiceTutorDialog(
     var silenceDurationMode by remember { mutableStateOf("normal") }
     val isSpeechRecognizerAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
     var hasAttemptedAutoSystemFallback by remember { mutableStateOf(false) }
-    var showUrduKeyboard by remember { mutableStateOf(false) }
+    var showArabicKeyboard by remember { mutableStateOf(false) }
 
     // TTS & STT instances
-    var textToSpeech by remember { mutableStateOf<TextToSpeech?>(null) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    
+    val currentlySpeakingText by viewModel.ttsManager.currentlySpeaking.collectAsState()
+
+    LaunchedEffect(currentlySpeakingText) {
+        if (currentlySpeakingText == null && voiceState == VoiceState.SPEAKING) {
+            voiceState = VoiceState.INACTIVE
+        }
+    }
     
     // Remember the last processed message to prevent repeating old responses
     var lastProcessedMessageIndex by remember { mutableStateOf(-1) }
@@ -108,18 +120,41 @@ fun VoiceTutorDialog(
         )
     }
 
+    val openAppSettings: () -> Unit = {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", context.packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("VoiceTutor", "Unable to open app settings", e)
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasAudioPermission = isGranted
         if (!isGranted) {
             voiceState = VoiceState.ERROR
-            errorMessage = "آڈیو ریکارڈنگ کی اجازت درکار ہے۔"
+            errorMessage = "Microphone permission is required for speech input. Please allow it in Settings.\n(إذن الميكروفون مطلوب للإدخال الصوتي. يرجى تفعيله في الإعدادات.)"
         }
     }
 
-    // Forward declaration of launchSystemSpeechDialog to allow use in launcher and onError
-    var launchSystemSpeechDialog: () -> Unit = {}
+    val isNetworkAvailable: (Context) -> Boolean = { ctx ->
+        val connectivityManager = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (connectivityManager != null) {
+            val activeNetwork = connectivityManager.activeNetwork
+            if (activeNetwork != null) {
+                val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+                capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            } else false
+        } else false
+    }
+
+    // Forward declaration of launchGoogleSpeechInput
+    var launchGoogleSpeechInput: () -> Unit = {}
 
     // System Speech Overlay Launcher (Native Voice Dialog)
     val speechIntentLauncher = rememberLauncherForActivityResult(
@@ -130,52 +165,33 @@ fun VoiceTutorDialog(
             val text = matches?.firstOrNull()
             if (!text.isNullOrBlank()) {
                 userSpeechText = text
-                voiceState = VoiceState.THINKING
-                viewModel.sendChatMessage(text)
+                manualInputText = text
+                voiceState = VoiceState.INACTIVE
                 errorMessage = ""
             } else {
                 voiceState = VoiceState.INACTIVE
-                errorMessage = "لم يتم الحصول على صوت واضح من نافذة جوجل.\n(گوگل وائس پاپ اپ سے آواز ریکارڈ نہیں ہو سکی۔ نیچے لکھ کر کوشش کریں۔)"
+                errorMessage = "I could not understand that. Please speak clearly and try again."
             }
         } else if (result.resultCode == Activity.RESULT_CANCELED) {
             voiceState = VoiceState.INACTIVE
-            errorMessage = ""
+            errorMessage = "Speech input was cancelled. Please try again."
         } else {
             voiceState = VoiceState.INACTIVE
-            errorMessage = "تم إغلاق نافذة الصوت. يمكنك استخدام الكلمات السريعة أو الكتابة أدناه.\n(وائس پاپ اپ منسوخ یا بند ہو گیا۔ نیچے ٹائپ کریں یا چپس استعمال کریں۔)"
+            errorMessage = "Speech input was cancelled. Please try again."
         }
     }
 
     // Helper functions for TTS
     val speakOut: (String) -> Unit = { text ->
-        if (!isMuted && textToSpeech != null) {
+        if (!isMuted) {
             voiceState = VoiceState.SPEAKING
             tutorSpeechText = text
-            
-            val cleanText = cleanMarkdownForSpeech(text)
-            val locale = detectLanguageForSpeech(cleanText)
-            
-            try {
-                val res = textToSpeech?.setLanguage(locale)
-                if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    textToSpeech?.setLanguage(Locale.forLanguageTag("ur"))
-                }
-            } catch (e: Exception) {
-                Log.e("VoiceTutor", "Error setting language to $locale", e)
-            }
-
-            textToSpeech?.setPitch(1.0f)
-            textToSpeech?.setSpeechRate(1.15f)
-
-            val params = Bundle().apply {
-                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "TUTOR_SPEECH")
-            }
-            textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, params, "TUTOR_SPEECH")
+            viewModel.ttsManager.speak(text)
         }
     }
 
     val stopSpeaking: () -> Unit = {
-        textToSpeech?.stop()
+        viewModel.ttsManager.stop()
         if (voiceState == VoiceState.SPEAKING) {
             voiceState = VoiceState.INACTIVE
         }
@@ -200,8 +216,8 @@ fun VoiceTutorDialog(
 
             override fun onBeginningOfSpeech() {
                 Log.d("VoiceTutor", "Beginning of speech")
-                if (userSpeechText.isBlank() || userSpeechText == "سن رہا ہے...") {
-                    userSpeechText = "سن رہا ہے..."
+                if (userSpeechText.isBlank() || userSpeechText == "أستمع...") {
+                    userSpeechText = "أستمع..."
                 }
             }
 
@@ -225,52 +241,47 @@ fun VoiceTutorDialog(
                 Log.e("VoiceTutor", "Speech recognizer error: $error")
                 rmsVolume = 0f
 
-                // If partial speech was already recognized, submit it directly to the AI tutor instead of failing
-                if (userSpeechText.isNotBlank() && userSpeechText != "سن رہا ہے...") {
-                    Log.d("VoiceTutor", "Error $error occurred but partial speech was captured: '$userSpeechText'. Sending to tutor.")
-                    val capturedText = userSpeechText
-                    voiceState = VoiceState.THINKING
-                    viewModel.sendChatMessage(capturedText)
+                // If partial speech was already recognized, set it into manualInputText and userSpeechText
+                if (userSpeechText.isNotBlank() && userSpeechText != "أستمع...") {
+                    Log.d("VoiceTutor", "Error $error occurred but partial speech was captured: '$userSpeechText'.")
+                    manualInputText = userSpeechText
+                    voiceState = VoiceState.INACTIVE
+                    errorMessage = ""
                     return
                 }
 
-                if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    voiceState = VoiceState.INACTIVE
-                    if (userSpeechText == "سن رہا ہے...") {
-                        userSpeechText = ""
-                    }
-                    errorMessage = "لم يتم سماع الصوت بشكل واضح. يرجى المحاولة مجدداً، أو اضغط زر گوگل وائس پاپ اپ، أو اكتب أدناه.\n(آواز سنائی نہیں دی۔ دوبارہ کوشش کریں یا نیچے لکھیں۔)"
-                } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT) {
-                    voiceState = VoiceState.INACTIVE
-                    errorMessage = "الخدمة الصوتية مشغولة حالياً (Busy/Client Error #$error).\nيرجى الضغط على زر الميكروفون مجدداً أو الكتابة أدناه.\n(وائس سروس مصروف یا ری سیٹ درکار ہے۔ مائیک دوبارہ دبائیں یا نیچے لکھیں۔)"
-                } else if ((error == 11 || error == 5 || error == 4 || error == 10 || error == 12) && !hasAttemptedAutoSystemFallback) {
-                    Log.d("VoiceTutor", "Network/Server error $error encountered. Auto launching system speech dialog.")
-                    hasAttemptedAutoSystemFallback = true
-                    voiceState = VoiceState.INACTIVE
-                    launchSystemSpeechDialog()
+                voiceState = VoiceState.INACTIVE
+
+                if (error == SpeechRecognizer.ERROR_NO_MATCH) {
+                    if (userSpeechText == "أستمع...") userSpeechText = ""
+                    errorMessage = "I could not understand that. Please speak clearly and try again."
+                } else if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    if (userSpeechText == "أستمع...") userSpeechText = ""
+                    errorMessage = "No speech was detected. Please try again."
+                } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    try { speechRecognizer?.cancel() } catch (e: Exception) {}
+                    errorMessage = "Speech recognition is busy. Please wait a moment and try again."
+                } else if (error == SpeechRecognizer.ERROR_CLIENT) {
+                    try { speechRecognizer?.cancel() } catch (e: Exception) {}
+                    errorMessage = "Speech recognition was interrupted. Please try again."
+                } else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    errorMessage = "Microphone permission is required for speech input."
+                } else if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
+                    errorMessage = "Speech recognition needs an internet connection. Check your connection and try again."
                 } else {
-                    voiceState = VoiceState.ERROR
-                    errorMessage = when (error) {
-                        SpeechRecognizer.ERROR_AUDIO -> "مشكلة في تسجيل الصوت (Audio Error #1).\n(آڈیو ریکارڈنگ کا مسئلہ)"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "لم يتم منح إذن الميكروفون (Permission Required #3).\n(مائیک کی اجازت درکار ہے)"
-                        SpeechRecognizer.ERROR_NETWORK -> "مشكلة في الاتصال بالإنترنت (Network Error #4).\nتعذر الاتصال بخوادم الصوت من Google. (نیٹ ورک منقطع ہے)"
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "⚠️ تجاوز وقت الشبكة في خدمة الصوت (Network Timeout - Error #5).\nخدمة Google الصوتية لم تستجب في الوقت المحدد (Timed Out).\nيمكنك تجربة نافذة Google الصوتية، أو إدخال النص أدناه وسيقوم المعلم بالرد عليك بصوت عالٍ!\n(گوگل وائس کا نیٹ ورک ٹائم آؤٹ ہو گیا ہے - Error 5۔ آپ سسٹم وائس پاپ اپ یا نیچے ٹائپ کریں، ٹیوٹر بول کر جواب دے گا!)"
-                        10 -> "تجاوز حد الطلبات على خدمة الصوت (Error 10: Too Many Requests).\nيرجى الكتابة أدناه بدلاً من ذلك. (بہت زیادہ درخواستیں۔ نیچے ٹائپ کریں)"
-                        11 -> "انقطع الاتصال بخادم الصوت (Google Speech Server Disconnected - Error 11).\nخدمة التعرف على الصوت لجوجل غير متوفرة أونلاين على هذا المحاكي.\nيمكنك كتابة رسالتك في المربع أدناه أو النقر على العبارات السريعة وسيقوم المعلم بالرد عليك بصوت عالٍ!\n(گوگل وائس سرور منقطع ہے - Error 11۔ آپ نیچے ٹائپ کریں یا چپس استعمال کریں، ٹیوٹر آپ کو آواز میں جواب دے گا!)"
-                        12 -> "⚠️ اللغة المحددة غير مدعومة أوفلاين أو غير مثبتة على هذا الجهاز (Language Not Supported - Error #12).\nيرجى استخدام لوحة المفاتيح، أو العبارات السريعة، أو الاتصال بالإنترنت.\n(منتخبہ زبان اس ڈیوائس پر آف لائن دستیاب نہیں ہے۔ آپ نیچے ٹائپ کریں یا چپس استعمال کریں!)"
-                        else -> "خطأ في التعرف على الصوت (Code #$error).\nيرجى إعادة المحاولة أو إدخال النص أدناه. (آواز کی شناخت کی خرابی #$error)"
-                    }
+                    errorMessage = "Speech recognition error (Code #$error). Please try again or use Google speech input (recommended)."
                 }
             }
 
             override fun onResults(results: Bundle?) {
                 rmsVolume = 0f
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull() ?: if (userSpeechText.isNotBlank() && userSpeechText != "سن رہا ہے...") userSpeechText else null
+                val text = matches?.firstOrNull() ?: if (userSpeechText.isNotBlank() && userSpeechText != "أستمع...") userSpeechText else null
                 if (!text.isNullOrBlank()) {
                     userSpeechText = text
-                    voiceState = VoiceState.THINKING
-                    viewModel.sendChatMessage(text)
+                    manualInputText = text
+                    voiceState = VoiceState.INACTIVE
+                    errorMessage = ""
                 } else {
                     voiceState = VoiceState.INACTIVE
                 }
@@ -281,6 +292,7 @@ fun VoiceTutorDialog(
                 val text = matches?.firstOrNull()
                 if (!text.isNullOrBlank()) {
                     userSpeechText = text
+                    manualInputText = text
                 }
             }
 
@@ -293,6 +305,10 @@ fun VoiceTutorDialog(
     val startListening: () -> Unit = {
         if (!hasAudioPermission) {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            errorMessage = "Microphone permission is required for speech input."
+        } else if (!isNetworkAvailable(context)) {
+            voiceState = VoiceState.ERROR
+            errorMessage = "Speech recognition needs an internet connection. Check your connection and try again."
         } else {
             stopSpeaking()
             userSpeechText = ""
@@ -300,8 +316,19 @@ fun VoiceTutorDialog(
             voiceState = VoiceState.LISTENING
             rmsVolume = 0f
 
-            // Cleanly re-initialize SpeechRecognizer on every start button click to ensure fresh microphone stream
-            val recognizer = initSpeechRecognizer()
+            val recognizer = speechRecognizer ?: initSpeechRecognizer()
+            try {
+                recognizer.cancel()
+            } catch (e: Exception) {
+                Log.e("VoiceTutor", "Error cancelling previous recognizer session", e)
+            }
+
+            val selectedLanguageCode = when (selectedLanguage) {
+                "en-US", "en" -> "en-US"
+                "ar-SA", "ar" -> "ar-SA"
+                "ar-SA", "ar" -> "ar-SA"
+                else -> selectedLanguage
+            }
 
             val completeSilenceMillis = when (silenceDurationMode) {
                 "short" -> 1800L
@@ -320,23 +347,21 @@ fun VoiceTutorDialog(
 
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
-                putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguageCode)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguageCode)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMillis)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possiblyCompleteSilenceMillis)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
             }
 
             try {
                 recognizer.startListening(intent)
             } catch (e: Exception) {
-                Log.e("VoiceTutor", "Error starting speech recognition", e)
-                voiceState = VoiceState.ERROR
-                errorMessage = "سپیچ ریکوگنیشن شروع نہیں ہوسکی۔"
+                Log.e("VoiceTutor", "Error starting speech recognition, fallback to Google speech input...", e)
+                launchGoogleSpeechInput()
             }
         }
     }
@@ -349,70 +374,63 @@ fun VoiceTutorDialog(
         }
     }
 
-    launchSystemSpeechDialog = {
+    launchGoogleSpeechInput = {
         stopSpeaking()
         stopListening()
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
-            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "بولیں... (Speak now)")
-        }
-        try {
-            speechIntentLauncher.launch(intent)
-        } catch (e: Exception) {
-            Log.e("VoiceTutor", "System speech activity not available", e)
-            errorMessage = "سسٹم میں وائس ڈائیلاگ دستیاب نہیں ہے۔"
+
+        if (!hasAudioPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            errorMessage = "Microphone permission is required for speech input."
+        } else if (!isNetworkAvailable(context)) {
+            voiceState = VoiceState.ERROR
+            errorMessage = "Speech recognition needs an internet connection. Check your connection and try again."
+        } else {
+            val selectedLanguageCode = when (selectedLanguage) {
+                "en-US", "en" -> "en-US"
+                "ar-SA", "ar" -> "ar-SA"
+                "ar-SA", "ar" -> "ar-SA"
+                else -> selectedLanguage
+            }
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguageCode)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }
+
+            val packageManager = context.packageManager
+            val resolvedActivity = intent.resolveActivity(packageManager)
+            val activities = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+
+            if (resolvedActivity == null && activities.isEmpty()) {
+                voiceState = VoiceState.ERROR
+                errorMessage = "Google speech recognition is not available on this phone. Install or update the Google app and Speech Services by Google."
+            } else {
+                try {
+                    errorMessage = ""
+                    speechIntentLauncher.launch(intent)
+                } catch (e: Exception) {
+                    Log.e("VoiceTutor", "Google speech activity failed to launch", e)
+                    voiceState = VoiceState.ERROR
+                    errorMessage = "Google speech recognition is not available on this phone. Install or update the Google app and Speech Services by Google."
+                }
+            }
         }
     }
 
-    // Initialize TTS and SpeechRecognizer
+    // Initialize SpeechRecognizer
     DisposableEffect(Unit) {
         // Init SpeechRecognizer using applicationContext for binding reliability
         initSpeechRecognizer()
-
-        // Init TextToSpeech
-        var tts: TextToSpeech? = null
-        tts = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                val localeUrdu = Locale.forLanguageTag("ur-PK")
-                val result = tts?.setLanguage(localeUrdu)
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.w("VoiceTutor", "ur-PK not supported by TTS, trying ur")
-                    tts?.setLanguage(Locale.forLanguageTag("ur"))
-                }
-                
-                tts?.setPitch(1.0f)
-                tts?.setSpeechRate(1.15f)
-
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        Log.d("VoiceTutor", "TTS started: $utteranceId")
-                    }
-
-                    override fun onDone(utteranceId: String?) {
-                        Log.d("VoiceTutor", "TTS finished: $utteranceId")
-                        voiceState = VoiceState.INACTIVE
-                    }
-
-                    override fun onError(utteranceId: String?) {
-                        Log.e("VoiceTutor", "TTS error: $utteranceId")
-                        voiceState = VoiceState.INACTIVE
-                    }
-                })
-            } else {
-                Log.e("VoiceTutor", "TTS initialization failed")
-            }
-        }
-        textToSpeech = tts
 
         onDispose {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
             speechRecognizer?.destroy()
-            tts?.stop()
-            tts?.shutdown()
         }
     }
 
@@ -464,7 +482,7 @@ fun VoiceTutorDialog(
     LaunchedEffect(hasAudioPermission, isSpeechRecognizerAvailable) {
         if (!isSpeechRecognizerAvailable) {
             voiceState = VoiceState.ERROR
-            errorMessage = "خدمة التعرف على الصوت غير متوفرة على هذا الجهاز. يمكنك استخدام الكتابة للتواصل!\n(اس ڈیوائس پر آواز کی شناخت کی سروس دستیاب نہیں ہے۔ آپ لکھ کر گفتگو کر سکتے ہیں!)"
+            errorMessage = "خدمة التعرف على الصوت غير متوفرة على هذا الجهاز. يمكنك استخدام الكتابة للتواصل!\n(خدمة التعرف على الصوت غير متوفرة على هذا الجهاز. يمكنك استخدام الكتابة للتواصل!)"
         } else if (hasAudioPermission && !hasStartedAutomatically) {
             hasStartedAutomatically = true
             startListening()
@@ -521,7 +539,7 @@ fun VoiceTutorDialog(
                     }
 
                     Text(
-                        text = "لسان وائس ٹیوٹر",
+                        text = "المعلم الصوتي لسان",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = EditorialPrimary,
@@ -554,7 +572,7 @@ fun VoiceTutorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val languages = listOf(
-                        Triple("ur-PK", "اردو", "Urdu"),
+                        Triple("ar-SA", "عربي", "Arabic"),
                         Triple("en-US", "English", "English"),
                         Triple("ar-SA", "العربية", "Arabic")
                     )
@@ -608,7 +626,7 @@ fun VoiceTutorDialog(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "وقفہ کی حد (Speech Pause Tolerance):",
+                        text = "مدة التوقف المؤقت (Speech Pause Tolerance):",
                         fontSize = 11.sp,
                         color = EditorialTextSecondary,
                         fontWeight = FontWeight.Bold
@@ -618,10 +636,10 @@ fun VoiceTutorDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val modes = listOf(
-                            Pair("short", "تیز (1.8s)"),
-                            Pair("normal", "معمولی (3.5s)"),
-                            Pair("long", "طویل (5.5s)"),
-                            Pair("extra_long", "بہت طویل (8s)")
+                            Pair("short", "سريع (1.8s)"),
+                            Pair("normal", "عادي (3.5s)"),
+                            Pair("long", "طويل (5.5s)"),
+                            Pair("extra_long", "طويل جداً (8s)")
                         )
                         modes.forEach { (modeCode, label) ->
                             val isSelected = silenceDurationMode == modeCode
@@ -709,11 +727,11 @@ fun VoiceTutorDialog(
                         }
 
                         val ballText = when (voiceState) {
-                            VoiceState.INACTIVE -> "بولنے کے لیے ٹیپ کریں\nTap to Speak"
-                            VoiceState.LISTENING -> "میں سن رہا ہوں...\nListening..."
-                            VoiceState.THINKING -> "سوچ رہا ہوں...\nThinking..."
-                            VoiceState.SPEAKING -> "بول رہا ہوں...\nSpeaking..."
-                            VoiceState.ERROR -> "مسئلہ پیش آگیا\nError"
+                            VoiceState.INACTIVE -> "اضغط للتحدث\nTap to Speak"
+                            VoiceState.LISTENING -> "أستمع...\nListening..."
+                            VoiceState.THINKING -> "أفكر...\nThinking..."
+                            VoiceState.SPEAKING -> "أتحدث...\nSpeaking..."
+                            VoiceState.ERROR -> "حدث خطأ\nError"
                         }
 
                         val ballTextColor = if (voiceState == VoiceState.INACTIVE) EditorialTextPrimary else Color.White
@@ -777,14 +795,14 @@ fun VoiceTutorDialog(
                         // User message bubble
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = "آپ نے کہا (You said):",
+                                text = "قلت (You said):",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EditorialAccentPurple,
                                 style = TextStyle(textDirection = TextDirection.Ltr)
                             )
                             Text(
-                                text = if (userSpeechText.isNotBlank()) userSpeechText else "بولنا شروع کریں...",
+                                text = if (userSpeechText.isNotBlank()) userSpeechText else "ابدأ التحدث...",
                                 fontSize = 14.sp,
                                 color = if (userSpeechText.isNotBlank()) EditorialTextPrimary else EditorialTextMuted,
                                 modifier = Modifier.fillMaxWidth(),
@@ -797,7 +815,7 @@ fun VoiceTutorDialog(
                         // Tutor response bubble
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = "ٹیوٹر کا جواب (Tutor):",
+                                text = "رد المعلم (Tutor):",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EditorialPrimary,
@@ -809,27 +827,12 @@ fun VoiceTutorDialog(
                                     .weight(1f)
                             ) {
                                 if (isChatLoading || voiceState == VoiceState.THINKING) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    GeneratingLightingGlow(
                                         modifier = Modifier.align(Alignment.CenterStart)
-                                    ) {
-                                        RevolvingAppIconCircle(
-                                            size = 28.dp,
-                                            iconSize = 12.dp
-                                        )
-                                        Text(
-                                            text = "استاد تقابلی جواب پر غور کر رہے ہیں...",
-                                            fontSize = 13.sp,
-                                            fontFamily = FontFamily.Serif,
-                                            fontStyle = FontStyle.Italic,
-                                            color = EditorialPrimary,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
+                                    )
                                 } else {
                                     EditorialMixedText(
-                                        text = if (tutorSpeechText.isNotBlank()) tutorSpeechText else "میں آپ کا انتظار کر رہا ہوں...",
+                                        text = if (tutorSpeechText.isNotBlank()) tutorSpeechText else "أنا في انتظارك...",
                                         fontSize = 14.sp,
                                         color = if (tutorSpeechText.isNotBlank()) EditorialTextPrimary else EditorialTextMuted,
                                         lineHeight = 20.sp,
@@ -845,7 +848,7 @@ fun VoiceTutorDialog(
                 val quickPhrases = remember {
                     listOf(
                         "السلام عليكم",
-                        "كيف حالك يا أستاذ؟",
+                        "كيف حالك يا معلم؟",
                         "علمني كلمة جديدة",
                         "محادثة تعارف باللغة العربية",
                         "تصحيح جملتي العربية",
@@ -893,24 +896,24 @@ fun VoiceTutorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "کتابت (Fallback Text Entry):",
+                        text = "إدخال نصي (Fallback Text Entry):",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = EditorialPrimary
                     )
                     TextButton(
-                        onClick = { showUrduKeyboard = !showUrduKeyboard },
+                        onClick = { showArabicKeyboard = !showArabicKeyboard },
                         colors = ButtonDefaults.textButtonColors(contentColor = EditorialAccentPurple),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.height(28.dp).testTag("toggle_urdu_keyboard_btn")
+                        modifier = Modifier.height(28.dp).testTag("toggle_arabic_keyboard_btn")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Keyboard,
-                            contentDescription = "Urdu Keyboard",
+                            contentDescription = "Arabic Keyboard",
                             modifier = Modifier.size(16.dp).padding(end = 4.dp)
                         )
                         Text(
-                            text = if (showUrduKeyboard) "کی بورڈ چھپائیں (Hide)" else "اردو کی بورڈ (Urdu Keyboard)",
+                            text = if (showArabicKeyboard) "إخفاء لوحة المفاتيح (Hide)" else "لوحة المفاتيح العربية (Arabic Keyboard)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -926,7 +929,7 @@ fun VoiceTutorDialog(
                         .testTag("voice_dialog_fallback_input"),
                     placeholder = {
                         Text(
-                            text = "یا یہاں ٹائپ کریں (ٹیوٹر بول کر جواب دے گا)...",
+                            text = "أو اكتب هنا (سيجيب المعلم صوتياً)...",
                             color = EditorialTextMuted,
                             fontSize = 13.sp,
                             style = TextStyle(textDirection = TextDirection.ContentOrRtl)
@@ -981,12 +984,12 @@ fun VoiceTutorDialog(
                     singleLine = true
                 )
 
-                if (showUrduKeyboard) {
+                if (showArabicKeyboard) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .testTag("urdu_virtual_keyboard"),
+                            .testTag("arabic_virtual_keyboard"),
                         colors = CardDefaults.cardColors(
                             containerColor = EditorialContainer
                         ),
@@ -999,10 +1002,10 @@ fun VoiceTutorDialog(
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            val row1 = listOf("آ", "ا", "ب", "پ", "ت", "ٹ", "ث", "ج", "چ", "ح", "خ")
-                            val row2 = listOf("د", "ڈ", "ذ", "ر", "ڑ", "ز", "ژ", "س", "ش", "ص", "ض")
-                            val row3 = listOf("ط", "ظ", "ع", "غ", "ف", "ق", "ک", "گ", "ل", "م", "ن")
-                            val row4 = listOf("و", "ہ", "ھ", "ء", "ی", "ے", "ں", "؟", "،", "۔")
+                            val row1 = listOf("ض", "ص", "ث", "ق", "ف", "غ", "ع", "ه", "خ", "ح")
+                            val row2 = listOf("ج", "د", "ش", "س", "ي", "ب", "ل", "ا", "ت", "ن")
+                            val row3 = listOf("م", "ك", "ط", "ئ", "ء", "ؤ", "ر", "ى", "ة", "و")
+                            val row4 = listOf("ز", "ظ", "؟", "،", ".")
 
                             // Render character rows
                             listOf(row1, row2, row3, row4).forEach { rowKeys ->
@@ -1049,7 +1052,7 @@ fun VoiceTutorDialog(
                                     contentPadding = PaddingValues(0.dp),
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
-                                    Text("مٹائیں (Clear)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("مسح (Clear)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 // Space button
@@ -1063,7 +1066,7 @@ fun VoiceTutorDialog(
                                     contentPadding = PaddingValues(0.dp),
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
-                                    Text("فاصلہ (Space)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("مسافة (Space)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 // Backspace button
@@ -1129,27 +1132,25 @@ fun VoiceTutorDialog(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Button(
-                                    onClick = {
-                                        errorMessage = ""
-                                        voiceState = VoiceState.INACTIVE
-                                        startListening()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFC81E1E),
-                                        contentColor = Color.White
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.height(30.dp)
-                                ) {
-                                    Text("دوبارہ مائیک (Retry)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                if (!hasAudioPermission || errorMessage.contains("permission", ignoreCase = true) || errorMessage.contains("الميكروفون")) {
+                                    Button(
+                                        onClick = openAppSettings,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFFC81E1E),
+                                            contentColor = Color.White
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.height(30.dp).testTag("open_settings_button")
+                                    ) {
+                                        Text("الإعدادات (Settings)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                                 Button(
                                     onClick = {
                                         errorMessage = ""
                                         voiceState = VoiceState.INACTIVE
-                                        launchSystemSpeechDialog()
+                                        startListening()
                                     },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = EditorialPrimary,
@@ -1159,7 +1160,23 @@ fun VoiceTutorDialog(
                                     shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.height(30.dp)
                                 ) {
-                                    Text("گوگل وائس پاپ اپ (Google Pop-up)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Built-in speech input", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Button(
+                                    onClick = {
+                                        errorMessage = ""
+                                        voiceState = VoiceState.INACTIVE
+                                        launchGoogleSpeechInput()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = EditorialAccentPurple,
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Google speech input (recommended)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1201,17 +1218,18 @@ fun VoiceTutorDialog(
                                     contentDescription = "Mic Toggle"
                                 )
                                 Text(
-                                    text = if (voiceState == VoiceState.LISTENING) "سننا بند کریں" else "مائیک ریکارڈنگ",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = if (voiceState == VoiceState.LISTENING) "Stop Listening" else "Built-in speech input",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
 
                         Button(
-                            onClick = launchSystemSpeechDialog,
+                            onClick = launchGoogleSpeechInput,
                             modifier = Modifier
-                                .weight(1f)
+                                .weight(1.2f)
                                 .height(46.dp)
                                 .testTag("system_voice_dialog_button"),
                             colors = ButtonDefaults.buttonColors(
@@ -1225,12 +1243,13 @@ fun VoiceTutorDialog(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Mic,
-                                    contentDescription = "System Speech Input"
+                                    contentDescription = "Google speech input (recommended)"
                                 )
                                 Text(
-                                    text = "گوگل وائس پاپ اپ",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = "Google speech input (recommended)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
@@ -1268,7 +1287,7 @@ fun VoiceTutorDialog(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = if (isMuted) "ٹیوٹر کی آواز کھولیں (Unmute Tutor)" else "ٹیوٹر کی آواز بند کریں (Mute Tutor)",
+                                    text = if (isMuted) "إلغاء كتم المعلم (Unmute Tutor)" else "كتم المعلم (Mute Tutor)",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1293,7 +1312,7 @@ fun VoiceTutorDialog(
                         )
                     ) {
                         Text(
-                            text = "گفتگو ختم کریں (Close Session)",
+                            text = "إنهاء الجلسة (Close Session)",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1301,33 +1320,6 @@ fun VoiceTutorDialog(
                 }
             }
         }
-    }
-}
-
-fun cleanMarkdownForSpeech(text: String): String {
-    return text
-        .replace(Regex("\\*\\*|\\*|`|_|#"), "")
-        .replace(Regex("💡|📚|✨|🎯|✅|❌|❓|❗"), "")
-        .replace(Regex("\\[([^\\]]+)\\]\\([^\\)]+\\)"), "$1")
-}
-
-fun detectLanguageForSpeech(text: String): Locale {
-    var englishCount = 0
-    var rtlCount = 0
-    
-    for (char in text) {
-        val code = char.code
-        if (char in 'a'..'z' || char in 'A'..'Z') {
-            englishCount++
-        } else if ((code in 0x0600..0x06FF) || (code in 0x0750..0x077F) || (code in 0x08A0..0x08FF) || (code in 0xFB50..0xFDFF) || (code in 0xFE70..0xFEFF)) {
-            rtlCount++
-        }
-    }
-    
-    return if (rtlCount > 0) {
-        Locale.forLanguageTag("ur-PK")
-    } else {
-        Locale.ENGLISH
     }
 }
 

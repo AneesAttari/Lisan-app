@@ -19,6 +19,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,21 +47,7 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.EditorialAccentPurple
-import com.example.ui.theme.EditorialBorder
-import com.example.ui.theme.EditorialBorderAccent
-import com.example.ui.theme.EditorialBorderSoft
-import com.example.ui.theme.EditorialContainer
-import com.example.ui.theme.EditorialDarkBoxAccent
-import com.example.ui.theme.EditorialDarkBoxBg
-import com.example.ui.theme.EditorialDivider
-import com.example.ui.theme.EditorialHeaderBg
-import com.example.ui.theme.EditorialPillBg
-import com.example.ui.theme.EditorialPrimary
-import com.example.ui.theme.EditorialSurface
-import com.example.ui.theme.EditorialTextMuted
-import com.example.ui.theme.EditorialTextPrimary
-import com.example.ui.theme.EditorialTextSecondary
+import com.example.ui.theme.*
 
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -226,13 +217,16 @@ private fun parseMarkdownToAnnotatedString(
 fun EditorialMixedText(
     text: String,
     fontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
-    color: Color = EditorialTextPrimary,
+    color: Color = EditorialTheme.colors.textPrimary,
     lineHeight: androidx.compose.ui.unit.TextUnit = 20.sp,
     fontFamily: FontFamily? = null,
     fontStyle: FontStyle? = null,
     fontWeight: FontWeight? = null,
     modifier: Modifier = Modifier
 ) {
+    val primaryColor = EditorialTheme.colors.primary
+    val accentColor = EditorialTheme.colors.accentPurple
+
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         text.split("\n").forEach { line ->
             val trimmed = line.trim()
@@ -244,7 +238,7 @@ fun EditorialMixedText(
             // 1. Check for Headers
             if (trimmed.startsWith("###")) {
                 val headerText = trimmed.removePrefix("###").trim()
-                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = EditorialPrimary, boldColor = EditorialPrimary)
+                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
                 val hasRtl = isLineRtl(headerText)
                 
                 Text(
@@ -252,13 +246,13 @@ fun EditorialMixedText(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Serif,
-                    color = EditorialPrimary,
+                    color = primaryColor,
                     textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp)
                 )
             } else if (trimmed.startsWith("##")) {
                 val headerText = trimmed.removePrefix("##").trim()
-                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = EditorialPrimary, boldColor = EditorialPrimary)
+                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
                 val hasRtl = isLineRtl(headerText)
                 
                 Text(
@@ -266,13 +260,13 @@ fun EditorialMixedText(
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Serif,
-                    color = EditorialPrimary,
+                    color = primaryColor,
                     textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)
                 )
             } else if (trimmed.startsWith("#")) {
                 val headerText = trimmed.removePrefix("#").trim()
-                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = EditorialPrimary, boldColor = EditorialPrimary)
+                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
                 val hasRtl = isLineRtl(headerText)
                 
                 Text(
@@ -280,7 +274,7 @@ fun EditorialMixedText(
                     fontSize = 19.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Serif,
-                    color = EditorialPrimary,
+                    color = primaryColor,
                     textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp)
                 )
@@ -288,7 +282,7 @@ fun EditorialMixedText(
             // 2. Check for Bullet Points
             else if (trimmed.startsWith("* ") || trimmed.startsWith("- ") || trimmed.startsWith("• ")) {
                 val bulletText = trimmed.substring(2).trim()
-                val annotated = parseMarkdownToAnnotatedString(bulletText, textColor = color, boldColor = EditorialAccentPurple)
+                val annotated = parseMarkdownToAnnotatedString(bulletText, textColor = color, boldColor = accentColor)
                 val hasRtl = isLineRtl(bulletText)
                 
                 if (hasRtl) {
@@ -301,9 +295,9 @@ fun EditorialMixedText(
                             fontSize = fontSize,
                             lineHeight = lineHeight,
                             color = color,
-                            fontFamily = fontFamily,
+                            fontFamily = fontFamily ?: FontFamily.Default,
                             fontStyle = fontStyle,
-                            fontWeight = fontWeight,
+                            fontWeight = fontWeight ?: FontWeight.Normal,
                             textAlign = TextAlign.Right,
                             style = TextStyle(textDirection = TextDirection.Rtl),
                             modifier = Modifier.weight(1f).padding(end = 6.dp)
@@ -312,7 +306,7 @@ fun EditorialMixedText(
                             text = "•",
                             fontSize = fontSize,
                             fontWeight = FontWeight.Bold,
-                            color = EditorialAccentPurple,
+                            color = accentColor,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
@@ -325,7 +319,7 @@ fun EditorialMixedText(
                             text = "•",
                             fontSize = fontSize,
                             fontWeight = FontWeight.Bold,
-                            color = EditorialAccentPurple,
+                            color = accentColor,
                             modifier = Modifier.padding(top = 2.dp, end = 6.dp)
                         )
                         Text(
@@ -333,9 +327,9 @@ fun EditorialMixedText(
                             fontSize = fontSize,
                             lineHeight = lineHeight,
                             color = color,
-                            fontFamily = fontFamily,
+                            fontFamily = fontFamily ?: FontFamily.Default,
                             fontStyle = fontStyle,
-                            fontWeight = fontWeight,
+                            fontWeight = fontWeight ?: FontWeight.Normal,
                             textAlign = TextAlign.Left,
                             style = TextStyle(textDirection = TextDirection.Ltr),
                             modifier = Modifier.weight(1f)
@@ -345,7 +339,7 @@ fun EditorialMixedText(
             }
             // 3. Regular Paragraph
             else {
-                val annotated = parseMarkdownToAnnotatedString(trimmed, textColor = color, boldColor = EditorialAccentPurple)
+                val annotated = parseMarkdownToAnnotatedString(trimmed, textColor = color, boldColor = accentColor)
                 val hasRtl = isLineRtl(trimmed)
                 val textDir = if (hasRtl) TextDirection.Rtl else TextDirection.Ltr
                 
@@ -354,9 +348,9 @@ fun EditorialMixedText(
                     fontSize = fontSize,
                     lineHeight = lineHeight,
                     color = color,
-                    fontFamily = fontFamily,
+                    fontFamily = fontFamily ?: FontFamily.Default,
                     fontStyle = fontStyle,
-                    fontWeight = fontWeight,
+                    fontWeight = fontWeight ?: FontWeight.Normal,
                     textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
                     style = TextStyle(textDirection = textDir),
                     modifier = Modifier.fillMaxWidth()
@@ -370,22 +364,34 @@ fun EditorialMixedText(
 fun EditorialHeader(
     subtitle: String,
     title: String,
-    levelBadge: String,
-    onLevelClick: () -> Unit,
+    levelBadge: String? = null,
+    onLevelClick: (() -> Unit)? = null,
+    isDarkTheme: Boolean = false,
+    onToggleTheme: (() -> Unit)? = null,
+    onMoreClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val colors = EditorialTheme.colors
+    val headerBg = colors.headerBg
+    val subtitleColor = colors.textMuted
+    val titleColor = colors.primary
+    val borderStrokeColor = colors.borderSoft
+    val levelBadgeBg = colors.pillBg
+    val levelBadgeText = colors.primary
+    val iconTint = colors.primary
+
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = EditorialHeaderBg,
+        color = headerBg,
         shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
-        border = BorderStroke(1.dp, EditorialBorderSoft)
+        border = BorderStroke(1.dp, borderStrokeColor)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -393,7 +399,7 @@ fun EditorialHeader(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 2.0.sp,
-                    color = EditorialTextMuted,
+                    color = subtitleColor,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
                 Text(
@@ -402,24 +408,56 @@ fun EditorialHeader(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic,
-                    color = EditorialPrimary
+                    color = titleColor
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Surface(
-                color = EditorialPillBg,
-                shape = CircleShape,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable { onLevelClick() }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = levelBadge,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = EditorialPrimary,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                )
+                if (onToggleTheme != null) {
+                    IconButton(
+                        onClick = onToggleTheme,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = "Toggle Theme",
+                            tint = iconTint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                if (!levelBadge.isNullOrBlank()) {
+                    Surface(
+                        color = levelBadgeBg,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { onLevelClick?.invoke() }
+                    ) {
+                        Text(
+                            text = levelBadge,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = levelBadgeText,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+                if (onMoreClick != null) {
+                    IconButton(
+                        onClick = onMoreClick,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "More Menu",
+                            tint = iconTint,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -428,15 +466,17 @@ fun EditorialHeader(
 @Composable
 fun EditorialCard(
     modifier: Modifier = Modifier,
+    containerColor: Color = EditorialTheme.colors.surface,
+    borderColor: Color = EditorialTheme.colors.border,
     content: @Composable () -> Unit
 ) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .shadow(2.dp, RoundedCornerShape(24.dp)),
-        color = EditorialSurface,
+        color = containerColor,
         shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, EditorialBorder)
+        border = BorderStroke(1.dp, borderColor)
     ) {
         Column(
             modifier = Modifier
@@ -459,7 +499,7 @@ fun EditorialSectionTitle(
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 1.8.sp,
-        color = EditorialAccentPurple,
+        color = EditorialTheme.colors.accentPurple,
         modifier = modifier
     )
 }
@@ -468,7 +508,7 @@ fun EditorialSectionTitle(
 fun EditorialDivider(modifier: Modifier = Modifier) {
     HorizontalDivider(
         thickness = 1.dp,
-        color = EditorialDivider,
+        color = EditorialTheme.colors.divider,
         modifier = modifier
     )
 }
@@ -479,6 +519,7 @@ fun EditorialComparisonGrid(
     differences: List<String>,
     modifier: Modifier = Modifier
 ) {
+    val colors = EditorialTheme.colors
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -490,16 +531,16 @@ fun EditorialComparisonGrid(
             // Similarities Box
             Surface(
                 modifier = Modifier.weight(1f),
-                color = EditorialContainer,
+                color = colors.container,
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, EditorialBorderAccent)
+                border = BorderStroke(1.dp, colors.borderAccent)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
                         text = "SIMILARITIES • مماثلتیں / یکسانیت",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EditorialTextMuted,
+                        color = colors.textMuted,
                         letterSpacing = 1.2.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -507,7 +548,7 @@ fun EditorialComparisonGrid(
                         EditorialMixedText(
                             text = "• $sim",
                             fontSize = 12.sp,
-                            color = EditorialTextSecondary,
+                            color = colors.textSecondary,
                             lineHeight = 17.sp,
                             modifier = Modifier.padding(vertical = 2.dp)
                         )
@@ -518,16 +559,16 @@ fun EditorialComparisonGrid(
             // Differences Box
             Surface(
                 modifier = Modifier.weight(1f),
-                color = EditorialContainer,
+                color = colors.container,
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, EditorialBorderAccent)
+                border = BorderStroke(1.dp, colors.borderAccent)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
                         text = "DIFFERENCES • اختلافات",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EditorialTextMuted,
+                        color = colors.textMuted,
                         letterSpacing = 1.2.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -535,7 +576,7 @@ fun EditorialComparisonGrid(
                         EditorialMixedText(
                             text = "• $diff",
                             fontSize = 12.sp,
-                            color = EditorialTextSecondary,
+                            color = colors.textSecondary,
                             lineHeight = 17.sp,
                             modifier = Modifier.padding(vertical = 2.dp)
                         )
@@ -556,11 +597,12 @@ fun EditorialDarkPracticeBox(
     feedback: String?,
     modifier: Modifier = Modifier
 ) {
+    val colors = EditorialTheme.colors
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .shadow(4.dp, RoundedCornerShape(16.dp)),
-        color = EditorialDarkBoxBg,
+        color = colors.darkBoxBg,
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(
@@ -573,7 +615,7 @@ fun EditorialDarkPracticeBox(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 2.0.sp,
-                color = EditorialDarkBoxAccent
+                color = colors.darkBoxAccent
             )
             Spacer(modifier = Modifier.height(6.dp))
             EditorialMixedText(
@@ -594,7 +636,7 @@ fun EditorialDarkPracticeBox(
                     onValueChange = onTextChange,
                     placeholder = {
                         Text(
-                            text = "Type your answer...",
+                            text = "جواب یہاں لکھیں (Type answer here)...",
                             color = Color.White.copy(alpha = 0.5f),
                             fontSize = 13.sp
                         )

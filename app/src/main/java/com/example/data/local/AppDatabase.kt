@@ -4,11 +4,22 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.example.data.model.SavedIdiom
 import com.example.data.model.SavedNote
+import com.example.data.model.DailyChallengeResultEntity
 
-@Database(entities = [SavedNote::class], version = 1, exportSchema = false)
+import com.example.data.model.ChatMessageEntity
+import com.example.data.model.LibraryItem
+import com.example.data.model.LikedItem
+
+@Database(entities = [SavedNote::class, SavedIdiom::class, DailyChallengeResultEntity::class, LibraryItem::class, LikedItem::class, ChatMessageEntity::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun savedNoteDao(): SavedNoteDao
+    abstract fun savedIdiomDao(): SavedIdiomDao
+    abstract fun dailyChallengeDao(): DailyChallengeDao
+    abstract fun libraryDao(): LibraryDao
+    abstract fun likedDao(): LikedDao
+    abstract fun chatMessageDao(): ChatMessageDao
 
     companion object {
         @Volatile

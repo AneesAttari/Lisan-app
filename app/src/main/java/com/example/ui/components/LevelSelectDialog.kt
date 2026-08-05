@@ -23,13 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.ProficiencyLevel
-import com.example.ui.theme.EditorialAccentPurple
-import com.example.ui.theme.EditorialBorder
-import com.example.ui.theme.EditorialContainer
-import com.example.ui.theme.EditorialPrimary
-import com.example.ui.theme.EditorialSurface
-import com.example.ui.theme.EditorialTextMuted
-import com.example.ui.theme.EditorialTextPrimary
+import com.example.ui.theme.*
 
 @Composable
 fun LevelSelectDialog(
@@ -37,11 +31,12 @@ fun LevelSelectDialog(
     onSelect: (ProficiencyLevel) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val colors = EditorialTheme.colors
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(28.dp),
-            color = EditorialSurface,
-            border = BorderStroke(1.dp, EditorialBorder),
+            color = colors.surface,
+            border = BorderStroke(1.dp, colors.border),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -55,7 +50,7 @@ fun LevelSelectDialog(
                         text = "STUDENT LEVEL • اپنا تعلیمی لیول منتخب کریں",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EditorialTextMuted,
+                        color = colors.textMuted,
                         letterSpacing = 1.4.sp
                     )
                     Text(
@@ -64,7 +59,7 @@ fun LevelSelectDialog(
                         fontFamily = FontFamily.Serif,
                         fontStyle = FontStyle.Italic,
                         fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary
+                        color = colors.primary
                     )
                 }
 
@@ -81,8 +76,8 @@ fun LevelSelectDialog(
                                     onSelect(level)
                                     onDismiss()
                                 },
-                            color = if (isSelected) EditorialContainer else EditorialSurface,
-                            border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                            color = if (isSelected) colors.container else colors.surface,
+                            border = BorderStroke(1.dp, if (isSelected) colors.accentPurple else colors.border),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Row(
@@ -97,14 +92,14 @@ fun LevelSelectDialog(
                                         text = level.labelEn,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = EditorialPrimary
+                                        color = colors.primary
                                     )
                                     Text(
-                                        text = level.labelAr,
+                                        text = level.labelUr,
                                         fontSize = 13.sp,
                                         fontFamily = FontFamily.Serif,
                                         fontStyle = FontStyle.Italic,
-                                        color = EditorialAccentPurple
+                                        color = colors.accentPurple
                                     )
                                 }
 

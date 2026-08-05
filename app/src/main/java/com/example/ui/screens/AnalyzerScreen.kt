@@ -21,11 +21,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +52,7 @@ import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialDivider
 import com.example.ui.components.EditorialSectionTitle
 import com.example.ui.components.EditorialMixedText
+import com.example.ui.components.GeneratingLightingGlow
 import com.example.ui.theme.EditorialAccentPurple
 import com.example.ui.theme.EditorialBorder
 import com.example.ui.theme.EditorialBorderSoft
@@ -64,6 +73,7 @@ fun AnalyzerScreen(
     val analysisResult by viewModel.analyzerOutput.collectAsState()
     val isAnalyzing by viewModel.isAnalyzing.collectAsState()
     val error by viewModel.analyzerError.collectAsState()
+    val currentlySpeaking by viewModel.currentlySpeakingText.collectAsState()
 
     val sampleSentences = listOf(
         "If I had known about the meeting, I would have arrived early.",
@@ -79,18 +89,40 @@ fun AnalyzerScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        EditorialSectionTitle("Deep Sentence Analyzer • جملہ کا گہرائی سے تقابلی تجزیہ")
+        EditorialSectionTitle("Deep Sentence Analyzer")
 
         // Input Card
         EditorialCard {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "ENTER ENGLISH SENTENCE TO ANALYZE • انگریزی جملہ یہاں درج کریں",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.2.sp,
-                    color = EditorialTextMuted
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ENTER SENTENCE TO ANALYZE (ENGLISH, URDU, OR ARABIC)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        color = EditorialTextMuted
+                    )
+                    if (inputSentence.isNotBlank()) {
+                        val isInputSpeaking = currentlySpeaking == "analyzer_input"
+                        IconButton(onClick = {
+                            if (isInputSpeaking) {
+                                viewModel.stopSpeech()
+                            } else {
+                                viewModel.speak(inputSentence, "analyzer_input")
+                            }
+                        }) {
+                            Icon(
+                                imageVector = if (isInputSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = "Speak Input Sentence",
+                                tint = if (isInputSpeaking) Color.Red else EditorialAccentPurple
+                            )
+                        }
+                    }
+                }
                 TextField(
                     value = inputSentence,
                     onValueChange = { viewModel.setAnalyzerInput(it) },
@@ -177,7 +209,7 @@ fun AnalyzerScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "DEEP DISSECT & ARABIC COMPARISON • گہرائی سے تجزیہ اور تقابل",
+                            text = "DEEP DISSECT & ARABIC COMPARISON • گہرائی سے تجزیہ اور عربي تقابل",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -185,6 +217,10 @@ fun AnalyzerScreen(
                     }
                 }
             }
+        }
+
+        if (isAnalyzing) {
+            GeneratingLightingGlow()
         }
 
         if (error != null) {
@@ -213,7 +249,7 @@ fun AnalyzerScreen(
                 ) {
                     Column {
                         Text(
-                            text = "GEMINI 3.1 PRO • THINKING MODE",
+                            text = "GRAMMATICAL ANALYSIS",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = EditorialTextMuted,
@@ -227,6 +263,60 @@ fun AnalyzerScreen(
                             fontWeight = FontWeight.Bold,
                             color = EditorialPrimary
                         )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val isAnalysisSpeaking = currentlySpeaking == "analysis_result"
+                        IconButton(onClick = {
+                            if (isAnalysisSpeaking) {
+                                viewModel.stopSpeech()
+                            } else {
+                                viewModel.speak(analysisResult!!, "analysis_result")
+                            }
+                        }) {
+                            Icon(
+                                imageVector = if (isAnalysisSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = "Listen to Analysis",
+                                tint = if (isAnalysisSpeaking) Color.Red else EditorialAccentPurple
+                            )
+                        }
+
+                        val isLiked by viewModel.isLiked("Analysis", inputSentence).collectAsState(initial = false)
+                        IconButton(onClick = {
+                            viewModel.toggleLike(
+                                com.example.data.model.LikedItem(
+                                    id = "like_analysis_${inputSentence.hashCode()}",
+                                    contentType = "Analysis",
+                                    contentId = inputSentence,
+                                    title = inputSentence
+                                )
+                            )
+                        }) {
+                            Icon(
+                                imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "Favorite",
+                                tint = if (isLiked) Color.Red else EditorialTextMuted
+                            )
+                        }
+
+                        val isSaved by viewModel.isSaved("Analysis", inputSentence).collectAsState(initial = false)
+                        IconButton(onClick = {
+                            viewModel.toggleLibrarySave(
+                                com.example.data.model.LibraryItem(
+                                    id = "analysis_${inputSentence.hashCode()}",
+                                    contentType = "Analysis",
+                                    contentId = inputSentence,
+                                    title = inputSentence,
+                                    preview = analysisResult?.take(100),
+                                    payloadJson = analysisResult
+                                )
+                            )
+                        }) {
+                            Icon(
+                                imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = "Save to Library",
+                                tint = if (isSaved) EditorialPrimary else EditorialTextMuted
+                            )
+                        }
                     }
                 }
 

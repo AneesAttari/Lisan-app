@@ -60,6 +60,13 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+// Dynamically write .env file from environment variables if present
+val envFile = file("${rootDir}/.env")
+val envKey = System.getenv("GEMINI_API_KEY") ?: ""
+if (envKey.isNotEmpty()) {
+  envFile.writeText("GEMINI_API_KEY=$envKey\n")
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {

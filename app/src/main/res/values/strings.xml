@@ -1,12 +1,12 @@
 <resources>
     <string name="app_name">Lisan Grammar</string>
-    <string name="app_subtitle">مصنوعی ذہانت کے ذریعے • انگریزی اور عربی گرامر</string>
-    <string name="tab_lessons">تقابلی اسباق (Lessons)</string>
-    <string name="tab_tutor">اے آئی ٹیوٹر (AI Tutor)</string>
-    <string name="tab_analyzer">جملہ تجزیہ نگار (Deep Analyzer)</string>
-    <string name="tab_idioms">محاورے اور استعمال (Idioms &amp; Search)</string>
-    <string name="tab_saved">محفوظ نوٹس (Saved Notes)</string>
-    <string name="level_beginner">ابتدائی (Beginner)</string>
-    <string name="level_intermediate">درمیانی (Intermediate)</string>
-    <string name="level_advanced">اعلیٰ (Advanced)</string>
+    <string name="app_subtitle">English &amp; Urdu Grammar Guide</string>
+    <string name="tab_lessons">Lessons</string>
+    <string name="tab_tutor">AI Tutor</string>
+    <string name="tab_analyzer">Sentence Analyzer</string>
+    <string name="tab_idioms">Idioms</string>
+    <string name="tab_saved">Saved Notes</string>
+    <string name="level_beginner">Beginner</string>
+    <string name="level_intermediate">Intermediate</string>
+    <string name="level_advanced">Advanced</string>
 </resources>

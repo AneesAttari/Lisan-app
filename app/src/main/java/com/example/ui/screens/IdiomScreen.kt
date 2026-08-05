@@ -1,229 +1,431 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.BorderStroke
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.EditorialCard
-import com.example.ui.components.EditorialDivider
-import com.example.ui.components.EditorialSectionTitle
-import com.example.ui.components.EditorialMixedText
-import com.example.ui.theme.EditorialAccentPurple
-import com.example.ui.theme.EditorialBorderSoft
-import com.example.ui.theme.EditorialContainer
-import com.example.ui.theme.EditorialPrimary
-import com.example.ui.theme.EditorialSurface
-import com.example.ui.theme.EditorialTextMuted
-import com.example.ui.theme.EditorialTextPrimary
-import com.example.ui.theme.EditorialTextSecondary
+import androidx.core.content.ContextCompat
+import com.example.data.model.ArabicEquivalentType
+import com.example.data.model.Idiom
+import com.example.data.model.IdiomCategory
+import com.example.data.model.IdiomLevel
 import com.example.ui.viewmodel.LisanViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IdiomScreen(
-    viewModel: LisanViewModel,
-    modifier: Modifier = Modifier
-) {
-    val query by viewModel.idiomQuery.collectAsState()
-    val output by viewModel.idiomOutput.collectAsState()
-    val isSearching by viewModel.isSearchingIdiom.collectAsState()
-    val error by viewModel.idiomError.collectAsState()
+fun IdiomScreen(viewModel: LisanViewModel) {
+    val searchQuery by viewModel.idiomSearchQuery.collectAsState()
+    val filteredIdioms by viewModel.filteredIdioms.collectAsState()
+    val selectedLevel by viewModel.selectedIdiomLevel.collectAsState()
+    val selectedCategory by viewModel.selectedIdiomCategory.collectAsState()
+    val isListening by viewModel.isListening.collectAsState()
+    val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
 
-    val suggestedIdioms = listOf(
-        "Break the ice",
-        "Once in a blue moon",
-        "A piece of cake",
-        "Bite the bullet",
-        "Hit the nail on the head"
-    )
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.startVoiceSearch()
+        } else {
+            Toast.makeText(context, "Microphone access is needed for voice search.", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        EditorialSectionTitle("Idioms & Search Grounding • محاورے اور ثقافتی متبادلات")
+        // Header
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            Text(
+                text = "Idioms & Usage",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = "Learn English idioms with Urdu meaning and Arabic grammar references.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
 
-        EditorialCard {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "SEARCH ENGLISH IDIOM / EXPRESSION • انگریزی محاورہ تلاش کریں",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.2.sp,
-                    color = EditorialTextMuted
-                )
-                TextField(
-                    value = query,
-                    onValueChange = { viewModel.setIdiomQuery(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = EditorialContainer,
-                        unfocusedContainerColor = EditorialContainer,
-                        focusedTextColor = EditorialTextPrimary,
-                        unfocusedTextColor = EditorialTextPrimary,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    singleLine = true
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { viewModel.setIdiomSearchQuery(it) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            placeholder = { Text("Search an idiom, meaning, or Urdu word") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                IconButton(onClick = {
+                    if (isListening) {
+                        viewModel.stopVoiceSearch()
+                    } else {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            viewModel.startVoiceSearch()
+                        } else {
+                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                }) {
+                    Icon(
+                        imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Voice Search",
+                        tint = if (isListening) Color.Red else MaterialTheme.colorScheme.primary,
+                        modifier = if (isListening) Modifier.graphicsLayer(scaleX = 1.2f, scaleY = 1.2f) else Modifier
+                    )
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+        )
+
+        // Filters
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val hasFilters = selectedLevel != null || selectedCategory != null || searchQuery.isNotBlank()
+            Text(
+                text = if (!hasFilters) "All Levels · All Categories" else "${filteredIdioms.size} matches found",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (hasFilters) {
+                TextButton(onClick = { viewModel.clearIdiomFilters() }) {
+                    Text("Clear filters")
+                }
+            }
+        }
+
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                FilterChip(
+                    selected = selectedLevel == null,
+                    onClick = { viewModel.setIdiomLevelFilter(null) },
+                    label = { Text("All Levels") }
                 )
             }
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "POPULAR IDIOMS • مشہور محاورے",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialTextMuted
+            items(IdiomLevel.values()) { level ->
+                FilterChip(
+                    selected = selectedLevel == level,
+                    onClick = { viewModel.setIdiomLevelFilter(level) },
+                    label = { Text(level.label) }
                 )
-                suggestedIdioms.forEach { idiom ->
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                viewModel.setIdiomQuery(idiom)
-                                viewModel.searchIdiom()
-                            },
-                        color = EditorialSurface,
-                        border = BorderStroke(1.dp, EditorialBorderSoft),
-                        shape = RoundedCornerShape(10.dp)
+            }
+        }
+
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                FilterChip(
+                    selected = selectedCategory == null,
+                    onClick = { viewModel.setIdiomCategoryFilter(null) },
+                    label = { Text("All Categories") }
+                )
+            }
+            items(IdiomCategory.values()) { category ->
+                FilterChip(
+                    selected = selectedCategory == category,
+                    onClick = { viewModel.setIdiomCategoryFilter(category) },
+                    label = { Text(category.label) }
+                )
+            }
+        }
+
+        // Popular Chips (Horizontal)
+        if (searchQuery.isBlank()) {
+            Text(
+                text = "Popular today",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val popular = listOf("Break the ice", "Piece of cake", "Under the weather")
+                items(popular) { term ->
+                    SuggestionChip(
+                        onClick = { viewModel.setIdiomSearchQuery(term) },
+                        label = { Text(term) }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Idiom List or Empty State
+        if (filteredIdioms.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SearchOff,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "No idioms found for \"$searchQuery\"",
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "Try searching in English, Urdu, or by meaning.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(filteredIdioms) { idiom ->
+                    IdiomCard(idiom, viewModel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
+    val currentlyPlayingId by viewModel.tutorAudioManager.currentlyPlayingId.collectAsState()
+    val loadingAudioId by viewModel.tutorAudioManager.isLoading.collectAsState()
+    
+    val isPlaying = currentlyPlayingId == idiom.id
+    val isLoading = loadingAudioId == idiom.id
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = idiom.expression,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row {
+                    IconButton(
+                        onClick = { viewModel.playIdiomAudio(idiom.id) },
+                        enabled = !isLoading
                     ) {
-                        Text(
-                            text = idiom,
-                            fontSize = 13.sp,
-                            fontFamily = FontFamily.Serif,
-                            fontStyle = FontStyle.Italic,
-                            color = EditorialAccentPurple,
-                            modifier = Modifier.padding(10.dp)
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.VolumeUp,
+                                contentDescription = if (isPlaying) "Stop" else "Pronounce",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    val isLiked by viewModel.isLiked("Idiom", idiom.id).collectAsState(initial = false)
+                    IconButton(onClick = {
+                        viewModel.toggleLike(
+                            com.example.data.model.LikedItem(
+                                id = "like_idiom_${idiom.id}",
+                                contentType = "Idiom",
+                                contentId = idiom.id,
+                                title = idiom.expression
+                            )
+                        )
+                    }) {
+                        Icon(
+                            imageVector = if (isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Like",
+                            tint = if (isLiked) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    val isSaved by viewModel.isSaved("Idiom", idiom.id).collectAsState(initial = false)
+                    IconButton(onClick = {
+                        viewModel.toggleLibrarySave(
+                            com.example.data.model.LibraryItem(
+                                id = "lib_idiom_${idiom.id}",
+                                contentType = "Idiom",
+                                contentId = idiom.id,
+                                title = idiom.expression,
+                                preview = idiom.urduMeaning,
+                                payloadJson = null
+                            )
+                        )
+                    }) {
+                        Icon(
+                            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = "Save to Library",
+                            tint = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
 
-            Surface(
+            Text(
+                text = idiom.simpleMeaning,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+
+            Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Urdu
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Urdu:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = idiom.urduMeaning,
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.fillMaxWidth(),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Arabic
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Likewise in Arabic, you say:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = idiom.arabicMeaning,
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.fillMaxWidth(),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Example Section
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(enabled = !isSearching) { viewModel.searchIdiom() },
-                color = EditorialPrimary,
-                shape = RoundedCornerShape(16.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 14.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                Text("Example:", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Text(idiom.example, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    if (isSearching) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "SEARCHING REAL-WORLD CONTEXT...",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "SEARCH ORIGIN & ARABIC PROVERB EQUIVALENT",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        if (error != null) {
-            Surface(
-                color = EditorialSurface,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFB3261E)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = error!!,
-                    color = Color(0xFFB3261E),
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
-        }
-
-        if (!output.isNullOrBlank()) {
-            EditorialCard {
-                Column {
                     Text(
-                        text = "GOOGLE SEARCH GROUNDED • تلاش کے نتائج کا تقابل",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialTextMuted,
-                        letterSpacing = 1.4.sp
-                    )
-                    Text(
-                        text = "Real-World Context & Proverb Bridge",
-                        fontSize = 18.sp,
-                        fontFamily = FontFamily.Serif,
-                        fontStyle = FontStyle.Italic,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary
+                        text = "Level: ${idiom.level.label}",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall
                     )
                 }
-
-                EditorialDivider()
-
-                EditorialMixedText(
-                    text = output!!,
-                    fontSize = 14.sp,
-                    lineHeight = 22.sp,
-                    color = EditorialTextPrimary
-                )
+                
+                Button(
+                    onClick = { /* Practice dialog */ },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Practice")
+                }
             }
         }
     }

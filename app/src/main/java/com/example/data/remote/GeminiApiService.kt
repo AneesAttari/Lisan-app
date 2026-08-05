@@ -14,4 +14,12 @@ interface GeminiApiService {
         @Query("key") apiKey: String,
         @Body request: GenerateContentRequest
     ): GenerateContentResponse
+
+    @POST("v1/models/{model}:generateContent")
+    suspend fun generateContentV1(
+        @Path("model") model: String,
+        @Query("key") apiKey: String,
+        @Body request: GenerateContentRequest
+    ): GenerateContentResponse
 }
+
