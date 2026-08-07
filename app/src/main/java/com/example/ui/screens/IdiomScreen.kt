@@ -73,18 +73,6 @@ fun IdiomScreen(viewModel: LisanViewModel) {
                 .fillMaxWidth()
                 .padding(20.dp)
         ) {
-            Text(
-                text = "Idioms & Usage",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "Learn English idioms with Urdu meaning and Arabic grammar references.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
-            )
         }
 
         // Search Bar
@@ -94,7 +82,7 @@ fun IdiomScreen(viewModel: LisanViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
-            placeholder = { Text("Search an idiom, meaning, or Urdu word") },
+            placeholder = { Text("Search for ideom") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {
                 IconButton(onClick = {
@@ -259,11 +247,9 @@ fun IdiomScreen(viewModel: LisanViewModel) {
 
 @Composable
 fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
-    val currentlyPlayingId by viewModel.tutorAudioManager.currentlyPlayingId.collectAsState()
-    val loadingAudioId by viewModel.tutorAudioManager.isLoading.collectAsState()
-    
-    val isPlaying = currentlyPlayingId == idiom.id
-    val isLoading = loadingAudioId == idiom.id
+    val currentlySpeakingId by viewModel.activeSpeakingId.collectAsState()
+    val isPlaying = currentlySpeakingId == idiom.id
+    val isLoading = false
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -297,7 +283,7 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
                             )
                         } else {
                             Icon(
-                                imageVector = if (isPlaying) Icons.Default.PauseCircleFilled else Icons.Default.VolumeUp,
+                                imageVector = if (isPlaying) Icons.Default.StopCircle else Icons.Default.VolumeUp,
                                 contentDescription = if (isPlaying) "Stop" else "Pronounce",
                                 tint = MaterialTheme.colorScheme.primary
                             )
@@ -350,7 +336,7 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
                 modifier = Modifier.padding(vertical = 4.dp)
             )
 
-            Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
             // Urdu
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -418,13 +404,6 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall
                     )
-                }
-                
-                Button(
-                    onClick = { /* Practice dialog */ },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Practice")
                 }
             }
         }

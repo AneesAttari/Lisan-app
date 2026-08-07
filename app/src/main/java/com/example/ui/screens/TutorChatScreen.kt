@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.ui.components.UserAvatar
+
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,6 +11,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -16,6 +19,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -62,6 +71,9 @@ import com.example.data.model.Part
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
+import com.example.ui.viewmodel.VoiceSessionState
+import com.example.ui.viewmodel.VoiceInputLanguage
+import com.example.ui.viewmodel.AudioPlaybackState
 import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -80,9 +92,13 @@ fun TutorChatScreen(
     val chatHistory by viewModel.chatHistory.collectAsState()
     val isChatLoading by viewModel.isChatLoading.collectAsState()
     val chatError by viewModel.chatError.collectAsState()
+    val currentlySpeakingText by viewModel.activeSpeakingId.collectAsState()
+    val playbackSpeed by viewModel.ttsManager.playbackSpeed.collectAsState()
+    val isUrduVoiceAvailable by viewModel.ttsManager.isUrduVoiceAvailable.collectAsState()
     val proficiencyLevel by viewModel.proficiencyLevel.collectAsState()
     val dailyStreak by viewModel.dailyStreak.collectAsState()
     val completedTopics by viewModel.completedTopicIds.collectAsState()
+    val settings by viewModel.appSettings.collectAsState(initial = com.example.data.model.AppSettings())
 
     var showChatDetails by remember { mutableStateOf(false) }
     var showNameChangeDialog by remember { mutableStateOf(false) }
@@ -90,11 +106,21 @@ fun TutorChatScreen(
     var showDailyGrammarInline by remember { mutableStateOf(false) }
     var showPlusMenu by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
+    var showTutorPreferences by remember { mutableStateOf(false) }
     
     var inputText by remember { mutableStateOf("") }
+    val chatInputState by viewModel.chatInputState.collectAsState()
+    LaunchedEffect(chatInputState) {
+        if (chatInputState.isNotEmpty()) {
+            inputText = chatInputState
+            viewModel.clearChatInput()
+        }
+    }
     val listState = rememberLazyListState()
     var showVoiceTutor by remember { mutableStateOf(false) }
     var isSttListening by remember { mutableStateOf(false) }
+    var isSttProcessing by remember { mutableStateOf(false) }
+    var sttErrorMessage by remember { mutableStateOf<String?>(null) }
     var activeSpeechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -104,23 +130,26 @@ fun TutorChatScreen(
             startSttListening(
                 context = context,
                 onPartial = { inputText = it },
-                onFinal = {
-                    inputText = it
+                onFinal = { text ->
+                    inputText = text
                     isSttListening = false
+                    isSttProcessing = false
                 },
                 onError = { errMsg ->
                     isSttListening = false
-                    Toast.makeText(context, errMsg, Toast.LENGTH_SHORT).show()
+                    isSttProcessing = false
+                    sttErrorMessage = "Try again or type your message. / دوبارہ کوشش کریں یا اپنا پیغام لکھیں۔"
                 },
-                onStarted = { isSttListening = true },
+                onStarted = {
+                    isSttListening = true
+                    isSttProcessing = false
+                },
                 onRecognizerCreated = { activeSpeechRecognizer = it }
             )
         } else {
             Toast.makeText(context, "Microphone permission is required for speech recognition", Toast.LENGTH_SHORT).show()
         }
     }
-
-    val currentlySpeakingText by viewModel.ttsManager.currentlySpeaking.collectAsState()
 
     val speakText: (String, String?) -> Unit = { text, id ->
         viewModel.ttsManager.speak(text, id)
@@ -511,281 +540,247 @@ fun TutorChatScreen(
             }
         } else {
             // ACTIVE CHAT STREAM VIEW
+            val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
+            var showTutorPreferences by remember { mutableStateOf(false) }
+            val hasUserSentMessage = chatHistory.any { it.role == "user" }
+            val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+            val isImeVisible = WindowInsets.isImeVisible
+
+            val totalChatItems = chatHistory.size + (if (isChatLoading) 1 else 0) + (if (chatError != null) 1 else 0)
+            val lastMsgText = chatHistory.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
+
+            LaunchedEffect(Unit) {
+                // Initial greeting if chat history is empty
+                if (chatHistory.isEmpty()) {
+                    kotlinx.coroutines.delay(1000) // Small delay to allow TTS setup
+                    val greeting = "السلام عليكم ورحمة الله وبركاته. Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
+                    viewModel.sendChatMessage(greeting)
+                    speakText(greeting, "greeting_id")
+                }
+            }
+
+            LaunchedEffect(totalChatItems, lastMsgText, isImeVisible) {
+                if (totalChatItems > 0) {
+                    listState.animateScrollToItem(totalChatItems - 1)
+                }
+            }
+
+            val welcomingText = when (effectiveResponseLanguage) {
+                "Urdu" -> "آپ کا دوستانہ English-learning ساتھی"
+                "Arabic" -> "رفيقك الودود لتعلّم الإنجليزية"
+                else -> "Your friendly English-learning companion"
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .background(Color(0xFFFAFAF9))
+                    .imePadding()
             ) {
-                // Toolbar Header with Back Button & Clear Chat Button
+                // PREMIUM HEADER BAR
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Back Button (circular)
+                    Surface(
+                        color = Color.White,
+                        shape = CircleShape,
+                        shadowElevation = 2.dp,
+                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clickable {
+                                viewModel.saveCurrentSessionToHistory()
+                                showChatDetails = false
+                            }
                     ) {
-                        IconButton(
-                            onClick = { showChatDetails = false },
-                            modifier = Modifier.size(36.dp)
-                        ) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back to Hub",
-                                tint = EditorialPrimary
+                                tint = EditorialPrimary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
-                        Column {
+                    }
+
+                    // Title pill (soft rounded)
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(20.dp),
+                        shadowElevation = 1.dp,
+                        border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        color = if (isStudyModeOn) EditorialAccentPurple else Color(0xFF10B981),
+                                        shape = CircleShape
+                                    )
+                            )
                             Text(
                                 text = "Lisan AI Tutor",
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EditorialPrimary,
                                 fontFamily = FontFamily.Serif
                             )
-                            val statusLabel = when {
-                                isChatLoading -> "Thinking…"
-                                isSttListening -> "Listening…"
-                                isStudyModeOn -> "Study Mode"
-                                else -> "Friendly conversation"
-                            }
-                            Surface(
-                                color = if (isStudyModeOn) EditorialAccentPurple.copy(alpha = 0.15f) else EditorialContainer,
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = statusLabel,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isStudyModeOn) EditorialAccentPurple else EditorialTextMuted,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
-                                )
-                            }
                         }
                     }
 
-                    IconButton(
-                        onClick = { showClearConfirmDialog = true },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("clear_chat_button")
+                    // Right Actions (New Chat & Settings)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "Clear Chat",
-                            tint = EditorialAccentPurple
-                        )
-                    }
-                }
-
-                // TTS Speaking banner
-                AnimatedVisibility(
-                    visible = currentlySpeakingText != null,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Surface(
-                        color = Color(0xFFFFF3E0),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Color(0xFFFFB74D)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                            .testTag("txt_speaking_stop_banner")
-                    ) {
-                        Row(
+                        // New Chat Button
+                        Surface(
+                            color = Color.White,
+                            shape = CircleShape,
+                            shadowElevation = 2.dp,
+                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .size(44.dp)
+                                .clickable { viewModel.clearChat() }
+                                .testTag("new_chat_button")
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                    contentDescription = "Speaking",
-                                    tint = Color(0xFFE65100),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Lisan AI is speaking... (ٹیچر بول رہے ہیں)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFE65100)
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "New Chat",
+                                    tint = EditorialPrimary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Button(
-                                onClick = {
-                                    viewModel.ttsManager.stop()
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Text("روکیں (Stop)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        // Sliders/Settings Icon (circular)
+                        Surface(
+                            color = Color.White,
+                            shape = CircleShape,
+                            shadowElevation = 2.dp,
+                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable { showTutorPreferences = true }
+                                .testTag("tutor_preferences_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Tutor Preferences",
+                                    tint = EditorialAccentPurple,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
                 }
 
-                // Chat Message Streams or Empty Conversation State
-                LazyColumn(
-                    state = listState,
+                // MAIN MESSAGES CONTENT CONTAINER
+                Box(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (chatHistory.size <= 1) {
-                        item {
-                            Surface(
-                                color = EditorialContainer,
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, EditorialBorderAccent),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp)
-                                    .testTag("empty_tutor_welcome_card")
+                    if (!hasUserSentMessage) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("empty_tutor_welcome_card"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(horizontal = 24.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(20.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Surface(
-                                        color = EditorialAccentPurple.copy(alpha = 0.15f),
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(56.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.AutoAwesome,
-                                                contentDescription = null,
-                                                tint = EditorialAccentPurple,
-                                                modifier = Modifier.size(28.dp)
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text(
-                                        text = "Assalamualaikum! I’m your Lisan AI Tutor.",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EditorialPrimary,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Ask me anything in English, اردو, العربية, or Roman Urdu.",
-                                        fontSize = 12.sp,
-                                        color = EditorialTextSecondary,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    Text(
-                                        text = "Try asking:",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EditorialTextMuted
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    val promptChips = listOf(
-                                        "Help me speak English",
-                                        "مجھے English سکھائیں",
-                                        "اشرح لي قواعد الإنجليزية",
-                                        "mujhe grammar samjhao"
-                                    )
-
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        promptChips.forEach { prompt ->
-                                            Surface(
-                                                color = EditorialSurface,
-                                                shape = RoundedCornerShape(12.dp),
-                                                border = BorderStroke(1.dp, EditorialBorder),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        viewModel.sendChatMessage(prompt)
-                                                    }
-                                                    .testTag("prompt_chip_${prompt.take(10)}")
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Text(
-                                                        text = prompt,
-                                                        fontSize = 13.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = EditorialPrimary
-                                                    )
-                                                    Icon(
-                                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                                        contentDescription = null,
-                                                        tint = EditorialAccentPurple,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                Text(
+                                    text = "السلام عليكم ورحمة الله وبركاته",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialPrimary,
+                                    textAlign = TextAlign.Center,
+                                    style = TextStyle(textDirection = TextDirection.Rtl)
+                                )
+                                Text(
+                                    text = "Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar.",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = EditorialTextPrimary,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         }
                     } else {
-                        items(chatHistory) { message ->
-                            val isUser = message.role == "user"
-                            val textContent = message.parts.firstOrNull()?.text ?: ""
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(vertical = 12.dp)
+                        ) {
+                            items(chatHistory) { message ->
+                                val isUser = message.role == "user"
+                                val textContent = message.parts.firstOrNull()?.text ?: ""
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-                            ) {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(0.85f),
-                                    color = if (isUser) EditorialPrimary else EditorialSurface,
-                                    shape = RoundedCornerShape(
-                                        topStart = 20.dp,
-                                        topEnd = 20.dp,
-                                        bottomStart = if (isUser) 20.dp else 4.dp,
-                                        bottomEnd = if (isUser) 4.dp else 20.dp
-                                    ),
-                                    border = if (isUser) null else BorderStroke(1.dp, EditorialBorder)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                    if (!isUser) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(end = 8.dp, top = 4.dp)
+                                                .size(32.dp)
+                                                .clip(CircleShape)
+                                                .background(EditorialPrimary),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = if (isUser) "YOU • آپ" else "TUTOR • لسان ٹیوٹر",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 1.2.sp,
-                                                color = if (isUser) Color.White.copy(alpha = 0.7f) else EditorialAccentPurple
-                                            )
-                                            val messageId = System.identityHashCode(message).toString()
-                                            val isThisSpeaking = currentlySpeakingText == messageId
+                                            Text("LS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        }
+                                    }
 
+                                    Surface(
+                                        modifier = Modifier.weight(1f, fill = false),
+                                        color = if (isUser) EditorialPrimary else Color(0xFFF3F2FF),
+                                        shape = RoundedCornerShape(
+                                            topStart = 20.dp,
+                                            topEnd = 20.dp,
+                                            bottomStart = if (isUser) 20.dp else 4.dp,
+                                            bottomEnd = if (isUser) 4.dp else 20.dp
+                                        ),
+                                        border = if (isUser) null else BorderStroke(1.dp, Color(0xFFE2E8F0))
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp)) {
                                             Row(
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
+                                                Text(
+                                                    text = if (isUser) "YOU • آپ" else "TUTOR • لسان ٹیوٹر",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = 1.2.sp,
+                                                    color = if (isUser) Color.White.copy(alpha = 0.7f) else EditorialAccentPurple
+                                                )
+                                                
                                                 if (!isUser) {
+                                                    val messageId = System.identityHashCode(message).toString()
                                                     val isLiked by viewModel.isLiked("Tutor Response", messageId).collectAsState(initial = false)
                                                     IconButton(
                                                         onClick = {
@@ -808,236 +803,719 @@ fun TutorChatScreen(
                                                         )
                                                     }
                                                 }
+                                            }
 
-                                                IconButton(
-                                                    onClick = {
-                                                        if (isThisSpeaking) {
-                                                            viewModel.ttsManager.stop()
-                                                        } else {
-                                                            speakText(textContent, messageId)
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(24.dp).testTag("speak_button_$messageId")
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isThisSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
-                                                        contentDescription = "Speak",
-                                                        tint = if (isThisSpeaking) Color.Red else if (isUser) Color.White else EditorialAccentPurple,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            FormattedMessageContent(
+                                                text = textContent,
+                                                isUser = isUser
+                                            )
+                                            
+                                            if (!isUser) {
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                TutorMessageControls(
+                                                    text = textContent,
+                                                    messageId = System.identityHashCode(message).toString(),
+                                                    viewModel = viewModel
+                                                )
                                             }
                                         }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        EditorialMixedText(
-                                            text = textContent,
-                                            fontSize = 14.sp,
-                                            lineHeight = 21.sp,
-                                            fontFamily = if (isUser) FontFamily.Default else FontFamily.Serif,
-                                            color = if (isUser) Color.White else EditorialTextPrimary
+                                    }
+
+                                    if (isUser) {
+                                        val authState = viewModel.authState.value
+                                        val currentUser = when (authState) {
+                                            is com.example.data.model.AuthState.LoggedIn -> authState.user
+                                            is com.example.data.model.AuthState.Guest -> authState.user
+                                            else -> null
+                                        }
+                                        UserAvatar(
+                                            photoPath = currentUser?.profilePhotoPath,
+                                            displayName = currentUser?.displayName ?: "Learner",
+                                            size = 32.dp,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.padding(start = 8.dp, top = 4.dp)
                                         )
+                                    }
+                                }
+                            }
+
+                            if (isChatLoading) {
+                                item {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                        horizontalAlignment = Alignment.Start
+                                    ) {
+                                        GeneratingLightingGlow(language = effectiveResponseLanguage)
+                                    }
+                                }
+                            }
+
+                            if (chatError != null) {
+                                item {
+                                    Surface(
+                                        color = EditorialSurface,
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("chat_error_card")
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Sorry, I couldn’t reach your Tutor right now. Please try again.",
+                                                color = Color(0xFFB91C1C),
+                                                fontSize = 14.sp,
+                                                lineHeight = 20.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Button(
+                                                onClick = { viewModel.retryLastChatMessage() },
+                                                colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.align(Alignment.End).testTag("retry_button")
+                                            ) {
+                                                Text("Retry (دوبارہ کوشش کریں)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                    if (isChatLoading) {
-                        item {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.Start
-                            ) {
-                                GeneratingLightingGlow()
-                                Text(
-                                    "Thinking... (ٹیچر سوچ رہے ہیں)",
-                                    fontSize = 11.sp,
-                                    color = EditorialAccentPurple,
-                                    modifier = Modifier.padding(start = 16.dp, top = 4.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (chatError != null) {
-                        item {
-                            Surface(
-                                color = EditorialSurface,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, Color(0xFFB3261E)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = chatError!!,
-                                    color = Color(0xFFB3261E),
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                // Conditional Scroll to bottom button (WhatsApp style)
+                val coroutineScope = rememberCoroutineScope()
+                val isScrollToBottomVisible by remember {
+                    derivedStateOf {
+                        val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+                        if (totalChatItems <= 1) false
+                        else {
+                            lastVisibleItem == null || lastVisibleItem.index < totalChatItems - 2
                         }
                     }
                 }
 
-                // BOTTOM COMPOSER / INPUT BAR
-                Surface(
-                    color = EditorialSurface,
-                    shape = RoundedCornerShape(28.dp),
-                    border = BorderStroke(1.dp, EditorialBorder),
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
+                AnimatedVisibility(
+                    visible = isScrollToBottomVisible,
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
                 ) {
-                    Row(
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        FloatingActionButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    if (totalChatItems > 0) {
+                                        listState.animateScrollToItem(totalChatItems - 1)
+                                    }
+                                }
+                            },
+                            containerColor = EditorialPrimary,
+                            contentColor = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp)
+                                .size(44.dp)
+                                .testTag("scroll_to_bottom_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardDoubleArrowDown,
+                                contentDescription = "Scroll to Bottom",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (!isNetworkAvailable) {
+                    Surface(
+                        color = Color(0xFFFFF3E0),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFFB74D)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
                     ) {
-                        // [ Plus (+) Button ]
-                        IconButton(
-                            onClick = { showPlusMenu = true },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .testTag("plus_menu_button")
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Tutor Options",
-                                tint = EditorialPrimary,
-                                modifier = Modifier.size(22.dp)
+                            Text(
+                                text = "Tutor needs an internet connection.\nاستاد کے ساتھ براہِ راست سبق کے لیے انٹرنیٹ ضروری ہے۔",
+                                color = Color(0xFFE65100),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
                             )
                         }
+                    }
+                }
 
-                        // [ Text Input Field ]
-                        val placeholderText = when (effectiveResponseLanguage) {
-                            "Urdu" -> "اپنے ٹیوٹر سے پوچھیں…"
-                            "Arabic" -> "اسأل معلّمك…"
-                            else -> "Ask your tutor…"
-                        }
-
-                        TextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            textStyle = TextStyle(
-                                color = EditorialTextPrimary,
-                                fontSize = 14.sp,
-                                textDirection = TextDirection.ContentOrRtl
-                            ),
-                            placeholder = {
-                                Text(
-                                    text = bidiIsolate(placeholderText),
-                                    color = EditorialTextMuted,
-                                    fontSize = 13.sp,
-                                    style = TextStyle(textDirection = TextDirection.ContentOrRtl)
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedTextColor = EditorialTextPrimary,
-                                unfocusedTextColor = EditorialTextPrimary,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
-                            ),
-                            maxLines = 3,
-                            keyboardOptions = KeyboardOptions.Default.copy(
-                                imeAction = ImeAction.Send
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onSend = {
-                                    if (inputText.isNotBlank()) {
-                                        viewModel.sendChatMessage(inputText)
-                                        inputText = ""
-                                    }
-                                }
-                            )
-                        )
-
-                        // [ Microphone STT Button ]
-                        IconButton(
-                            onClick = {
-                                if (isSttListening) {
-                                    activeSpeechRecognizer?.stopListening()
-                                    isSttListening = false
-                                } else {
-                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                        startSttListening(
-                                            context = context,
-                                            onPartial = { inputText = it },
-                                            onFinal = {
-                                                inputText = it
-                                                isSttListening = false
-                                            },
-                                            onError = { errMsg ->
-                                                isSttListening = false
-                                                Toast.makeText(context, errMsg, Toast.LENGTH_SHORT).show()
-                                            },
-                                            onStarted = { isSttListening = true },
-                                            onRecognizerCreated = { activeSpeechRecognizer = it }
-                                        )
-                                    } else {
-                                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("mic_stt_button")
-                        ) {
-                            Icon(
-                                imageVector = if (isSttListening) Icons.Default.MicOff else Icons.Default.Mic,
-                                contentDescription = "Speech to text",
-                                tint = if (isSttListening) Color.Red else EditorialTextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // [ Send Arrow Button ]
-                        if (inputText.isNotBlank()) {
-                            IconButton(
-                                onClick = {
-                                    if (inputText.isNotBlank()) {
-                                        viewModel.sendChatMessage(inputText)
-                                        inputText = ""
-                                    }
-                                },
+                // STICKY COMPOSER BAR (Directly above keyboard)
+                Surface(
+                    color = Color.White,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.ime)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        sttErrorMessage?.let { errMsg ->
+                            Row(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .testTag("send_button")
+                                    .fillMaxWidth()
+                                    .background(Color(0xFFFEF2F2))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send",
-                                    tint = EditorialAccentPurple,
-                                    modifier = Modifier.size(18.dp)
+                                Text(
+                                    text = errMsg,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFDC2626),
+                                    modifier = Modifier.weight(1f)
                                 )
+                                IconButton(
+                                    onClick = { sttErrorMessage = null },
+                                    modifier = Modifier.size(20.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Dismiss",
+                                        tint = Color(0xFFDC2626),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(4.dp))
+                        if (isSttListening) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        try { activeSpeechRecognizer?.cancel() } catch(e: Exception){}
+                                        try { activeSpeechRecognizer?.destroy() } catch(e: Exception){}
+                                        activeSpeechRecognizer = null
+                                        isSttListening = false
+                                        isSttProcessing = false
+                                    }
+                                ) {
+                                    Text(
+                                        text = "Cancel / منسوخ کریں",
+                                        color = EditorialTextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
 
-                        // [ Blue Voice Conversation Button ]
-                        Surface(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .clickable { showVoiceTutor = true }
-                                .testTag("blue_voice_button"),
-                            color = Color(0xFF2563EB),
-                            shape = CircleShape,
-                            shadowElevation = 2.dp
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.GraphicEq,
-                                    contentDescription = "Voice Conversation",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(Color.Red, CircleShape)
+                                    )
+                                    Text(
+                                        text = "Listening… / بولیں، میں سن رہا ہوں",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EditorialPrimary
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        isSttListening = false
+                                        isSttProcessing = true
+                                        try {
+                                            activeSpeechRecognizer?.stopListening()
+                                        } catch(e: Exception) {
+                                            isSttProcessing = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Stop,
+                                            contentDescription = "Stop",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = "Stop / ریکارڈنگ روکیں",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        } else if (isSttProcessing) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = EditorialAccentPurple,
+                                    strokeWidth = 2.dp
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Processing voice… / آپ کی آواز کو سمجھا جا رہا ہے…",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialPrimary
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Plus Button [ + ]
+                                Surface(
+                                    color = Color(0xFFF3F4F6),
+                                    shape = CircleShape,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clickable { showPlusMenu = true }
+                                        .testTag("plus_menu_button")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Tutor Options",
+                                            tint = EditorialPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                // Input Field [ Type a message… ]
+                                Surface(
+                                    color = Color(0xFFF9FAFB),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 40.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                                    ) {
+                                        val placeholderText = when (effectiveResponseLanguage) {
+                                            "Urdu" -> "پیغام لکھیں…"
+                                            "Arabic" -> "اكتب رسالة…"
+                                            else -> "Type a message…"
+                                        }
+
+                                        TextField(
+                                            value = inputText,
+                                            onValueChange = {
+                                                inputText = it
+                                                if (sttErrorMessage != null) sttErrorMessage = null
+                                            },
+                                            textStyle = TextStyle(
+                                                color = EditorialTextPrimary,
+                                                fontSize = 14.sp,
+                                                textDirection = TextDirection.ContentOrRtl
+                                            ),
+                                            placeholder = {
+                                                Text(
+                                                    text = bidiIsolate(placeholderText),
+                                                    color = EditorialTextMuted,
+                                                    fontSize = 13.sp,
+                                                    style = TextStyle(textDirection = TextDirection.ContentOrRtl)
+                                                )
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("chat_input_field"),
+                                            colors = TextFieldDefaults.colors(
+                                                focusedContainerColor = Color.Transparent,
+                                                unfocusedContainerColor = Color.Transparent,
+                                                focusedTextColor = EditorialTextPrimary,
+                                                unfocusedTextColor = EditorialTextPrimary,
+                                                focusedIndicatorColor = Color.Transparent,
+                                                unfocusedIndicatorColor = Color.Transparent
+                                            ),
+                                            maxLines = 3,
+                                            keyboardOptions = KeyboardOptions.Default.copy(
+                                                imeAction = ImeAction.Send,
+                                                autoCorrectEnabled = true
+                                            ),
+                                            keyboardActions = KeyboardActions(
+                                                onSend = {
+                                                    if (inputText.isNotBlank() && !isChatLoading && isNetworkAvailable) {
+                                                        viewModel.sendChatMessage(inputText)
+                                                        inputText = ""
+                                                    }
+                                                }
+                                            )
+                                        )
+                                    }
+                                }
+
+                                // Microphone Button [ 🎤 ]
+                                Surface(
+                                    color = Color(0xFFF3F4F6),
+                                    shape = CircleShape,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clickable {
+                                            keyboardController?.hide()
+                                            sttErrorMessage = null
+                                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                                startSttListening(
+                                                    context = context,
+                                                    onPartial = { inputText = it },
+                                                    onFinal = { text ->
+                                                        inputText = text
+                                                        isSttListening = false
+                                                        isSttProcessing = false
+                                                    },
+                                                    onError = { errMsg ->
+                                                        isSttListening = false
+                                                        isSttProcessing = false
+                                                        sttErrorMessage = "Try again or type your message. / دوبارہ کوشش کریں یا اپنا پیغام لکھیں۔"
+                                                    },
+                                                    onStarted = {
+                                                        isSttListening = true
+                                                        isSttProcessing = false
+                                                    },
+                                                    onRecognizerCreated = { activeSpeechRecognizer = it }
+                                                )
+                                            } else {
+                                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                            }
+                                        }
+                                        .testTag("mic_stt_button")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Mic,
+                                            contentDescription = "Speech to text",
+                                            tint = EditorialPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                if (inputText.isBlank()) {
+                                    // Blue Conversational Voice Tutor Button [ 🎙️ ]
+                                    Surface(
+                                        color = Color(0xFF2563EB),
+                                        shape = CircleShape,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clickable { showVoiceTutor = true }
+                                            .testTag("blue_voice_button")
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.GraphicEq,
+                                                contentDescription = "Live Voice Tutor",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // Send Button [ Send ]
+                                    val isSendEnabled = !isChatLoading && isNetworkAvailable
+                                    Surface(
+                                        color = if (isSendEnabled) EditorialAccentPurple else Color(0xFFE5E7EB),
+                                        shape = CircleShape,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clickable(enabled = isSendEnabled) {
+                                                if (inputText.isNotBlank() && !isChatLoading && isNetworkAvailable) {
+                                                    viewModel.sendChatMessage(inputText)
+                                                    inputText = ""
+                                                }
+                                            }
+                                            .testTag("send_button")
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (isChatLoading) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    color = Color.White,
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                                    contentDescription = "Send",
+                                                    tint = if (isSendEnabled) Color.White else Color(0xFF9CA3AF),
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
+            }
+
+            // Tutor Preferences Dialog
+            if (showTutorPreferences) {
+                AlertDialog(
+                    onDismissRequest = { showTutorPreferences = false },
+                    title = {
+                        Text(
+                            "Tutor Preferences • ترجیحات",
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary,
+                            fontSize = 16.sp
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Response Language Choice
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Response Language • جواب کی زبان",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialTextMuted
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val languages = listOf("Auto", "English", "Urdu", "Arabic")
+                                    val displayLangs = mapOf("Auto" to "Auto", "English" to "English", "Urdu" to "اردو", "Arabic" to "العربية")
+                                    
+                                    languages.forEach { lang ->
+                                        val isSelected = activeLanguage.equals(lang, ignoreCase = true) || 
+                                            (lang == "Urdu" && activeLanguage == "اردو") ||
+                                            (lang == "Arabic" && activeLanguage == "العربية")
+
+                                        Surface(
+                                            color = if (isSelected) EditorialAccentPurple else EditorialContainer,
+                                            contentColor = if (isSelected) Color.White else EditorialPrimary,
+                                            shape = CircleShape,
+                                            border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { viewModel.setActiveLanguage(lang) }
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            ) {
+                                                Text(
+                                                    text = displayLangs[lang] ?: lang,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = EditorialBorder)
+
+                            // Tutor Voice Profile Selection
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Tutor Voice Profile • آواز کی قسم",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialTextMuted
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val presets = listOf("Young Voice", "Mature Voice")
+                                    val displayPresets = mapOf(
+                                        "Young Voice" to "Young • نو عمر",
+                                        "Mature Voice" to "Mature • بزرگ"
+                                    )
+                                    
+                                    presets.forEach { preset ->
+                                        val isSelected = if (preset == "Young Voice") {
+                                            settings.selectedSpeaker.contains("Young", ignoreCase = true)
+                                        } else {
+                                            settings.selectedSpeaker.contains("Mature", ignoreCase = true)
+                                        }
+
+                                        Surface(
+                                            color = if (isSelected) EditorialAccentPurple else EditorialContainer,
+                                            contentColor = if (isSelected) Color.White else EditorialPrimary,
+                                            shape = CircleShape,
+                                            border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { 
+                                                    viewModel.updateAppSettings { it.copy(selectedSpeaker = preset) }
+                                                    viewModel.ttsManager.applySpeakerPreset(preset)
+                                                }
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            ) {
+                                                Text(
+                                                    text = displayPresets[preset] ?: preset,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = EditorialBorder)
+
+                            // Study Mode Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Study Mode • گرامر موڈ",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EditorialPrimary
+                                    )
+                                    Text(
+                                        "Structured grammar explanations and exercises",
+                                        fontSize = 11.sp,
+                                        color = EditorialTextSecondary
+                                    )
+                                }
+                                Switch(
+                                    checked = isStudyModeOn,
+                                    onCheckedChange = { viewModel.setStudyMode(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = EditorialAccentPurple
+                                    )
+                                )
+                            }
+
+                            HorizontalDivider(color = EditorialBorder)
+
+                            // Voice Responses Toggle (TTS)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Voice Settings • آواز کی ترتیبات",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EditorialPrimary
+                                    )
+                                    Text(
+                                        "Enable spoken replies from teacher automatically",
+                                        fontSize = 11.sp,
+                                        color = EditorialTextSecondary
+                                    )
+                                }
+                                var voiceResponseEnabled by remember { mutableStateOf(true) }
+                                Switch(
+                                    checked = voiceResponseEnabled,
+                                    onCheckedChange = { 
+                                        voiceResponseEnabled = it
+                                        if (!it) {
+                                            viewModel.ttsManager.stop()
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = EditorialAccentPurple
+                                    )
+                                )
+                            }
+
+                            HorizontalDivider(color = EditorialBorder)
+
+                            // Clear Conversation Option
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showTutorPreferences = false
+                                        showClearConfirmDialog = true
+                                    }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "Clear Chat",
+                                    tint = Color.Red
+                                )
+                                Column {
+                                    Text(
+                                        "Clear Conversation History",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Red
+                                    )
+                                    Text(
+                                        "Delete all messages in this conversation",
+                                        fontSize = 11.sp,
+                                        color = EditorialTextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showTutorPreferences = false }) {
+                            Text("Close", color = EditorialAccentPurple, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    containerColor = EditorialSurface
+                )
             }
         }
 
@@ -1052,7 +1530,7 @@ fun TutorChatScreen(
                 },
                 title = {
                     Text(
-                        text = "Tutor Options",
+                        text = "Quick Options",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = EditorialPrimary
@@ -1097,11 +1575,24 @@ fun TutorChatScreen(
                                             contentAlignment = Alignment.Center,
                                             modifier = Modifier.padding(vertical = 8.dp)
                                         ) {
-                                            Text(
-                                                text = displayLangs[lang] ?: lang,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = displayLangs[lang] ?: lang,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1145,12 +1636,6 @@ fun TutorChatScreen(
                                             )
                                         }
                                     }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Provides structured lessons, grammar comparisons & practice exercises.",
-                                        fontSize = 11.sp,
-                                        color = EditorialTextSecondary
-                                    )
                                 }
                                 Switch(
                                     checked = isStudyModeOn,
@@ -1160,6 +1645,42 @@ fun TutorChatScreen(
                                         checkedTrackColor = EditorialAccentPurple
                                     ),
                                     modifier = Modifier.testTag("study_mode_switch")
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = EditorialBorder)
+
+                        // Start New Chat (which clears current chat)
+                        Surface(
+                            color = EditorialContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, EditorialBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showPlusMenu = false
+                                    showClearConfirmDialog = true
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Chat,
+                                    contentDescription = null,
+                                    tint = EditorialAccentPurple,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Start New Chat",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = EditorialPrimary
                                 )
                             }
                         }
@@ -1433,3 +1954,342 @@ private fun startSttListening(
         onError("Speech recognition error: ${e.message}")
     }
 }
+
+@Composable
+fun LisanCalmOrb(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "orb_animation")
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "orb_scale"
+    )
+    val floatOffset by infiniteTransition.animateFloat(
+        initialValue = -10f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(6000, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "orb_float"
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationY = floatOffset
+            }
+            .size(220.dp)
+            .shadow(
+                elevation = 24.dp,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = Color(0xFF6366F1).copy(alpha = 0.25f),
+                spotColor = Color(0xFF3B82F6).copy(alpha = 0.35f)
+            )
+            .background(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFFEEF2FF), // soft lavender white
+                        Color(0xFFE0E7FF), // pale lavender
+                        Color(0xFFC7D2FE), // pale blue
+                        Color(0xFF818CF8).copy(alpha = 0.6f) // subtle sky gradient edge
+                    ),
+                    radius = 330f
+                ),
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(6.dp)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.6f),
+                            Color.Transparent,
+                            Color(0xFF6366F1).copy(alpha = 0.2f)
+                        )
+                    ),
+                    shape = CircleShape
+                )
+        )
+    }
+}
+
+@Composable
+fun TutorMessageControls(
+    text: String,
+    messageId: String,
+    viewModel: com.example.ui.viewmodel.LisanViewModel
+) {
+    val ttsManager = viewModel.ttsManager
+    val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
+    val isSpeaking = currentlySpeaking == messageId
+    val currentSpeed by ttsManager.playbackSpeed.collectAsState()
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isSpeaking) {
+            val ttsLoadingStatus by ttsManager.ttsLoadingStatus.collectAsState()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (ttsLoadingStatus != null) {
+                    Text(
+                        text = ttsLoadingStatus ?: "",
+                        fontSize = 10.sp,
+                        color = EditorialAccentPurple,
+                        fontStyle = FontStyle.Italic,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+                    CircularProgressIndicator(
+                        color = EditorialAccentPurple,
+                        strokeWidth = 1.5.dp,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                // 1x Speed Pill
+                val is1x = currentSpeed == 1.0f
+                Surface(
+                    onClick = {
+                        ttsManager.setPlaybackSpeed(1.0f)
+                    },
+                    color = if (is1x) EditorialPrimary else Color.Transparent,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (is1x) EditorialPrimary else Color(0xFFCBD5E1)),
+                    modifier = Modifier.height(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text(
+                            text = "1×",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (is1x) Color.White else EditorialTextSecondary
+                        )
+                    }
+                }
+
+                // 1.25x Speed Pill
+                val is125x = currentSpeed == 1.25f
+                Surface(
+                    onClick = {
+                        ttsManager.setPlaybackSpeed(1.25f)
+                    },
+                    color = if (is125x) EditorialPrimary else Color.Transparent,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (is125x) EditorialPrimary else Color(0xFFCBD5E1)),
+                    modifier = Modifier.height(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text(
+                            text = "1.25×",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (is125x) Color.White else EditorialTextSecondary
+                        )
+                    }
+                }
+
+                // Red Circular Stop Dot
+                Surface(
+                    onClick = { ttsManager.stop() },
+                    color = Color(0xFFEF4444),
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .testTag("stop_speech_$messageId")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color.White, RoundedCornerShape(2.dp))
+                        )
+                    }
+                }
+            }
+        } else {
+            IconButton(
+                onClick = { viewModel.speak(text, messageId) },
+                modifier = Modifier
+                    .size(28.dp)
+                    .testTag("speak_button_$messageId")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = "Speak response",
+                    tint = EditorialAccentPurple,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun GeneratingLightingGlow(language: String) {
+    val infiniteTransition = rememberInfiniteTransition(label = "glow")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Surface(
+        color = Color(0xFFF3F2FF),
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp),
+        border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = alpha)),
+        modifier = Modifier.fillMaxWidth(0.6f)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+                color = EditorialAccentPurple
+            )
+            Text(
+                text = if (language == "Urdu") "ٹیوٹر سوچ رہا ہے…" else "Tutor is thinking…",
+                fontSize = 12.sp,
+                color = EditorialAccentPurple,
+                fontStyle = FontStyle.Italic
+            )
+        }
+    }
+}
+
+private fun isUrduOrArabicText(text: String): Boolean {
+    var arabicCharCount = 0
+    var totalLetters = 0
+    for (char in text) {
+        val code = char.code
+        if (code in 0x0600..0x06FF || code in 0x0750..0x077F || code in 0x08A0..0x08FF || code in 0xFB50..0xFDFF || code in 0xFE70..0xFEFF) {
+            arabicCharCount++
+        }
+        if (char.isLetter()) {
+            totalLetters++
+        }
+    }
+    return if (totalLetters > 0) {
+        (arabicCharCount.toFloat() / totalLetters) > 0.25f || arabicCharCount >= 3
+    } else {
+        arabicCharCount > 0
+    }
+}
+
+private fun cleanMarkdownSymbols(text: String): String {
+    return text
+        .replace("**", "")
+        .replace("###", "")
+        .replace("##", "")
+        .replace("#", "")
+        .replace("`", "")
+        .replace(">", "")
+        .trim()
+}
+
+@Composable
+fun FormattedMessageContent(text: String, isUser: Boolean) {
+    if (isUser) {
+        val isRtl = isUrduOrArabicText(text)
+        Text(
+            text = text,
+            fontSize = 15.sp,
+            color = Color.White,
+            lineHeight = 22.sp,
+            textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+            style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr)
+        )
+        return
+    }
+
+    val cleanedText = cleanMarkdownSymbols(text)
+    val lines = cleanedText.split("\n")
+
+    val knownHeaders = setOf(
+        "English Explanation", "Urdu Explanation", "اردو وضاحت",
+        "When We Use It", "اردو میں استعمال", "Sentence Pattern",
+        "Examples", "Positive Examples", "Negative Examples", "Question Examples",
+        "Common Mistakes", "Arabic Grammar Connection", "Practice",
+        "Lesson Title", "Simple English Explanation"
+    )
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+            if (line.isEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                continue
+            }
+
+            val isHeader = knownHeaders.any { header ->
+                line.equals(header, ignoreCase = true) || (line.startsWith(header, ignoreCase = true) && line.length < 35)
+            }
+
+            val isRtl = isUrduOrArabicText(line)
+
+            if (isHeader) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = line,
+                    fontSize = if (isRtl) 16.sp else 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isRtl) EditorialAccentPurple else EditorialPrimary,
+                    textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+                    style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (line.startsWith("Positive:") || line.startsWith("Negative:") || line.startsWith("Question:")) {
+                Surface(
+                    color = Color(0xFFF1F5F9),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                ) {
+                    Text(
+                        text = line,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = EditorialPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            } else {
+                Text(
+                    text = line,
+                    fontSize = if (isRtl) 16.sp else 15.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = EditorialTextPrimary,
+                    lineHeight = if (isRtl) 25.sp else 22.sp,
+                    textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+                    style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+

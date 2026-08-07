@@ -1,0 +1,6 @@
+sed -i 's/val existing = dailyDaos.getDailyVerbAssignmentByDate(todayStr)/val existing = dailyDaos.getAssignmentByDateSync("current-user-id", todayStr)/' app/src/main/java/com/example/data/repository/DailyVerbRepository.kt
+sed -i 's/val allAssignments = dailyDaos.getAllDailyVerbAssignments()/val allAssignments = dailyDaos.getAllAssignmentsSync("current-user-id")/' app/src/main/java/com/example/data/repository/DailyVerbRepository.kt
+sed -i 's/val yesterdayAssignment = dailyDaos.getDailyVerbAssignmentByDate(yesterdayStr)/val yesterdayAssignment = dailyDaos.getAssignmentByDateSync("current-user-id", yesterdayStr)/' app/src/main/java/com/example/data/repository/DailyVerbRepository.kt
+sed -i 's/dailyDaos.insertDailyVerbAssignment(newAssignment)/dailyDaos.insertAssignment(newAssignment)/' app/src/main/java/com/example/data/repository/DailyVerbRepository.kt
+sed -i 's/return dailyDaos.getDailyVerbAssignmentByDate(todayStr) ?: newAssignment/return dailyDaos.getAssignmentByDateSync("current-user-id", todayStr) ?: newAssignment/' app/src/main/java/com/example/data/repository/DailyVerbRepository.kt
+sed -i 's/class DailyVerbRepository(private val dailyDaos: DailyDaos)/class DailyVerbRepository(private val dailyDaos: com.example.data.local.DailyVerbAssignmentDao)/' app/src/main/java/com/example/data/repository/DailyVerbRepository.kt

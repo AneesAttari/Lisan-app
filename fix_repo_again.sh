@@ -1,0 +1,4 @@
+sed -i 's/suspend fun getTodayQuestion()/suspend fun getDailyQuestions()/' app/src/main/java/com/example/data/repository/DailyGrammarRepository.kt
+sed -i 's/return selectedQuestion/return listOf(selectedQuestion)/' app/src/main/java/com/example/data/repository/DailyGrammarRepository.kt
+sed -i 's/return getQuestionById(existing.questionId) ?: allQuestions.first()/return listOf(getQuestionById(existing.questionId) ?: allQuestions.first())/' app/src/main/java/com/example/data/repository/DailyGrammarRepository.kt
+sed -i 's/private val chatMessageRepository/private val dailyGrammarRepository = com.example.data.repository.DailyGrammarRepository(database.dailyChallengeAssignmentDao())\n    private val dailyVerbRepository = com.example.data.repository.DailyVerbRepository(database.dailyVerbAssignmentDao())\n    private val chatMessageRepository/' app/src/main/java/com/example/ui/viewmodel/LisanViewModel.kt

@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Lisan Grammar"
+rootProject.name = "Lisan AI"
 
 include(":app")

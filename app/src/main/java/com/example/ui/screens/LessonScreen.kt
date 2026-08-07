@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +61,7 @@ import com.example.ui.components.EditorialDivider
 import com.example.ui.components.EditorialSectionTitle
 import com.example.ui.components.EditorialMixedText
 import com.example.ui.components.GeneratingLightingGlow
+import com.example.ui.components.UserAvatar
 import com.example.ui.theme.EditorialAccentPurple
 import com.example.ui.theme.EditorialBorder
 import com.example.ui.theme.EditorialBorderAccent
@@ -79,6 +81,7 @@ fun LessonScreen(
     modifier: Modifier = Modifier
 ) {
     val selectedTopicId by viewModel.selectedTopicId.collectAsState()
+    val authState by viewModel.authState.collectAsState()
     val activeLesson by viewModel.activeLesson.collectAsState()
     val isGenerating by viewModel.isGeneratingLesson.collectAsState()
     val error by viewModel.lessonError.collectAsState()
@@ -95,6 +98,68 @@ fun LessonScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        val userNameState by viewModel.userName.collectAsState()
+        val displayName = if (userNameState == "Learner" || userNameState == "Lisan Guest Learner") "" else userNameState
+        
+        EditorialCard(
+            containerColor = com.example.ui.theme.EditorialContainer,
+            borderColor = com.example.ui.theme.EditorialBorderSoft
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                UserAvatar(
+                    photoPath = when (val state = authState) {
+                        is com.example.data.model.AuthState.LoggedIn -> state.user.profilePhotoPath
+                        is com.example.data.model.AuthState.Guest -> state.user.profilePhotoPath
+                        else -> null
+                    },
+                    displayName = if (displayName.isBlank()) "Learner" else displayName,
+                    size = 56.dp,
+                    fontSize = 18.sp
+                )
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    val greeting = remember(displayName) {
+                        if (displayName.isBlank()) {
+                            "Assalamu Alaikum!"
+                        } else {
+                            "Assalamu Alaikum, $displayName!"
+                        }
+                    }
+                    Text(
+                        text = greeting,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialPrimary
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Ready to continue your English journey?",
+                        fontSize = 12.sp,
+                        color = EditorialTextSecondary
+                    )
+                }
+            }
+        }
+
+        // Progress Overview
+        EditorialCard(containerColor = EditorialAccentPurple.copy(alpha = 0.05f), borderColor = EditorialAccentPurple.copy(alpha = 0.2f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { viewModel.setSelectedTab(9) },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("MY PROGRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted)
+                    Text("اپنی پیش رفت دیکھیں", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                }
+                Icon(Icons.Default.BarChart, contentDescription = null, tint = EditorialAccentPurple)
+            }
+        }
+
         // Daily Grammar Card (Featured at top)
         DailyGrammarCard(viewModel = viewModel)
 
@@ -161,7 +226,7 @@ fun LessonScreen(
                     ) {
                         val isSaved by viewModel.isSaved("Lesson", lesson.topicTitleEn).collectAsState(initial = false)
                         val isLiked by viewModel.isLiked("Lesson", lesson.topicTitleEn).collectAsState(initial = false)
-                        val currentlySpeaking by viewModel.currentlySpeakingText.collectAsState()
+                        val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
                         val lessonSpeechId = "lesson_${lesson.topicTitleEn}"
                         val isLessonSpeaking = currentlySpeaking == lessonSpeechId
 
@@ -347,7 +412,23 @@ fun LessonScreen(
                     isChecking = isCheckingQuiz,
                     feedback = quizFeedback
                 )
-            }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                val context = androidx.compose.ui.platform.LocalContext.current
+                androidx.compose.material3.Button(
+                    onClick = {
+                        viewModel.saveLessonNote(lesson)
+                        android.widget.Toast.makeText(context, "Lesson summary note saved! (نوٹ محفوظ ہو گیا)", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Save Summary Note (نوٹ محفوظ کریں)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+              }
         }
     }
 }

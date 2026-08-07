@@ -11,5 +11,6 @@ data class SavedNote(
     val englishText: String,
     val arabicComparisonText: String,
     val category: String = "Lesson Note",
+    val isPinned: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )

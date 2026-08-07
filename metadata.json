@@ -1,5 +1,5 @@
 {
-  "name": "Lisan Grammar",
+  "name": "Lisan AI",
   "description": "Comparative English grammar teacher for Urdu native speakers using Urdu grammar concepts, featuring comparative lessons, AI tutor chat, and deep sentence analyzer.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

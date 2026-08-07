@@ -1,13 +1,16 @@
 package com.example.data.repository
 
+import com.example.data.local.DailyChallengeAssignmentDao
+import com.example.data.model.DailyChallengeAssignment
 import com.example.data.model.DailyChallengeQuestion
 import com.example.data.model.DailyChallengeQuestionType
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
-object DailyGrammarRepository {
+class DailyGrammarRepository(private val assignmentDao: DailyChallengeAssignmentDao) {
 
-    private val allQuestions = listOf(
+    val allQuestionsList = listOf(
         DailyChallengeQuestion(
             id = "dg_1",
             topic = "Present Simple",
@@ -15,8 +18,8 @@ object DailyGrammarRepository {
             questionText = "She _____ to school every day.",
             options = listOf("go", "goes", "going", "gone"),
             correctOptionIndex = 1,
-            explanationEn = "Use 'goes' because 'she' is third-person singular in the Present Simple tense.",
-            explanationUr = "Present Simple میں 'she' کے ساتھ 'goes' کا استعمال کریں کیونکہ یہ third-person singular ہے۔",
+            explanationEn = "With 'he, she, it', add 's' or 'es' to the verb.",
+            explanationUr = "He, she, it کے ساتھ فعل میں 's' یا 'es' کا اضافہ کریں۔",
             arabicReference = "Likewise in Arabic, you say 'تذهبُ' (Tadhhabu) for 'she goes', reflecting the singular feminine form of the present tense (Al-Mudari).",
             extraExample = "Example: He plays football. (وہ فٹ بال کھیلتا ہے۔)",
             urduTranslation = "وہ ہر روز اسکول جاتی ہے۔"
@@ -63,7 +66,7 @@ object DailyGrammarRepository {
             topic = "Sentence Correction",
             type = DailyChallengeQuestionType.SENTENCE_CORRECTION,
             questionText = "Correct the sentence: 'He don't like apples.'",
-            acceptedAnswers = listOf("He doesn't like apples", "He does not like apples"),
+            acceptedAnswers = listOf("He doesn't like apples.", "He does not like apples.", "He doesn't like apples", "He does not like apples"),
             explanationEn = "With 'he', use 'doesn't' or 'does not'.",
             explanationUr = "'he' کے ساتھ 'doesn't' یا 'does not' استعمال کریں۔",
             arabicReference = "Likewise in Arabic, you say 'لا يحبُّ' (La yuhibbu) where 'لا' (La) is used for negation in the present tense, similar to 'does not'.",
@@ -88,7 +91,7 @@ object DailyGrammarRepository {
             topic = "Vocabulary",
             type = DailyChallengeQuestionType.FILL_IN_THE_BLANK,
             questionText = "A person who treats sick people is a _____.",
-            acceptedAnswers = listOf("doctor", "physician"),
+            acceptedAnswers = listOf("doctor", "physician", "doctor.", "physician."),
             explanationEn = "A doctor treats patients.",
             explanationUr = "ڈاکٹر مریضوں کا علاج کرتا ہے۔",
             arabicReference = "Likewise in Arabic, you say 'طبيب' (Tabib) for someone who heals others, derived from the root 'ط ب ب'.",
@@ -132,16 +135,60 @@ object DailyGrammarRepository {
             arabicReference = "Likewise in Arabic, you say 'أينَ' (Ayna) for asking about place or location.",
             extraExample = "Example: Where do you live? (آپ کہاں رہتے ہیں؟)",
             urduTranslation = "آپ کہاں جا رہے ہیں؟"
+        ),
+        DailyChallengeQuestion(
+            id = "dg_11",
+            topic = "Pronouns",
+            type = DailyChallengeQuestionType.MCQ,
+            questionText = "_____ is my brother.",
+            options = listOf("He", "Him", "His", "She"),
+            correctOptionIndex = 0,
+            explanationEn = "Use 'He' as the subject.",
+            explanationUr = "Subject کے طور پر 'He' استعمال کریں۔",
+            arabicReference = "Likewise in Arabic, you say 'هو' (Huwa) for 'he'.",
+            extraExample = "Example: He is tall. (وہ لمبا ہے۔)",
+            urduTranslation = "وہ میرا بھائی ہے۔"
+        ),
+        DailyChallengeQuestion(
+            id = "dg_12",
+            topic = "Adjectives",
+            type = DailyChallengeQuestionType.FILL_IN_THE_BLANK,
+            questionText = "The elephant is very _____.",
+            acceptedAnswers = listOf("big", "large", "huge"),
+            explanationEn = "'Big' describes size.",
+            explanationUr = "'Big' حجم کو بیان کرتا ہے۔",
+            arabicReference = "Likewise in Arabic, you say 'كبير' (Kabir) for 'big'.",
+            extraExample = "Example: A big house. (ایک بڑا گھر۔)",
+            urduTranslation = "ہاتھی بہت بڑا ہے۔"
         )
     )
 
-    fun getDailyQuestions(): List<DailyChallengeQuestion> {
-        val sdf = SimpleDateFormat("yyyyMMdd", Locale.US)
-        val dateStr = sdf.format(Date())
-        val seed = dateStr.toLong()
-        val random = Random(seed)
+    fun getAllQuestions(): List<DailyChallengeQuestion> = allQuestionsList
+
+    fun getQuestionById(id: String): DailyChallengeQuestion? {
+        return allQuestionsList.find { it.id == id }
+    }
+
+    suspend fun getDailyQuestions(): List<DailyChallengeQuestion> {
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val existing = assignmentDao.getAssignmentByDateSync("current-user-id", todayStr)
+        if (existing != null) {
+            return listOf(getQuestionById(existing.questionId) ?: allQuestionsList.first())
+        }
+
+        val allAssignments = assignmentDao.getAllAssignmentsSync("current-user-id")
+        val usedQuestionIds = allAssignments.map { it.questionId }.toSet()
         
-        // Select 5 varied questions
-        return allQuestions.shuffled(random).take(5)
+        var availableQuestions = allQuestionsList.filter { it.id !in usedQuestionIds }
+        if (availableQuestions.isEmpty()) {
+            val yesterdayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(System.currentTimeMillis() - 86400000))
+            val yesterdayAssignment = assignmentDao.getAssignmentByDateSync("current-user-id", yesterdayStr)
+            availableQuestions = allQuestionsList.filter { it.id != yesterdayAssignment?.questionId }
+        }
+
+        val selectedQuestion = availableQuestions.randomOrNull() ?: allQuestionsList.first()
+        val newAssignment = DailyChallengeAssignment(questionId = selectedQuestion.id, assignedDate = todayStr)
+        assignmentDao.insertAssignment(newAssignment)
+        return listOf(selectedQuestion)
     }
 }

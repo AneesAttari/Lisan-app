@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,6 +30,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -55,6 +61,7 @@ fun SavedNotesScreen(
     val savedIdiomIds by viewModel.savedIdiomIds.collectAsState()
     val allIdioms = com.example.data.repository.IdiomRepository.idioms
     val savedIdioms = allIdioms.filter { savedIdiomIds.contains(it.id) }
+    val context = LocalContext.current
 
     Column(
         modifier = modifier
@@ -68,7 +75,13 @@ fun SavedNotesScreen(
         ) {
             // Grammar Notes Section
             item {
-                EditorialSectionTitle("Saved Grammar Notes")
+                EditorialSectionTitle("Saved Grammar Notes & Lesson Summaries")
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Review pinned grammar rules and exported lesson notes offline.",
+                    fontSize = 12.sp,
+                    color = EditorialTextMuted
+                )
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
@@ -76,9 +89,11 @@ fun SavedNotesScreen(
                 item {
                     EditorialCard {
                         Text(
-                            text = "No grammar notes saved yet.",
+                            text = "No grammar notes or lesson summaries saved yet. Complete a lesson and click 'Save Summary Note' to pin or export it here.",
                             modifier = Modifier.padding(16.dp),
-                            color = EditorialTextMuted
+                            color = EditorialTextMuted,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
                         )
                     }
                 }
@@ -91,13 +106,26 @@ fun SavedNotesScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = note.category.uppercase(),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EditorialTextMuted,
-                                    letterSpacing = 1.2.sp
-                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (note.isPinned) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = "Pinned",
+                                            tint = EditorialAccentPurple,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = note.category.uppercase(),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EditorialTextMuted,
+                                        letterSpacing = 1.2.sp
+                                    )
+                                }
                                 Text(
                                     text = note.titleEn,
                                     fontSize = 18.sp,
@@ -113,22 +141,77 @@ fun SavedNotesScreen(
                                 )
                             }
 
-                            Surface(
-                                color = EditorialContainer,
-                                shape = CircleShape,
-                                border = BorderStroke(1.dp, EditorialBorderAccent),
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .clickable { viewModel.deleteSavedNote(note.id) }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.DeleteOutline,
-                                    contentDescription = "Delete",
-                                    tint = EditorialAccentPurple,
+                                // Pin toggle button
+                                Surface(
+                                    color = if (note.isPinned) EditorialAccentPurple.copy(alpha = 0.15f) else EditorialContainer,
+                                    shape = CircleShape,
+                                    border = BorderStroke(1.dp, if (note.isPinned) EditorialAccentPurple else EditorialBorderAccent),
                                     modifier = Modifier
-                                        .padding(10.dp)
-                                        .size(18.dp)
-                                )
+                                        .clip(CircleShape)
+                                        .clickable { viewModel.togglePinNote(note.id, note.isPinned) }
+                                ) {
+                                    Icon(
+                                        imageVector = if (note.isPinned) Icons.Default.Star else Icons.Default.StarBorder,
+                                        contentDescription = "Pin Note",
+                                        tint = EditorialAccentPurple,
+                                        modifier = Modifier
+                                            .padding(8.dp)
+                                            .size(16.dp)
+                                    )
+                                }
+
+                                // Export / Share button
+                                Surface(
+                                    color = EditorialContainer,
+                                    shape = CircleShape,
+                                    border = BorderStroke(1.dp, EditorialBorderAccent),
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            val shareIntent = Intent().apply {
+                                                action = Intent.ACTION_SEND
+                                                putExtra(Intent.EXTRA_SUBJECT, note.titleEn)
+                                                putExtra(
+                                                    Intent.EXTRA_TEXT,
+                                                    "=== Lisan Grammar Note ===\n${note.titleEn} (${note.titleAr})\n\n${note.englishText}\n\n${note.arabicComparisonText}"
+                                                )
+                                                type = "text/plain"
+                                            }
+                                            context.startActivity(Intent.createChooser(shareIntent, "Export Lesson Note"))
+                                        }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = "Export Note",
+                                        tint = EditorialPrimary,
+                                        modifier = Modifier
+                                            .padding(8.dp)
+                                            .size(16.dp)
+                                    )
+                                }
+
+                                // Delete button
+                                Surface(
+                                    color = EditorialContainer,
+                                    shape = CircleShape,
+                                    border = BorderStroke(1.dp, EditorialBorderAccent),
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable { viewModel.deleteSavedNote(note.id) }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteOutline,
+                                        contentDescription = "Delete",
+                                        tint = Color.Red,
+                                        modifier = Modifier
+                                            .padding(8.dp)
+                                            .size(16.dp)
+                                    )
+                                }
                             }
                         }
 

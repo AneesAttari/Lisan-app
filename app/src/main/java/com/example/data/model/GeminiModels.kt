@@ -14,7 +14,21 @@ data class GenerateContentRequest(
 @Serializable
 data class Content(
     val role: String? = null,
-    val parts: List<Part>
+    val parts: List<Part>,
+    @kotlinx.serialization.Transient var debugMetadata: TutorDebugMetadata? = null
+)
+
+@Serializable
+data class TutorDebugMetadata(
+    val requestId: String,
+    val submittedMessage: String,
+    val provider: String,
+    val modelName: String,
+    val endpointCalled: String,
+    val httpStatus: String,
+    val source: String,
+    val responseId: String?,
+    val errorMessage: String? = null
 )
 
 @Serializable
@@ -58,4 +72,9 @@ data class GeminiError(
     val code: Int? = null,
     val message: String? = null,
     val status: String? = null
+)
+
+data class TutorResponseResult(
+    val responseText: String,
+    val debugMetadata: TutorDebugMetadata
 )

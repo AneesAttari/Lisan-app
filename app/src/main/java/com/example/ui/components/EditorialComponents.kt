@@ -23,7 +23,20 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.LibraryBooks
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.EventNote
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.foundation.border
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,6 +98,20 @@ private fun isLineRtl(text: String): Boolean {
         if (char.isLetter()) return false
     }
     return true
+}
+
+private fun mapHeaderToIcon(headerText: String): String {
+    val lower = headerText.lowercase()
+    return when {
+        lower.contains("tip") || lower.contains("نصيحة") || lower.contains("تپ") -> "💡 $headerText"
+        lower.contains("correct") || lower.contains("تصحيح") || lower.contains("درست") -> "✅ $headerText"
+        lower.contains("practice") || lower.contains("تمرين") || lower.contains("مشق") -> "✏️ $headerText"
+        lower.contains("grammar") || lower.contains("قواعد") || lower.contains("گرامر") -> "📘 $headerText"
+        lower.contains("pronunciation") || lower.contains("نطق") || lower.contains("تلفظ") -> "🗣️ $headerText"
+        lower.contains("remember") || lower.contains("تذكر") || lower.contains("یاد رکھیں") -> "📌 $headerText"
+        lower.contains("mistake") || lower.contains("warning") || lower.contains("خطأ") || lower.contains("غلطی") -> "⚠️ $headerText"
+        else -> headerText
+    }
 }
 
 internal fun bidiIsolate(text: String): String {
@@ -237,7 +264,8 @@ fun EditorialMixedText(
 
             // 1. Check for Headers
             if (trimmed.startsWith("###")) {
-                val headerText = trimmed.removePrefix("###").trim()
+                val rawHeaderText = trimmed.removePrefix("###").trim()
+                val headerText = mapHeaderToIcon(rawHeaderText)
                 val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
                 val hasRtl = isLineRtl(headerText)
                 
@@ -251,7 +279,8 @@ fun EditorialMixedText(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp)
                 )
             } else if (trimmed.startsWith("##")) {
-                val headerText = trimmed.removePrefix("##").trim()
+                val rawHeaderText = trimmed.removePrefix("##").trim()
+                val headerText = mapHeaderToIcon(rawHeaderText)
                 val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
                 val hasRtl = isLineRtl(headerText)
                 
@@ -265,7 +294,8 @@ fun EditorialMixedText(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)
                 )
             } else if (trimmed.startsWith("#")) {
-                val headerText = trimmed.removePrefix("#").trim()
+                val rawHeaderText = trimmed.removePrefix("#").trim()
+                val headerText = mapHeaderToIcon(rawHeaderText)
                 val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
                 val hasRtl = isLineRtl(headerText)
                 
@@ -368,7 +398,10 @@ fun EditorialHeader(
     onLevelClick: (() -> Unit)? = null,
     isDarkTheme: Boolean = false,
     onToggleTheme: (() -> Unit)? = null,
+    onProfileClick: (() -> Unit)? = null,
     onMoreClick: (() -> Unit)? = null,
+    userPhotoPath: String? = null,
+    userDisplayName: String? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = EditorialTheme.colors
@@ -415,6 +448,19 @@ fun EditorialHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                if (onProfileClick != null) {
+                    IconButton(
+                        onClick = onProfileClick,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        UserAvatar(
+                            photoPath = userPhotoPath,
+                            displayName = userDisplayName ?: "Learner",
+                            size = 32.dp,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
                 if (onToggleTheme != null) {
                     IconButton(
                         onClick = onToggleTheme,
@@ -447,7 +493,7 @@ fun EditorialHeader(
                 }
                 if (onMoreClick != null) {
                     IconButton(
-                        onClick = onMoreClick,
+                        onClick = { onMoreClick.invoke() },
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(

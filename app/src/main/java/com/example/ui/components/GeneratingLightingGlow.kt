@@ -3,13 +3,14 @@ package com.example.ui.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -21,129 +22,138 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun GeneratingLightingGlow(
-    text: String = "Thinking...",
+    language: String = "English",
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "generating_lighting_glow")
+    val text = when (language) {
+        "Urdu" -> "لسان سوچ رہا ہے"
+        "Arabic" -> "لسان يفكّر"
+        else -> "Lisan is thinking"
+    }
 
-    // Animated progress for sweeping color effect in the bars
-    val offsetProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "offset"
-    )
+    val infiniteTransition = rememberInfiniteTransition(label = "lisan_thinking_animation")
 
-    // Gentle pulsing opacity of the bars
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.5f,
+    // Gentle pulsing/breathing scale and alpha for the gradient orb
+    val orbAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
         targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
-
-    // Smooth dynamic width breathing for line 1 (green)
-    val widthProgress1 by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 0.82f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "width1"
+        label = "orb_alpha"
     )
 
-    // Smooth dynamic width breathing for line 2 (blue)
-    val widthProgress2 by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.65f,
+    // Staggered bounce/fade for 3 dots
+    val dot1Alpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
+            animation = keyframes {
+                durationMillis = 1200
+                0.2f at 0
+                1.0f at 300
+                0.2f at 600
+                0.2f at 1200
+            },
+            repeatMode = RepeatMode.Restart
         ),
-        label = "width2"
+        label = "dot1"
     )
 
-    // Light green and light blue colors
-    val lightGreen = Color(0xFFA5D6A7) // Light Green
-    val lightBlue = Color(0xFF90CAF9)  // Light Blue
+    val dot2Alpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0.2f at 0
+                0.2f at 300
+                1.0f at 600
+                0.2f at 900
+                0.2f at 1200
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "dot2"
+    )
+
+    val dot3Alpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0.2f at 0
+                0.2f at 600
+                1.0f at 900
+                0.2f at 1200
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "dot3"
+    )
+
+    // Soft gradient brush for the orb (lavender & pale blue)
+    val orbBrush = Brush.radialGradient(
+        colors = listOf(
+            Color(0xFFC7D2FE), // Light lavender
+            Color(0xFF93C5FD), // Pale blue
+            Color.Transparent
+        )
+    )
+
+    // Light lavender tinted background for the bubble
+    val bubbleBgColor = Color(0xFFF3F2FF) // Soft tinted background
+    val textColor = Color(0xFF4F46E5) // Muted indigo for premium styling
 
     Surface(
+        color = bubbleBgColor,
+        shape = RoundedCornerShape(
+            topStart = 20.dp,
+            topEnd = 20.dp,
+            bottomStart = 4.dp,
+            bottomEnd = 20.dp
+        ),
         modifier = modifier
-            .fillMaxWidth()
-            .testTag("generating_lighting_glow_container"),
-        color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant, // Theme-aware background
-        shape = RoundedCornerShape(16.dp)
+            .widthIn(max = 280.dp)
+            .testTag("generating_lighting_glow_container")
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Spinning icon
-            RevolvingAppIconCircle(
-                size = 32.dp,
-                iconSize = 14.dp
-            )
-            
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Thinking text strictly in English
-                Text(
-                    text = text,
-                    fontSize = 15.sp,
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant // Theme-aware high contrast color
-                )
-                
-                // First animated line: Light green glowing bar with smooth width transition
+                // Small soft lavender/pale blue gradient orb
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(widthProgress1)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    lightGreen.copy(alpha = glowAlpha * 0.6f),
-                                    lightGreen.copy(alpha = glowAlpha),
-                                    lightGreen.copy(alpha = glowAlpha * 0.4f)
-                                ),
-                                start = androidx.compose.ui.geometry.Offset(offsetProgress, 0f),
-                                end = androidx.compose.ui.geometry.Offset(offsetProgress + 350f, 0f)
-                            )
-                        )
+                        .size(16.dp)
+                        .alpha(orbAlpha)
+                        .background(brush = orbBrush, shape = CircleShape)
                 )
 
-                // Second animated line: Light blue glowing bar with smooth width transition
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(widthProgress2)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    lightBlue.copy(alpha = glowAlpha * 0.6f),
-                                    lightBlue.copy(alpha = glowAlpha),
-                                    lightBlue.copy(alpha = glowAlpha * 0.4f)
-                                ),
-                                start = androidx.compose.ui.geometry.Offset(offsetProgress, 0f),
-                                end = androidx.compose.ui.geometry.Offset(offsetProgress + 350f, 0f)
-                            )
-                        )
+                Text(
+                    text = text,
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Medium,
+                    color = textColor
                 )
+            }
+
+            // Exactly three small animated dots below the label using muted indigo/lavender
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 24.dp) // align under text, past the orb
+            ) {
+                val dotColor = Color(0xFF818CF8) // Muted lavender/indigo shade
+                Box(modifier = Modifier.size(5.dp).alpha(dot1Alpha).background(dotColor, CircleShape))
+                Box(modifier = Modifier.size(5.dp).alpha(dot2Alpha).background(dotColor, CircleShape))
+                Box(modifier = Modifier.size(5.dp).alpha(dot3Alpha).background(dotColor, CircleShape))
             }
         }
     }

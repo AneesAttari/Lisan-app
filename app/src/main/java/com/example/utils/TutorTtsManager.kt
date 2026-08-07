@@ -37,7 +37,8 @@ class TutorTtsManager(private val context: Context) {
                 if (status == TextToSpeech.SUCCESS) {
                     Log.d("TutorTtsManager", "Native TextToSpeech initialized successfully")
                     isNativeTtsReady = true
-                    nativeTts?.language = Locale("ur", "PK")
+                    nativeTts?.language = Locale.US
+                    checkUrduVoiceAvailability()
                 } else {
                     Log.e("TutorTtsManager", "Native TextToSpeech init failed: $status")
                 }
@@ -47,16 +48,32 @@ class TutorTtsManager(private val context: Context) {
         }
     }
     
-    private val _isReady = MutableStateFlow(true)
-    val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+    private val _isUrduVoiceAvailable = MutableStateFlow(true)
+    val isUrduVoiceAvailable: StateFlow<Boolean> = _isUrduVoiceAvailable.asStateFlow()
+
+    private fun checkUrduVoiceAvailability() {
+        scope.launch {
+            val preferredVoiceFound = nativeTts?.voices?.any { v ->
+                val matchesUrdu = v.locale.language == "ur" || v.locale.country == "PK"
+                matchesUrdu && isPreferredVoice(v.name, v.features)
+            } ?: false
+            _isUrduVoiceAvailable.value = preferredVoiceFound
+        }
+    }
 
     private val _currentlySpeaking = MutableStateFlow<String?>(null)
     val currentlySpeaking: StateFlow<String?> = _currentlySpeaking.asStateFlow()
 
+    private val _ttsLoadingStatus = MutableStateFlow<String?>(null)
+    val ttsLoadingStatus: StateFlow<String?> = _ttsLoadingStatus.asStateFlow()
+
+    private var currentSpeakerPreset: String = "Young Voice"
+
     companion object {
         fun isFemaleVoiceId(voiceId: String): Boolean {
             val upper = voiceId.uppercase(Locale.getDefault())
-            if (upper.contains("FEMALE") || upper.contains("WOMAN")) return true
+            if (upper.contains("FEMALE") || upper.contains("WOMAN") || upper.contains("GIRL") ||
+                upper.contains("ZIRA") || upper.contains("HAZEL") || upper.contains("SUSAN")) return true
             
             val lastSegment = upper.substringAfterLast("-")
             if (upper.startsWith("EN-")) {
@@ -70,33 +87,61 @@ class TutorTtsManager(private val context: Context) {
             }
             return false
         }
+
+        fun isPreferredVoice(voiceName: String, features: Set<String>? = null): Boolean {
+            val nameLower = voiceName.lowercase(Locale.getDefault())
+            if (nameLower.contains("female") || nameLower.contains("woman") || nameLower.contains("girl") ||
+                nameLower.contains("zira") || nameLower.contains("hazel") || nameLower.contains("susan")) {
+                return false
+            }
+
+            val upper = voiceName.uppercase(Locale.US)
+            val lastSegment = upper.substringAfterLast("-")
+            if (upper.startsWith("EN-") && listOf("A", "C", "E", "F", "G", "H", "O").contains(lastSegment)) return false
+            if (upper.startsWith("AR-") && listOf("A", "D").contains(lastSegment)) return false
+            if (upper.startsWith("UR-") && listOf("A").contains(lastSegment)) return false
+
+            if (features != null) {
+                if (features.contains("male")) return true
+                if (features.contains("female")) return false
+            }
+
+            if (nameLower.contains("male") || nameLower.contains("guy") || nameLower.contains("boy") || nameLower.contains("man")) {
+                return true
+            }
+
+            if (upper.startsWith("EN-") && listOf("B", "D", "I", "J", "N", "R").contains(lastSegment)) return true
+            if (upper.startsWith("AR-") && listOf("B", "C").contains(lastSegment)) return true
+            if (upper.startsWith("UR-") && listOf("B").contains(lastSegment)) return true
+
+            return true
+        }
     }
 
-    // Fixed server-side voices catalog (STRICTLY Male voices only for Urdu, English, and Arabic)
+    // Fixed server-side voices catalog (STRICTLY preferred voices only for Urdu, English, and Arabic)
     private val _availableVoices = MutableStateFlow<List<ServerVoice>>(listOf(
-        ServerVoice("ur-PK-Wavenet-B", "Urdu Male Primary (پاکستانی گويا - Wavenet Natural)", "ur-PK"),
-        ServerVoice("ur-PK-Standard-B", "Urdu Male Backup (پاکستانی گويا - Standard)", "ur-PK"),
-        ServerVoice("en-US-Standard-D", "English Male Primary", "en-US"),
-        ServerVoice("en-US-Standard-I", "English Male Backup", "en-US"),
-        ServerVoice("en-US-Wavenet-D", "English Male Wavenet", "en-US"),
-        ServerVoice("ar-XA-Standard-B", "Arabic Male Primary", "ar-XA"),
-        ServerVoice("ar-XA-Wavenet-B", "Arabic Male Backup", "ar-XA")
+        ServerVoice("ur-PK-Wavenet-B", "Urdu Native Young (پاکستانی گويا - Wavenet)", "ur-PK"),
+        ServerVoice("ur-PK-Standard-B", "Urdu Native Mature (پاکستانی گويا - Standard)", "ur-PK"),
+        ServerVoice("en-US-Standard-B", "English Young (US - Standard B)", "en-US"),
+        ServerVoice("en-US-Standard-I", "English Mature (US - Standard I)", "en-US"),
+        ServerVoice("ar-SA-Standard-B", "Arabic Native Young (ar-SA)", "ar-SA"),
+        ServerVoice("ar-XA-Wavenet-B", "Arabic Native Mature (ar-XA)", "ar-XA")
     ))
     val availableVoices: StateFlow<List<ServerVoice>> = _availableVoices.asStateFlow()
 
     private val prefs = context.getSharedPreferences("tutor_tts_prefs", Context.MODE_PRIVATE)
 
     private val _selectedVoiceIdEn = MutableStateFlow<String?>(
-        prefs.getString("selected_voice_en", "en-US-Standard-D")?.let {
-            if (isFemaleVoiceId(it)) "en-US-Standard-D" else it
-        } ?: "en-US-Standard-D"
+        prefs.getString("selected_voice_en", "en-US-Standard-B")?.let {
+            if (isFemaleVoiceId(it)) "en-US-Standard-B" else it
+        } ?: "en-US-Standard-B"
     )
     val selectedVoiceIdEn: StateFlow<String?> = _selectedVoiceIdEn.asStateFlow()
 
     private val _selectedVoiceIdAr = MutableStateFlow<String?>(
-        prefs.getString("selected_voice_ar", "ar-XA-Standard-B")?.let {
-            if (isFemaleVoiceId(it)) "ar-XA-Standard-B" else it
-        } ?: "ar-XA-Standard-B"
+        prefs.getString("selected_voice_ar", "ar-SA-Standard-B")?.let {
+            if (isFemaleVoiceId(it)) "ar-SA-Standard-B" else it
+        } ?: "ar-SA-Standard-B"
     )
     val selectedVoiceIdAr: StateFlow<String?> = _selectedVoiceIdAr.asStateFlow()
 
@@ -110,25 +155,67 @@ class TutorTtsManager(private val context: Context) {
     private val _speechRate = MutableStateFlow(1.0f)
     val speechRate: StateFlow<Float> = _speechRate.asStateFlow()
 
-    private val _pitch = MutableStateFlow(1.0f)
+    private val _pitch = MutableStateFlow(prefs.getFloat("voice_pitch", 1.0f))
     val pitch: StateFlow<Float> = _pitch.asStateFlow()
 
-    private var speechQueue = mutableListOf<SpeechChunk>()
+    private val _voiceVolume = MutableStateFlow(prefs.getFloat("voice_volume", 1.0f))
+    val voiceVolume: StateFlow<Float> = _voiceVolume.asStateFlow()
+
+    private var speechQueue = mutableListOf<SpeechAction>()
     private var isPlayingQueue = false
+    private var lastSpokenText: String? = null
 
-    data class SpeechChunk(val text: String, val languageTag: String)
+    sealed class SpeechAction
+    data class SpeakChunk(val text: String, val languageTag: String, val pitchMod: Float) : SpeechAction()
+    data class PauseChunk(val durationMs: Long) : SpeechAction()
 
-    fun setSpeechRate(rate: Float) { _speechRate.value = rate }
-    fun setPitch(p: Float) { _pitch.value = p }
+    fun setSpeechRate(rate: Float) {
+        _speechRate.value = rate
+        setPlaybackSpeed(rate)
+    }
+
+    fun setPitch(p: Float) {
+        _pitch.value = p
+        prefs.edit().putFloat("voice_pitch", p).apply()
+        try {
+            nativeTts?.setPitch(p)
+        } catch (e: Exception) {}
+    }
+
+    fun setVoiceVolume(vol: Float) {
+        _voiceVolume.value = vol
+        prefs.edit().putFloat("voice_volume", vol).apply()
+        try {
+            mediaPlayer?.setVolume(vol, vol)
+        } catch (e: Exception) {}
+    }
+
+    fun applySpeakerPreset(speaker: String) {
+        val mappedPreset = if (speaker.contains("Young", ignoreCase = true)) "Young Voice" else "Mature Voice"
+        currentSpeakerPreset = mappedPreset
+        if (mappedPreset == "Young Voice") {
+            setEnglishVoice("en-US-Standard-B")
+            setArabicVoice("ar-SA-Standard-B")
+            setUrduVoice("ur-PK-Wavenet-B")
+        } else {
+            setEnglishVoice("en-US-Standard-I")
+            setArabicVoice("ar-XA-Wavenet-B")
+            setUrduVoice("ur-PK-Standard-B")
+        }
+    }
+
+    fun replay() {
+        lastSpokenText?.let { speak(it) }
+    }
 
     fun setEnglishVoice(voiceId: String) {
-        val finalId = if (voiceId.isBlank() || isFemaleVoiceId(voiceId)) "en-US-Standard-D" else voiceId
+        val finalId = if (voiceId.isBlank() || isFemaleVoiceId(voiceId)) "en-US-Standard-B" else voiceId
         _selectedVoiceIdEn.value = finalId
         prefs.edit().putString("selected_voice_en", finalId).apply()
     }
 
     fun setArabicVoice(voiceId: String) {
-        val finalId = if (voiceId.isBlank() || isFemaleVoiceId(voiceId)) "ar-XA-Standard-B" else voiceId
+        val finalId = if (voiceId.isBlank() || isFemaleVoiceId(voiceId)) "ar-SA-Standard-B" else voiceId
         _selectedVoiceIdAr.value = finalId
         prefs.edit().putString("selected_voice_ar", finalId).apply()
     }
@@ -139,9 +226,53 @@ class TutorTtsManager(private val context: Context) {
         prefs.edit().putString("selected_voice_ur", finalId).apply()
     }
 
+    private val _playbackSpeed = MutableStateFlow(prefs.getFloat("playback_speed", 1.0f))
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
+    fun setPlaybackSpeed(speed: Float) {
+        _playbackSpeed.value = speed
+        prefs.edit().putFloat("playback_speed", speed).apply()
+        // Apply to current playback if possible
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) { // Just for safety
+             try {
+                 mediaPlayer?.let { 
+                     if (it.isPlaying) {
+                         it.playbackParams = it.playbackParams.setSpeed(speed)
+                     }
+                 }
+                 nativeTts?.setSpeechRate(speed)
+             } catch (e: Exception) {}
+        }
+    }
+
+    private var isPaused = false
+
+    fun pause() {
+        if (isPlayingQueue) {
+            isPaused = true
+            try {
+                mediaPlayer?.pause()
+                nativeTts?.stop() // Native TTS can't really pause easily, so we just stop and it won't resume perfectly
+            } catch (e: Exception) {}
+        }
+    }
+
+    fun resume() {
+        if (isPlayingQueue && isPaused) {
+            isPaused = false
+            try {
+                mediaPlayer?.start()
+                // For Native TTS, we would need to resume from the chunk. 
+                // Since native stop() clears the buffer, resume won't work easily for native chunks.
+                // But Cloud TTS (mediaPlayer) will work.
+            } catch (e: Exception) {}
+        }
+    }
+
     fun stop() {
         speechQueue.clear()
         isPlayingQueue = false
+        isPaused = false
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()
@@ -157,20 +288,44 @@ class TutorTtsManager(private val context: Context) {
         _currentlySpeaking.value = null
     }
 
-    fun speak(text: String, id: String? = null) {
-        Log.d("TutorTtsManager", "speak called: $text, id: $id")
+    private var currentRate: Float = 1.0f
+
+    fun speak(text: String, id: String? = null, speed: Float? = null) {
+        Log.d("TutorTtsManager", "speak called: text='$text', id=$id, rate=$speed")
+        val rate = speed ?: _playbackSpeed.value
+        currentRate = rate
         stop()
+        lastSpokenText = text
         _currentlySpeaking.value = id ?: text
         
-        val chunks = splitTextByLanguage(text)
-        speechQueue.addAll(chunks)
-        Log.d("TutorTtsManager", "speechQueue size: ${speechQueue.size}")
+        val actions = parseActions(text)
+        speechQueue.addAll(actions)
+        Log.d("TutorTtsManager", "speechQueue size: ${speechQueue.size}, actions: $actions")
         
         if (speechQueue.isNotEmpty()) {
             isPlayingQueue = true
             processNextChunk()
         } else {
+            Log.d("TutorTtsManager", "speechQueue is empty, nothing to speak")
             _currentlySpeaking.value = null
+        }
+    }
+
+    private var isCloudTtsDisabled = false
+
+    private fun hasLocalHighQualityVoice(languageTag: String): Boolean {
+        if (!isNativeTtsReady || nativeTts == null) return false
+        return try {
+            nativeTts?.voices?.any { v ->
+                val matchesLang = when (languageTag) {
+                    "ur" -> v.locale.language == "ur" || v.locale.country == "PK"
+                    "ar" -> v.locale.language == "ar"
+                    else -> v.locale.language == "en"
+                }
+                matchesLang && isPreferredVoice(v.name, v.features)
+            } ?: false
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -178,45 +333,86 @@ class TutorTtsManager(private val context: Context) {
         if (speechQueue.isEmpty() || !isPlayingQueue) {
             isPlayingQueue = false
             _currentlySpeaking.value = null
+            _ttsLoadingStatus.value = null
             return
         }
 
-        val chunk = speechQueue.removeAt(0)
+        val action = speechQueue.removeAt(0)
 
         scope.launch {
+            if (action is PauseChunk) {
+                kotlinx.coroutines.delay(action.durationMs)
+                processNextChunk()
+                return@launch
+            }
+            
+            val chunk = action as SpeakChunk
+
             try {
+                if (isCloudTtsDisabled) {
+                    _ttsLoadingStatus.value = null
+                    speakWithNativeTts(chunk)
+                    return@launch
+                }
+
                 val voiceId = when (chunk.languageTag) {
                     "ur" -> {
                         val selected = _selectedVoiceIdUr.value ?: "ur-PK-Wavenet-B"
-                        if (isFemaleVoiceId(selected)) "ur-PK-Wavenet-B" else selected
+                        if (isFemaleVoiceId(selected)) {
+                             Log.w("TutorTtsManager", "No suitable Urdu voice found, skipping Urdu audio")
+                             null
+                        } else selected
                     }
                     "ar" -> {
-                        val selected = _selectedVoiceIdAr.value ?: "ar-XA-Standard-B"
-                        if (isFemaleVoiceId(selected)) "ar-XA-Standard-B" else selected
+                        val selected = _selectedVoiceIdAr.value ?: "ar-SA-Standard-B"
+                        if (isFemaleVoiceId(selected)) "ar-SA-Standard-B" else selected
                     }
                     else -> {
-                        val selected = _selectedVoiceIdEn.value ?: "en-US-Standard-D"
-                        if (isFemaleVoiceId(selected)) "en-US-Standard-D" else selected
+                        val selected = _selectedVoiceIdEn.value ?: "en-US-Standard-B"
+                        if (isFemaleVoiceId(selected)) "en-US-Standard-B" else selected
                     }
+                }
+                
+                if (voiceId == null) {
+                    processNextChunk()
+                    return@launch
+                }
+
+                // Device Voice Check & dynamic download state triggering
+                val localVoiceAvailable = hasLocalHighQualityVoice(chunk.languageTag)
+                if (!localVoiceAvailable) {
+                    _ttsLoadingStatus.value = "Downloading native voice pack..."
+                } else {
+                    _ttsLoadingStatus.value = null
                 }
 
                 val langCode = when (chunk.languageTag) {
                     "ur" -> "ur-PK"
-                    "ar" -> "ar-XA"
+                    "ar" -> "ar-SA"
                     else -> "en-US"
                 }
 
                 val apiKey = CloudTtsClient.getApiKey()
                 if (apiKey.isEmpty()) {
                     Log.w("TutorTtsManager", "No API key found for Cloud TTS, falling back to Native TTS")
+                    isCloudTtsDisabled = true
+                    _ttsLoadingStatus.value = null
                     speakWithNativeTts(chunk)
                     return@launch
                 }
 
+                // Adjust speech rate and pitch based on age variant
+                val baseCloudPitch = if (currentSpeakerPreset == "Young Voice") 1.5 else -2.5
+                val cloudPitch = baseCloudPitch + ((chunk.pitchMod - 1.0) * 10.0)
+
                 val request = SynthesizeRequest(
                     input = SynthesisInput(text = chunk.text),
                     voice = VoiceSelectionParams(languageCode = langCode, name = voiceId),
-                    audioConfig = AudioConfig(audioEncoding = "MP3", speakingRate = 1.05, pitch = 0.0)
+                    audioConfig = AudioConfig(
+                        audioEncoding = "MP3",
+                        speakingRate = 1.0,
+                        pitch = cloudPitch
+                    )
                 )
 
                 val response = withContext(Dispatchers.IO) {
@@ -230,20 +426,42 @@ class TutorTtsManager(private val context: Context) {
                     file
                 }
 
+                _ttsLoadingStatus.value = null
                 playAudioFile(tempFile, chunk)
 
+            } catch (e: retrofit2.HttpException) {
+                _ttsLoadingStatus.value = null
+                if (e.code() == 401 || e.code() == 403) {
+                    Log.w("TutorTtsManager", "Cloud TTS unauthorized (HTTP ${e.code()}), switching to device Native TTS")
+                    isCloudTtsDisabled = true
+                } else {
+                    Log.w("TutorTtsManager", "Cloud TTS HTTP error (${e.code()}), using Native TTS fallback")
+                }
+                speakWithNativeTts(chunk)
             } catch (e: Exception) {
-                Log.e("TutorTtsManager", "Error synthesizing text with Cloud TTS, using Native TTS fallback", e)
+                _ttsLoadingStatus.value = null
+                Log.w("TutorTtsManager", "Cloud TTS error (${e.message}), using Native TTS fallback")
                 speakWithNativeTts(chunk)
             }
         }
     }
 
-    private fun playAudioFile(file: File, chunk: SpeechChunk) {
+    private fun playAudioFile(file: File, chunk: SpeakChunk) {
         try {
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(file.absolutePath)
+                val vol = _voiceVolume.value
+                setVolume(vol, vol)
                 setOnPreparedListener {
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
+                            val speed = currentRate * baseRateMultiplier
+                            it.playbackParams = it.playbackParams.setSpeed(speed)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TutorTtsManager", "Error setting playback speed on MediaPlayer", e)
+                    }
                     it.start()
                 }
                 setOnCompletionListener {
@@ -252,8 +470,10 @@ class TutorTtsManager(private val context: Context) {
                     file.delete()
                     processNextChunk()
                 }
-                setOnErrorListener { _, what, extra ->
+                setOnErrorListener { it, what, extra ->
                     Log.e("TutorTtsManager", "MediaPlayer error: $what, $extra")
+                    it.release()
+                    mediaPlayer = null
                     file.delete()
                     speakWithNativeTts(chunk)
                     true
@@ -267,7 +487,7 @@ class TutorTtsManager(private val context: Context) {
         }
     }
 
-    private fun speakWithNativeTts(chunk: SpeechChunk) {
+    private fun speakWithNativeTts(chunk: SpeakChunk) {
         if (!isNativeTtsReady || nativeTts == null) {
             Log.e("TutorTtsManager", "Native TTS is not ready yet")
             processNextChunk()
@@ -287,38 +507,34 @@ class TutorTtsManager(private val context: Context) {
                     Log.w("TutorTtsManager", "Language $targetLocale not supported on Native TTS, trying default")
                 }
                 
-                // Human natural fluency tuning (prevent slow robotic speech)
-                tts.setSpeechRate(1.05f)
-                tts.setPitch(0.95f)
+                // Adjust speech rate and pitch based on age variant
+                val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
+                val adjustedSpeakingRate = currentRate * baseRateMultiplier
+                val nativePitch = (if (currentSpeakerPreset == "Young Voice") 1.1f else 0.85f) * chunk.pitchMod
 
-                // Strictly filter and apply native male voice for English, Arabic, and Urdu
+                tts.setSpeechRate(adjustedSpeakingRate)
+                tts.setPitch(nativePitch)
+
+                // Strictly filter and apply native preferred voice for English, Arabic, and Urdu
                 try {
                     val targetLang = chunk.languageTag
-                    val maleVoice = tts.voices?.find { v ->
+                    val preferredVoice = tts.voices?.find { v ->
                         val matchesLang = when (targetLang) {
                             "ur" -> v.locale.language == "ur" || v.locale.country == "PK"
                             "ar" -> v.locale.language == "ar"
                             else -> v.locale.language == "en"
                         }
-                        val voiceName = v.name.lowercase(Locale.getDefault())
-                        val isFemale = voiceName.contains("female") ||
-                                       voiceName.contains("woman") ||
-                                       voiceName.contains("-a") ||
-                                       voiceName.contains("-c") ||
-                                       voiceName.contains("-e") ||
-                                       voiceName.contains("-f") ||
-                                       voiceName.contains("-g") ||
-                                       voiceName.contains("-h") ||
-                                       voiceName.contains("-o") ||
-                                       voiceName.contains("ura") ||
-                                       (v.features != null && v.features.contains("female"))
-                        matchesLang && !isFemale
+                        matchesLang && isPreferredVoice(v.name, v.features)
                     }
-                    if (maleVoice != null) {
-                        tts.voice = maleVoice
+                    if (preferredVoice != null) {
+                        tts.voice = preferredVoice
+                    } else if (chunk.languageTag == "ur") {
+                        Log.w("TutorTtsManager", "No suitable Urdu voice found in Native TTS, skipping Urdu audio")
+                        processNextChunk()
+                        return
                     }
                 } catch (e: Exception) {
-                    Log.e("TutorTtsManager", "Could not set native male voice", e)
+                    Log.e("TutorTtsManager", "Could not set native preferred voice", e)
                 }
 
                 val params = android.os.Bundle()
@@ -345,12 +561,53 @@ class TutorTtsManager(private val context: Context) {
         }
     }
 
-    private fun splitTextByLanguage(text: String): List<SpeechChunk> {
+    private fun parseActions(text: String): List<SpeechAction> {
         val cleanText = text.replace(Regex("(\\*\\*|\\*|_|#|`|\\||---|===)"), "")
             .replace(Regex("\\[(.*?)\\]\\(.*?\\)"), "$1")
             
-        val rawLines = cleanText.split(Regex("(?<=[.?!])\\s+|\n+"))
-        val initialChunks = mutableListOf<SpeechChunk>()
+        val regex = Regex("\\[(pause_short|pause_long|pitch_high|pitch_normal|pitch_low)\\]")
+        val parts = cleanText.split(regex)
+        val matches = regex.findAll(cleanText).toList()
+        
+        val actions = mutableListOf<SpeechAction>()
+        var currentPitchMod = 1.0f
+        
+        for (i in parts.indices) {
+            val partText = parts[i].trim()
+            if (partText.isNotEmpty()) {
+                val langChunks = splitTextByLanguage(partText, currentPitchMod)
+                actions.addAll(langChunks)
+            }
+            if (i < matches.size) {
+                when (matches[i].groupValues[1]) {
+                    "pause_short" -> actions.add(PauseChunk(400L))
+                    "pause_long" -> actions.add(PauseChunk(1000L))
+                    "pitch_high" -> currentPitchMod = 1.25f
+                    "pitch_low" -> currentPitchMod = 0.85f
+                    "pitch_normal" -> currentPitchMod = 1.0f
+                }
+            }
+        }
+        
+        val mergedActions = mutableListOf<SpeechAction>()
+        for (action in actions) {
+            if (action is SpeakChunk && mergedActions.isNotEmpty() && mergedActions.last() is SpeakChunk) {
+                val last = mergedActions.last() as SpeakChunk
+                if (last.languageTag == action.languageTag && last.pitchMod == action.pitchMod) {
+                    mergedActions.removeAt(mergedActions.lastIndex)
+                    mergedActions.add(SpeakChunk("${last.text} ${action.text}", last.languageTag, last.pitchMod))
+                    continue
+                }
+            }
+            mergedActions.add(action)
+        }
+        
+        return mergedActions
+    }
+
+    private fun splitTextByLanguage(text: String, pitchMod: Float): List<SpeakChunk> {
+        val rawLines = text.split(Regex("(?<=[.?!])\\s+|\n+"))
+        val initialChunks = mutableListOf<SpeakChunk>()
         
         for (line in rawLines) {
             val trimmed = line.trim()
@@ -373,15 +630,14 @@ class TutorTtsManager(private val context: Context) {
                 else -> "en"
             }
             
-            initialChunks.add(SpeechChunk(trimmed, langTag))
+            initialChunks.add(SpeakChunk(trimmed, langTag, pitchMod))
         }
 
-        // Merge contiguous chunks of the same language to eliminate stuttering & audio gaps
-        val mergedChunks = mutableListOf<SpeechChunk>()
+        val mergedChunks = mutableListOf<SpeakChunk>()
         for (chunk in initialChunks) {
             if (mergedChunks.isNotEmpty() && mergedChunks.last().languageTag == chunk.languageTag) {
                 val last = mergedChunks.removeAt(mergedChunks.lastIndex)
-                mergedChunks.add(SpeechChunk("${last.text} ${chunk.text}", last.languageTag))
+                mergedChunks.add(SpeakChunk("${last.text} ${chunk.text}", last.languageTag, pitchMod))
             } else {
                 mergedChunks.add(chunk)
             }

@@ -24,12 +24,17 @@ object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
     private const val TAG = "RetrofitClient"
 
-    const val MODEL_FLASH = "gemini-2.5-flash"
-    const val MODEL_PRO = "gemini-2.5-pro"
-    const val MODEL_FLASH_LITE = "gemini-2.0-flash-lite"
+    const val MODEL_FLASH = "gemini-3.5-flash"
+    const val MODEL_PRO = "gemini-3.1-pro-preview"
+    const val MODEL_FLASH_LITE = "gemini-3.5-flash"
 
     @Volatile
     private var customApiKey: String = ""
+
+    @Volatile
+    private var PREVIOUS_USER_MESSAGE: String = ""
+    @Volatile
+    private var PREVIOUS_ASSISTANT_RESPONSE: String = ""
 
     fun setCustomApiKey(key: String) {
         customApiKey = key.trim()
@@ -79,8 +84,8 @@ object RetrofitClient {
     }
 
     private suspend fun <T> runWithRetry(
-        maxAttempts: Int = 3,
-        initialDelayMillis: Long = 1000,
+        maxAttempts: Int = 5,
+        initialDelayMillis: Long = 2000,
         block: suspend () -> T
     ): T {
         var currentDelay = initialDelayMillis
@@ -107,14 +112,8 @@ object RetrofitClient {
     ): com.example.data.model.GenerateContentResponse {
         val candidateModels = listOf(
             preferredModel,
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-2.5-pro",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro-latest"
+            "gemini-3.5-flash",
+            "gemini-3.1-pro-preview"
         ).distinct()
 
         var lastException: Exception? = null
@@ -202,36 +201,149 @@ object RetrofitClient {
         }
     }
 
+    suspend fun getDailyHelperResponse(
+        sysPrompt: String,
+        history: List<com.example.data.model.ChatMessageEntity>
+    ): String = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (apiKey.isEmpty()) {
+            return@withContext "Gemini API key is not set. Please enter a valid API key in Settings."
+        }
+        val contents = history.map {
+            Content(
+                role = if (it.role == "model") "model" else "user",
+                parts = listOf(Part(text = it.text))
+            )
+        }
+        val req = GenerateContentRequest(
+            systemInstruction = Content(
+                role = "system",
+                parts = listOf(Part(text = sysPrompt))
+            ),
+            contents = contents
+        )
+        try {
+            val response = callWithModelFallback(apiKey, req, MODEL_FLASH)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?: "I am here to help! What question do you have about today's lesson?"
+        } catch (e: Exception) {
+            Log.e(TAG, "getDailyHelperResponse error: ${e.message}")
+            "Error: ${e.message ?: "Failed to connect to AI helper."}"
+        }
+    }
+
+    suspend fun getVoiceTutorResponse(
+        history: List<Content>,
+        userName: String,
+        learnerProfileSummary: String
+    ): String = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (apiKey.isEmpty()) {
+            return@withContext "السلام عليكم! Welcome to Lisan Voice Tutor. Please enter your Gemini API Key in settings to start our conversation."
+        }
+        val sysPrompt = """
+            You are Lisan Voice Tutor, a warm, friendly, natural human English tutor speaking with $userName, an Arabic and Urdu speaking learner.
+            
+            VOICE CONVERSATION GUIDELINES:
+            1. Speak like a real, empathetic, friendly human teacher. Be conversational, smooth, and express emotions naturally.
+            2. USE TEXT-TO-SPEECH MARKERS for natural pacing and emotion:
+               - Insert `[pause_short]` for a brief, natural hesitation (e.g., "Hmm, [pause_short] let's see.").
+               - Insert `[pause_long]` for a longer thought pause or transition (e.g., "That's exactly right. [pause_long] Now...").
+               - Insert `[pitch_high]` before exciting/encouraging words (e.g., "[pitch_high] Great job!").
+               - Insert `[pitch_low]` for a more serious or explanatory tone.
+               - Insert `[pitch_normal]` to reset back to normal tone.
+            3. Keep your answers brief (1 to 3 short sentences maximum) so that speech synthesis is clear and pleasant to listen to.
+            4. Use simple, natural English. When helpful, add a brief, clear sentence in Modern Standard Arabic or Urdu to explain difficult grammar concepts.
+            5. Gently correct any mistakes in the user's speech, then give them a quick example.
+            6. Do NOT use markdown code blocks, asterisks (*), or complex bullet lists, as this text will be read aloud by Text-To-Speech.
+            
+            Learner Profile Context: $learnerProfileSummary
+        """.trimIndent()
+
+        val req = GenerateContentRequest(
+            systemInstruction = Content(
+                role = "system",
+                parts = listOf(Part(text = sysPrompt))
+            ),
+            contents = history
+        )
+        try {
+            val response = callWithModelFallback(apiKey, req, MODEL_FLASH)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?: "I'm listening! Please say that again or ask me anything."
+        } catch (e: Exception) {
+            Log.e(TAG, "getVoiceTutorResponse error: ${e.message}")
+            "Sorry, I had trouble hearing that. Could you please try again?"
+        }
+    }
+
     suspend fun analyzeDeepGrammar(inputSentence: String, level: String): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
         if (apiKey.isNotEmpty()) {
             try {
                 val prompt = """
-                    Analyze this sentence for an Urdu native speaker: "$inputSentence" (Level: $level).
-                    The input sentence could be in English, Urdu, or Arabic.
+                    You are the Lisan Grammar Sentence Analyzer.
+                    Analyze this input for a Pakistani Urdu-speaking Muslim learner (beginner English): "$inputSentence"
                     
-                    CRITICAL INSTRUCTION:
-                    Write ALL explanations, grammatical rules, word breakdowns, and notes in clear, natural URDU (اردو). Do NOT write explanations in English.
-                    For Arabic grammar comparison, start with "جیسے آپ نے عربی میں سیکھا ہے..." (Likewise in Arabic you have learned...) and compare with Arabic grammar concepts (like الجملة الاسمية, الجملة الفعلية, الفاعل, الفعل).
+                    CRITICAL RULES:
+                    1. First validate if it's a single word, phrase, full sentence, question, command, or incomplete text.
+                    2. NEVER GUESS grammar carelessly. Do not create invented grammar explanations.
+                    3. Identify the COMPLETE noun phrase as subject (never label a, an, the, this, that, my, your alone as the subject).
+                    4. Separate helping verbs from the main verb. DO NOT label helping verbs (is, are, was, does, did, will, have) as the main verb.
+                    5. Identify direct objects, complements (after linking verbs like be/seem), and adverbials correctly. Do not call complements or adverbials "objects".
+                    6. Arabic grammar references must be optional, short, and used only when genuinely useful.
+                    7. Do not show internal analysis, debug data, confidence values, parser labels, or token metadata.
+                    8. Use English content in LTR, Urdu content in RTL. Use separate blocks for them.
                     
-                    REQUIRED RESPONSE STRUCTURE (Return strictly in Markdown):
+                    FORMAT FOR A SENTENCE (Strictly follow this structure. Do NOT include '[ 🔊 Listen ] [ 🎙 Practise ]' as the app UI will provide those buttons.):
                     
-                    1. **اصل جملہ (Original Sentence)**: "$inputSentence"
-                    2. **تصحیح (Correction)**: [Corrected version or "جملہ ساخت کے لحاظ سے بالکل درست ہے"]
-                    3. **جملے کی قسم (Sentence Type)**: [e.g. جملہ خبریہ / Declarative, جملہ استفہامیہ / Interrogative]
-                    4. **زمانہ (Tense)**: [e.g. فعل حال جاری / Present Continuous]
-                    5. **بنیادی اجزاء (Key Components)**:
-                       - **فاعل (Subject)**: [The doer]
-                       - **فعل (Main Verb)**: [The action]
-                       - **مفعول (Object/Complement)**: [What receives action]
-                    6. **لفظ بہ لفظ تجزیہ (Word-by-Word Breakdown)**:
-                       - [Word 1]: [Grammatical role explained in Urdu]
-                       - [Word 2]: ...
-                    7. **اردو میں تفصیلی وضاحت (Urdu Explanation)**: [Clear Urdu explanation of the sentence structure and rules]
-                    8. **عربی گرامر سے تقابل (Arabic Grammar Reference)**:
-                       جیسے آپ نے عربی میں سیکھا ہے: [Explain similarities & differences using Arabic terms]
-                    9. **مزید مثالیں (Additional Examples)**: [2 more English examples with Urdu translations]
-                    10. **عام غلطیاں (Common Mistakes)**: [What Urdu/Arabic speakers often get wrong here]
+                    **Your sentence:** $inputSentence
+                    
+                    **Urdu meaning:**
+                    [Urdu meaning here]
+                    
+                    **Sentence type:** [Statement / Question / Command / Negative]
+                    
+                    **Main parts:**
+                    - **Subject:** [Complete subject phrase]
+                      [Optional breakdown of subject, e.g., - Article: The, - Main noun: boy]
+                    - **Verb phrase:** [Complete verb phrase]
+                      [Optional breakdown, e.g., - Helping verb: is, - Main verb: reading]
+                    - **Object / Complement:** [Complete object or complement, if present]
+                    - **Extra detail:** [Adverbial or time/place information, if useful]
+                    
+                    **Tense or time meaning:** [Tense name and simple explanation]
+                    
+                    **Simple explanation:**
+                    [Clear Urdu explanation. Keep it short. Only include Arabic comparison if genuinely helpful.]
+                    
+                    **Common mistake to avoid:**
+                    [If relevant, explain briefly in Urdu/English]
+                    
+                    **Practice Question:**
+                    [One short question to check understanding]
+                    
+                    <details>
+                    <summary>See word details</summary>
+                    [Optional word-by-word breakdown - only show accurate roles, do not give conflicting labels]
+                    </details>
+                    
+                    FORMAT FOR A SINGLE WORD (If input is just one word):
+                    **Word:** $inputSentence
+                    **Meaning:** [Urdu meaning]
+                    **Word type:** [Grammar type, e.g., verb, noun]
+                    **Example:** [One short English example]
+                    **ترجمہ:** [Urdu translation of example]
+                    
+                    FORMAT FOR A PHRASE (If input is not a full sentence, e.g. "in the morning"):
+                    This is a phrase, not a complete sentence.
+                    [Explain what it does in English]
+                    
+                    یہ ایک فقرہ ہے، مکمل جملہ نہیں۔
+                    [Urdu explanation]
+                    
+                    **Main parts:**
+                    [Breakdown of the phrase parts]
                 """.trimIndent()
                 val request = GenerateContentRequest(contents = listOf(Content(parts = listOf(Part(text = prompt)))))
                 val response = callWithModelFallback(apiKey, request, MODEL_PRO)
@@ -248,73 +360,583 @@ object RetrofitClient {
 
     private fun generateLocalGrammarAnalysis(inputSentence: String, level: String): String {
         val cleanInput = inputSentence.trim()
-        val words = cleanInput.split("\\s+".toRegex())
+        val lower = cleanInput.lowercase().removeSuffix(".")
 
-        val isQuestion = cleanInput.endsWith("?") || cleanInput.startsWith("What", true) ||
-                cleanInput.startsWith("Where", true) || cleanInput.startsWith("How", true) ||
-                cleanInput.startsWith("Is", true) || cleanInput.startsWith("Are", true) ||
-                cleanInput.startsWith("Do", true) || cleanInput.startsWith("Does", true)
+        return when {
+            lower.contains("the boy is reading a book") -> """
+                **Your sentence:** $cleanInput
 
-        val sentenceType = if (isQuestion) "جملہ استفہامیہ (Interrogative Sentence)" else "جملہ خبریہ (Declarative Sentence)"
+                **Urdu meaning:**
+                لڑکا ایک کتاب پڑھ رہا ہے۔
 
-        val hasPast = cleanInput.contains("was", true) || cleanInput.contains("were", true) ||
-                cleanInput.contains("had", true) || cleanInput.endsWith("ed")
-        val hasFuture = cleanInput.contains("will", true) || cleanInput.contains("shall", true) || cleanInput.contains("going to", true)
-        val hasIng = cleanInput.contains("ing", true)
+                **Sentence type:** Statement
 
-        val tense = when {
-            hasPast && hasIng -> "فعل ماضی جاری (Past Continuous Tense)"
-            hasPast -> "فعل ماضی مطلق (Past Simple Tense)"
-            hasFuture -> "فعل مستقبل (Future Simple Tense)"
-            hasIng -> "فعل حال جاری (Present Continuous Tense)"
-            else -> "فعل حال مطلق (Present Simple Tense)"
+                **Main parts:**
+                - **Subject:** The boy
+                  - Article: The
+                  - Main noun: boy
+                - **Verb phrase:** is reading
+                  - Helping verb: is
+                  - Main verb: reading
+                - **Object:** a book
+                  - Article: a
+                  - Main noun: book
+
+                **Tense or time meaning:** Present Continuous
+                یہ کام ابھی ہو رہا ہے۔
+
+                **Simple explanation:**
+                اس جملے میں فاعل پورا "The boy" ہے۔ امدادی فعل "is" کے ساتھ اصل فعل "reading" ہے۔
+                جیسے آپ نے عربی میں سیکھا ہے: مبتدأ 'الولدُ' اور خبر 'يقرأ كتاباً' ہے۔
+
+                **Common mistake to avoid:**
+                صرف 'The' کو فاعل مت سمجھیں۔ 'The boy' پورا فاعل ہے۔
+
+                **Practice Question:**
+                Is the girl reading a book?
+            """.trimIndent()
+
+            lower.contains("my sister speaks english") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                میری بہن انگریزی بولتی ہے۔
+
+                **Sentence type:** Statement
+
+                **Main parts:**
+                - **Subject:** My sister
+                  - Possessive determiner: My
+                  - Main noun: sister
+                - **Verb phrase:** speaks
+                  - Main verb: speaks
+                - **Object:** English
+                  - Main noun: English
+
+                **Tense or time meaning:** Present Simple
+                یہ ایک مستقل عادت یا سچائی ہے۔
+
+                **Simple explanation:**
+                اس جملے میں فاعل "My sister" ہے۔ فعل "speaks" ہے۔
+
+                **Practice Question:**
+                Does my brother study Arabic?
+            """.trimIndent()
+
+            lower.contains("these students are ready") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                یہ طلبہ تیار ہیں۔
+
+                **Sentence type:** Statement
+
+                **Main parts:**
+                - **Subject:** These students
+                  - Determiner: These
+                  - Main noun: students
+                - **Verb phrase:** are
+                  - Linking verb: are
+                - **Complement:** ready
+
+                **Tense or time meaning:** Present Simple
+                یہ موجودہ حالت ظاہر کرتا ہے۔
+
+                **Simple explanation:**
+                "These" اور "students" مل کر فاعل ہیں۔ "ready" مفعول نہیں بلکہ تکملہ (Complement) ہے۔
+
+                **Practice Question:**
+                Are those teachers busy?
+            """.trimIndent()
+
+            lower.contains("the book on the table is mine") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                میز پر رکھی کتاب میری ہے۔
+
+                **Sentence type:** Statement
+
+                **Main parts:**
+                - **Subject:** The book on the table
+                  - Main noun: book
+                  - Extra detail: on the table
+                - **Verb phrase:** is
+                  - Linking verb: is
+                - **Complement:** mine
+
+                **Tense or time meaning:** Present Simple
+                موجودہ ملکیت۔
+
+                **Simple explanation:**
+                "The book on the table" پورا فاعل ہے۔
+
+                **Practice Question:**
+                Is the pen on the desk yours?
+            """.trimIndent()
+
+            lower.contains("a teacher gave the children homework") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                ایک استاد نے بچوں کو ہوم ورک دیا۔
+
+                **Sentence type:** Statement
+
+                **Main parts:**
+                - **Subject:** A teacher
+                - **Verb phrase:** gave
+                  - Main verb: gave
+                - **Indirect Object:** the children
+                - **Direct Object:** homework
+
+                **Tense or time meaning:** Past Simple
+                یہ کام ماضی میں ہوا۔
+
+                **Simple explanation:**
+                "gave" فعل کے دو مفعول ہیں: بچوں کو (indirect) اور ہوم ورک (direct)۔
+
+                **Practice Question:**
+                Did the teacher give them a test?
+            """.trimIndent()
+
+            lower.contains("the students have completed the exercise") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                طلبہ نے مشق مکمل کر لی ہے۔
+
+                **Sentence type:** Statement
+
+                **Main parts:**
+                - **Subject:** The students
+                - **Verb phrase:** have completed
+                  - Helping verb: have
+                  - Main verb: completed
+                - **Object:** the exercise
+
+                **Tense or time meaning:** Present Perfect
+                کام حال ہی میں مکمل ہوا ہے۔
+
+                **Simple explanation:**
+                "have" امدادی فعل ہے اور "completed" اصل فعل ہے۔
+
+                **Practice Question:**
+                Have they finished the work?
+            """.trimIndent()
+
+            lower.contains("does ali like tea") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                کیا علی کو چائے پسند ہے؟
+
+                **Sentence type:** Question
+
+                **Main parts:**
+                - **Subject:** Ali
+                - **Verb phrase:** Does like
+                  - Helping verb: Does
+                  - Main verb: like
+                - **Object:** tea
+
+                **Tense or time meaning:** Present Simple Question
+                موجودہ عادت یا پسند کے بارے میں سوال۔
+
+                **Simple explanation:**
+                “Does” سوال بنانے میں مدد دیتا ہے۔ اصل فعل “like” ہے۔
+
+                **Practice Question:**
+                Does Fatima drink milk?
+            """.trimIndent()
+
+            lower.contains("did they finish the work") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                کیا انہوں نے کام ختم کر لیا؟
+
+                **Sentence type:** Question
+
+                **Main parts:**
+                - **Subject:** they
+                - **Verb phrase:** Did finish
+                  - Helping verb: Did
+                  - Main verb: finish
+                - **Object:** the work
+
+                **Tense or time meaning:** Past Simple Question
+                ماضی کے بارے میں سوال۔
+
+                **Simple explanation:**
+                “Did” ماضی کا سوال بنانے میں مدد دیتا ہے۔
+
+                **Practice Question:**
+                Did she eat dinner?
+            """.trimIndent()
+
+            lower.contains("open the door") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                دروازہ کھولیں۔
+
+                **Sentence type:** Command
+
+                **Main parts:**
+                - **Subject:** Understood "you" (آپ)
+                - **Verb phrase:** Open
+                  - Main verb: Open
+                - **Object:** the door
+
+                **Tense or time meaning:** Imperative
+                حکم یا درخواست۔
+
+                **Simple explanation:**
+                حکمیہ جملوں میں فاعل "you" چھپا ہوا (understood) ہوتا ہے۔
+
+                **Practice Question:**
+                Close the window.
+            """.trimIndent()
+
+            lower.contains("in the morning") -> """
+                This is a phrase, not a complete sentence.
+                It gives time information.
+
+                یہ ایک فقرہ ہے، مکمل جملہ نہیں۔
+                یہ وقت کے بارے میں معلومات دیتا ہے۔
+
+                **Main parts:**
+                - Preposition: In
+                - Noun phrase: the morning
+            """.trimIndent()
+
+            lower.contains("she is not going anywhere") -> """
+                **Your sentence:** $cleanInput
+
+                **Urdu meaning:**
+                وہ کہیں نہیں جا رہی ہے۔
+
+                **Sentence type:** Negative
+
+                **Main parts:**
+                - **Subject:** She
+                - **Verb phrase:** is not going
+                  - Helping verb: is
+                  - Negative word: not
+                  - Main verb: going
+                - **Adverbial:** anywhere
+
+                **Tense or time meaning:** Present Continuous Negative
+                یہ کام ابھی نہیں ہو رہا ہے۔
+
+                **Simple explanation:**
+                اس میں "is" امدادی فعل اور "going" اصل فعل ہے۔ "anywhere" مفعول نہیں، بلکہ جگہ کا اشارہ (Adverbial) ہے۔
+
+                **Practice Question:**
+                Is he going somewhere?
+            """.trimIndent()
+
+            else -> parseSentenceLocally(cleanInput)
+        }
+    }
+
+    private fun translateWordToUrdu(word: String): String {
+        return when (word.lowercase()) {
+            "he" -> "وہ (مذکر)"
+            "she" -> "وہ (مؤنث)"
+            "i" -> "میں"
+            "you" -> "آپ / تم"
+            "we" -> "ہم"
+            "they" -> "وہ (جمع)"
+            "boy" -> "لڑکا"
+            "girl" -> "لڑکی"
+            "good" -> "اچھا / اچھی"
+            "bad" -> "برا"
+            "book" -> "کتاب"
+            "pen" -> "قلم"
+            "teacher" -> "استاد"
+            "student" -> "طالب علم"
+            "school" -> "اسکول"
+            "home" -> "گھر"
+            "tea" -> "چائے"
+            "water" -> "پانی"
+            "milk" -> "دودھ"
+            "car" -> "گاڑی"
+            "cat" -> "بلی"
+            "dog" -> "کتا"
+            "door" -> "دروازہ"
+            "window" -> "کھڑکی"
+            "open" -> "کھولنا"
+            "close" -> "بند کرنا"
+            "read" -> "پڑھنا"
+            "write" -> "لکھنا"
+            "play" -> "کھیلنا"
+            "speak" -> "بولنا"
+            "go" -> "جانا"
+            "come" -> "آنا"
+            else -> "$word کا معنی"
+        }
+    }
+
+    private fun generateQuestionUrduTranslation(aux: String, subj: String, rest: String, full: String): String {
+        val lowerFull = full.lowercase().trim().removeSuffix("?").removeSuffix(".")
+        if (lowerFull == "is he a good boy") return "کیا وہ ایک اچھا لڑکا ہے؟"
+        if (lowerFull == "is she a good girl") return "کیا وہ ایک اچھی لڑکی ہے؟"
+        if (lowerFull == "are you ready") return "کیا آپ تیار ہیں؟"
+        if (lowerFull == "does ali like tea") return "کیا علی کو چائے پسند ہے؟"
+        if (lowerFull == "did she go") return "کیا وہ چلی گئی؟"
+        if (lowerFull == "are they students") return "کیا وہ طالب علم ہیں؟"
+        if (lowerFull == "is this your book") return "کیا یہ آپ کی کتاب ہے؟"
+
+        val subjUrdu = when (subj.lowercase()) {
+            "he" -> "وہ"
+            "she" -> "وہ"
+            "you" -> "آپ"
+            "i" -> "میں"
+            "we" -> "ہم"
+            "they" -> "وہ"
+            "this" -> "یہ"
+            "that" -> "وہ"
+            "ali" -> "علی"
+            "fatima" -> "فاطمہ"
+            "the boy" -> "لڑکا"
+            "the girl" -> "لڑکی"
+            else -> subj
         }
 
-        val subject = words.firstOrNull() ?: "Subject"
-        val verb = words.getOrNull(1) ?: "Verb"
-        val complement = if (words.size > 2) words.drop(2).joinToString(" ") else "N/A"
+        val verbEnd = when (aux.lowercase()) {
+            "is" -> "ہے؟"
+            "are" -> "ہیں؟"
+            "am" -> "ہوں؟"
+            "was" -> "تھا؟"
+            "were" -> "تھے؟"
+            "does", "do" -> "ہے؟"
+            "did" -> "کیا؟"
+            else -> "ہے؟"
+        }
 
-        val wordBreakdown = words.mapIndexed { index, word ->
-            val role = when (index) {
-                0 -> "فاعل / اسم (Subject / Pronoun - اسم الفاعل / ضمير)"
-                1 -> "فعل / امدادی فعل (Main / Auxiliary Verb - الفعل الرئيسي / المساعد)"
-                else -> "مفعول / حرفِ جار (Object / Preposition - المفعول به / حرف جر)"
+        val restUrdu = when (rest.lowercase()) {
+            "a good boy" -> "ایک اچھا لڑکا"
+            "a good girl" -> "ایک اچھی لڑکی"
+            "a student" -> "ایک طالب علم"
+            "a teacher" -> "ایک استاد"
+            "ready" -> "تیار"
+            "happy" -> "خوش"
+            "busy" -> "مصروف"
+            "like tea" -> "کو چائے پسند"
+            "like milk" -> "کو دودھ پسند"
+            "go to school" -> "اسکول جاتا"
+            else -> rest
+        }
+
+        return "کیا $subjUrdu $restUrdu $verbEnd"
+    }
+
+    private fun generateCommandUrduTranslation(verb: String, objectPhrase: String, full: String): String {
+        val lowerFull = full.lowercase().trim().removeSuffix(".")
+        if (lowerFull == "open the door") return "دروازہ کھولیں۔"
+        if (lowerFull == "close the window") return "کھڑکی بند کریں۔"
+        if (lowerFull == "read the book") return "کتاب پڑھیں۔"
+        if (lowerFull == "come here") return "یہاں آئیں۔"
+        if (lowerFull == "sit down") return "بیٹھ جائیں۔"
+
+        val objUrdu = when (objectPhrase.lowercase()) {
+            "the door" -> "دروازہ"
+            "the window" -> "کھڑکی"
+            "the book" -> "کتاب"
+            "the pen" -> "قلم"
+            "the lesson" -> "سبق"
+            else -> objectPhrase
+        }
+
+        val verbUrdu = when (verb.lowercase()) {
+            "open" -> "کھولیں"
+            "close" -> "بند کریں"
+            "read" -> "پڑھیں"
+            "write" -> "لکھیں"
+            "clean" -> "صاف کریں"
+            "stop" -> "روکیں"
+            else -> "کریں"
+        }
+
+        return "$objUrdu $verbUrdu۔"
+    }
+
+    private fun generateStatementUrduTranslation(full: String, lower: String): String {
+        if (lower == "he is a good boy") return "وہ ایک اچھا لڑکا ہے۔"
+        if (lower == "she is a good girl") return "وہ ایک اچھی لڑکی ہے۔"
+        if (lower == "they are ready") return "وہ تیار ہیں۔"
+        if (lower == "i am a student") return "میں ایک طالب علم ہوں۔"
+        if (lower == "she plays football") return "وہ فٹ بال کھیلتی ہے۔"
+        if (lower == "i love english") return "مجھے انگریزی پسند ہے۔"
+
+        return "$full کا اردو مفہوم"
+    }
+
+    private fun makePracticeQuestion(aux: String, subj: String, rest: String): String {
+        return when (aux.lowercase()) {
+            "is" -> "Is she a good girl?"
+            "are" -> "Are they ready?"
+            "does" -> "Does Fatima drink milk?"
+            "did" -> "Did he finish the task?"
+            else -> "Is $subj ready?"
+        }
+    }
+
+    private fun parseSentenceLocally(cleanInput: String): String {
+        val trimmed = cleanInput.trim()
+        val lower = trimmed.lowercase().removeSuffix(".").removeSuffix("?")
+        val words = lower.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val hasQuestionMark = cleanInput.endsWith("?")
+
+        val auxVerbs = setOf("is", "am", "are", "was", "were", "do", "does", "did", "have", "has", "had", "will", "shall", "can", "could", "should", "would", "may", "might", "must")
+        val questionWords = setOf("what", "where", "when", "why", "who", "whom", "whose", "which", "how")
+
+        if (words.isEmpty()) {
+            return "Please enter a valid sentence."
+        }
+
+        if (words.size == 1) {
+            val word = words[0]
+            val meaning = translateWordToUrdu(word)
+            return """
+                **Your sentence:** $trimmed
+
+                **Urdu meaning:**
+                $meaning
+
+                **Sentence type:** Single Word
+
+                **Main parts:**
+                - **Word:** $trimmed
+                - **Meaning:** $meaning
+
+                **Simple explanation:**
+                یہ ایک منفرد لفظ ہے۔ اس کا جملے میں استعمال کے مطابق معنی طے ہوتا ہے۔
+            """.trimIndent()
+        }
+
+        val aux = words[0]
+        val isAuxQuestion = auxVerbs.contains(aux) || questionWords.contains(aux) || hasQuestionMark
+
+        if (isAuxQuestion && auxVerbs.contains(aux) && words.size >= 2) {
+            val helpingVerb = words[0].replaceFirstChar { it.uppercase() }
+            val subjectWord = words[1].replaceFirstChar { it.uppercase() }
+            val restOfSentence = words.drop(2).joinToString(" ")
+            
+            val sentenceType = "Question"
+            val tenseName = when (aux) {
+                "is", "am", "are" -> "Present Simple Question"
+                "does", "do" -> "Present Simple Question"
+                "was", "were", "did" -> "Past Simple Question"
+                "will", "shall" -> "Future Simple Question"
+                "have", "has" -> "Present Perfect Question"
+                else -> "Question"
             }
-            "- **$word**: $role"
-        }.joinToString("\n")
+
+            val urduTranslation = generateQuestionUrduTranslation(aux, subjectWord, restOfSentence, trimmed)
+
+            return """
+                **Your sentence:** $trimmed
+
+                **Urdu meaning:**
+                $urduTranslation
+
+                **Sentence type:** $sentenceType
+
+                **Main parts:**
+                - **Subject:** $subjectWord
+                - **Verb phrase:** $helpingVerb ${if (restOfSentence.startsWith("like") || restOfSentence.startsWith("play") || restOfSentence.startsWith("go")) restOfSentence.split(" ").first() else "(Linking verb)"}
+                  - Helping/Linking verb: $helpingVerb
+                - **Complement / Object:** ${if (restOfSentence.isNotBlank()) restOfSentence else "N/A"}
+
+                **Tense or time meaning:** $tenseName
+
+                **Simple explanation:**
+                جملے کے شروع میں "$helpingVerb" سوال بنانے کے لیے استعمال ہوا ہے۔ فاعل "$subjectWord" ہے۔
+
+                **Arabic Grammar Connection:**
+                عربی میں اس قسم کے سوال کے لیے "هَلْ" یا "أَ" کا استعمال ہوتا ہے۔
+                مثال: هَلْ هُوَ وَلَدٌ صَالِحٌ؟
+
+                **Common mistake to avoid:**
+                سوال بناتے وقت امدادی فعل ($helpingVerb) کو فاعل سے پہلے لانا ضروری ہے۔
+
+                **Practice Question:**
+                ${makePracticeQuestion(aux, subjectWord, restOfSentence)}
+            """.trimIndent()
+        }
+
+        val imperativeVerbs = setOf("open", "close", "read", "write", "sit", "stand", "go", "come", "bring", "listen", "speak", "clean", "stop", "help")
+        if (imperativeVerbs.contains(words[0])) {
+            val verb = words[0].replaceFirstChar { it.uppercase() }
+            val objectPhrase = words.drop(1).joinToString(" ")
+            val urduTr = generateCommandUrduTranslation(verb, objectPhrase, trimmed)
+            return """
+                **Your sentence:** $trimmed
+
+                **Urdu meaning:**
+                $urduTr
+
+                **Sentence type:** Command
+
+                **Main parts:**
+                - **Subject:** Understood "you" (آپ / تم)
+                - **Verb phrase:** $verb
+                - **Object / Detail:** ${if (objectPhrase.isNotBlank()) objectPhrase else "N/A"}
+
+                **Tense or time meaning:** Imperative
+
+                **Simple explanation:**
+                حکمیہ جملوں میں فاعل "you" چھپا ہوا (understood) ہوتا ہے۔
+
+                **Arabic Grammar Connection:**
+                عربی میں فعلِ امر استعمال ہوتا ہے۔ جیسے: افْتَحِ الْبَابَ.
+
+                **Common mistake to avoid:**
+                حکمیہ جملوں میں فاعل (You) لکھنے کی ضرورت نہیں ہوتی۔
+
+                **Practice Question:**
+                Close the window.
+            """.trimIndent()
+        }
+
+        val subjectCandidate = words.takeWhile { !auxVerbs.contains(it) && it != "not" }.joinToString(" ")
+        val rest = words.drop(subjectCandidate.split(" ").filter { it.isNotBlank() }.size)
+        val subjectStr = if (subjectCandidate.isNotBlank()) subjectCandidate.replaceFirstChar { it.uppercase() } else words[0].replaceFirstChar { it.uppercase() }
+        val restStr = if (rest.isNotEmpty()) rest.joinToString(" ") else ""
+        
+        val isNegative = words.contains("not") || words.contains("n't")
+        val sentenceType = if (isNegative) "Negative" else "Statement"
+        val urduTr = generateStatementUrduTranslation(trimmed, lower)
 
         return """
-            ### 1. **اصل جملہ (Original Sentence)**: "$cleanInput"
-            
-            ### 2. **تصحیح (Correction)**: جملہ ساخت کے لحاظ سے بالکل درست ہے۔
-            
-            ### 3. **جملے کی قسم (Sentence Type)**: $sentenceType
-            
-            ### 4. **زمانہ (Tense)**: $tense
-            
-            ### 5. **بنیادی اجزاء (Key Components)**:
-            - **فاعل (Subject)**: $subject
-            - **فعل (Main Verb)**: $verb
-            - **مفعول (Object / Complement)**: $complement
-            
-            ### 6. **لفظ بہ لفظ تجزیہ (Word-by-Word Breakdown)**:
-            $wordBreakdown
-            
-            ### 7. **اردو میں تفصیلی وضاحت (Urdu Explanation)**:
-            یہ جملہ انگریزی کے بنیادی اصول (فاعل + فعل + مفعول) کی پیروی کرتا ہے۔ اس میں ایک عمل یا حالت کو واضح طور پر بیان کیا گیا ہے۔
-            
-            ### 8. **عربی گرامر سے تقابل (Arabic Grammar Reference)**:
-            جیسے آپ نے عربی میں سیکھا ہے:
-            عربی زبان میں اسم سے شروع ہونے والے جملے کو (الجملة الاسمية) کہتے ہیں جس میں مبتدأ اور خبر ہوتی ہے اور فعل کے بغیر بھی مکمل ہوتا ہے (جیسے: اللهُ غَفُورٌ)، جبکہ انگریزی میں ہر خبر دینے والے جملے میں فعل (is/am/are) کا ہونا ضروری ہے (جیسے: God is Forgiving)۔
-            
-            ### 9. **مزید مثالیں (Additional Examples)**:
-            1. "$cleanInput today." (اردو: آج $cleanInput)
-            2. "They also said: $cleanInput" (اردو: انہوں نے بھی یہی کہا)
-            
-            ### 10. **عام غلطیاں (Common Mistakes)**:
-            اردو اور عربی بولنے والے اکثر انگریزی کے فعل حال میں "is/am/are" لگانا بھول جاتے ہیں۔
-            
-            *(نوٹ: تفصیلی گرامر تجزیہ مکمل ہوا).*
+            **Your sentence:** $trimmed
+
+            **Urdu meaning:**
+            $urduTr
+
+            **Sentence type:** $sentenceType
+
+            **Main parts:**
+            - **Subject:** $subjectStr
+            - **Verb phrase:** ${if (restStr.isNotBlank()) restStr.split(" ").take(2).joinToString(" ") else "Present verb"}
+            - **Complement / Object:** ${if (restStr.split(" ").size > 2) restStr.split(" ").drop(2).joinToString(" ") else "N/A"}
+
+            **Tense or time meaning:** Present / General Tense
+
+            **Simple explanation:**
+            اس جملے میں فاعل "$subjectStr" ہے جو عمل انجام دے رہا ہے یا جس کی حالت بیان کی گئی ہے۔
+
+            **Arabic Grammar Connection:**
+            انگریزی جملہ اسمیہ يا فعلیہ کے مطابق عربی کے مبتدأ اور خبر سے مشابہت رکھتا ہے۔
+
+            **Common mistake to avoid:**
+            انگریزی جملے میں فاعل کے بعد فعل کی صحیح حالت کا انتخاب ضروری ہے۔
+
+            **Practice Question:**
+            Is $subjectStr ready?
         """.trimIndent()
     }
 
@@ -347,7 +969,7 @@ object RetrofitClient {
         val apiKey = getApiKey()
         if (apiKey.isNotEmpty()) {
             try {
-                val prompt = "Check this answer for an Urdu learner: Q: \"$question\", A: \"$userAnswer\". Context: $ruleContext. Provide feedback in natural Urdu, and include a comparison starting with 'جیسے آپ نے عربی میں سیکھا ہے...'."
+                val prompt = "Check this answer for an Arabic/Urdu learner: Q: \"$question\", A: \"$userAnswer\". Context: $ruleContext. Provide feedback in simple English and natural Urdu. Evaluate if the answer is correct or not. Explain why simply. Then include an Arabic comparison starting exactly with 'Likewise in Arabic, you have learned...' (or 'جیسے آپ نے عربی میں سیکھا ہے...') explaining the grammar similarities or differences."
                 val request = GenerateContentRequest(contents = listOf(Content(parts = listOf(Part(text = prompt)))))
                 val response = callWithModelFallback(apiKey, request, MODEL_FLASH)
                 val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
@@ -361,95 +983,117 @@ object RetrofitClient {
     }
 
     suspend fun getTutorResponse(
-        history: List<Content>,
+        history: List<com.example.data.model.Content>,
         mode: String,
         language: String,
         userName: String,
         learnerProfileSummary: String? = null,
         isStudyModeOn: Boolean = false
-    ): String = withContext(Dispatchers.IO) {
+    ): com.example.data.model.TutorResponseResult = withContext(Dispatchers.IO) {
         val lastUserMessage = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
         val (detectedInputLang, effectiveResponseLang) = LanguageDetector.resolveEffectiveResponseLanguage(language, lastUserMessage)
 
+        val requestId = "req_" + java.util.UUID.randomUUID().toString().substring(0, 8)
         val apiKey = getApiKey()
         
-        if (apiKey.isNotEmpty()) {
-            try {
-                val profileContext = learnerProfileSummary ?: "Student profile: Level Beginner."
-                val studyModeStatusStr = if (isStudyModeOn) {
-                    "STUDY MODE IS ON. Provide structured educational support, explanations, examples, and practice exercises when useful."
-                } else {
-                    "STUDY MODE IS OFF (FRIENDLY CASUAL MODE). Speak naturally, warmly, and conversationally. Answer directly and briefly. DO NOT send full lesson templates, grammar sections, quizzes, or homework unless requested."
-                }
-                
-                val systemPrompt = """
-                    You are Lisan AI Tutor, a personalized English-learning tutor inside an app called Lisan Grammar.
-                    
-                    Learner Name: $userName
-                    Selected Response Language Setting: $language
-                    Detected Input Language of Latest Message: ${detectedInputLang.label}
-                    REQUIRED EFFECTIVE RESPONSE LANGUAGE FOR THIS TURN: $effectiveResponseLang
-                    STUDY MODE STATUS: $studyModeStatusStr
-                    
-                    $profileContext
-                    
-                    SYSTEM INSTRUCTIONS FOR THE TUTOR AI:
-                    Default state: Friendly Mode (Study Mode OFF).
-
-                    In Friendly Mode:
-                    - Speak naturally, warmly, and conversationally.
-                    - Answer the latest user message directly.
-                    - Keep responses short by default.
-                    - Do not impose lesson templates, grammar sections, quizzes, Arabic comparisons, or study plans.
-                    - Use the selected response language. If none is selected, detect the input language accurately.
-                    - Roman Urdu is Urdu written in Latin script, not English (e.g., "mujhe English seekhni hai", "kya haal hai").
-
-                    In Study Mode:
-                    - Give structured educational support when useful.
-                    - Adapt explanations to the learner’s level and past learning history.
-                    - Still answer the current question first.
-                    - Use teaching sections only when appropriate.
-                    - Offer practice only when it helps or the learner requests it.
-
-                    Language priority:
-                    1. Explicit language request in the current prompt.
-                    2. Selected language in the plus menu ($language).
-                    3. Auto-detected input language (${detectedInputLang.label}).
-                    4. User’s saved preference.
-
-                    LANGUAGE ENFORCEMENT FOR THIS TURN:
-                    - Effective Response Language is: $effectiveResponseLang.
-                    - If Effective Response Language is English: Respond PRIMARILY and FULLY in English.
-                    - If Effective Response Language is Urdu: Respond PRIMARILY and FULLY in natural Urdu script (اردو). Use English words only for grammar terms or examples.
-                    - If Effective Response Language is Arabic: Respond PRIMARILY and FULLY in Modern Standard Arabic (العربية).
-
-                    Roman Urdu is Urdu written in Latin script. Do not classify Roman Urdu as English. When Roman Urdu is detected in Auto mode, respond in natural Urdu script unless the user asks otherwise.
-
-                    Use learner history only when it is relevant to the current request. Never let history override the current question.
-
-                    For short or casual messages (e.g., "Hi", "Hello"), reply naturally and briefly in 1-2 sentences.
-                    Never use a fixed response template for all questions.
-                    Never answer an old question instead of the newest question.
-                    Never add image-generation or web-search features.
-                """.trimIndent()
-
-                val fullContents = listOf(Content(role = "user", parts = listOf(Part(text = systemPrompt)))) + history
-
-                val request = GenerateContentRequest(
-                    contents = fullContents,
-                    generationConfig = GenerationConfig(temperature = 0.5f)
-                )
-                
-                val response = callWithModelFallback(apiKey, request, MODEL_FLASH)
-                val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                if (!text.isNullOrBlank()) return@withContext text
-            } catch (e: Exception) {
-                Log.e(TAG, "getTutorResponse error: ${e.message}")
-            }
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
+            throw Exception("Gemini is not connected. Add a valid GEMINI_API_KEY in the app’s secure environment settings, then redeploy.")
         }
 
-        // Smart Local Response Fallback
-        generateSmartLocalTutorResponse(history, mode, language, userName, learnerProfileSummary)
+        val profileContext = learnerProfileSummary ?: "Student profile: Level Beginner."
+        val studyModeStatusStr = if (isStudyModeOn) {
+            "MODE: STUDY MODE (تفصیلی سبق). Goal: Provide detailed teaching."
+        } else {
+            "MODE: QUICK HELP (فوری مدد). Goal: Provide FAST, SHORT, and DIRECT answers. Minimal explanation."
+        }
+        
+        val systemPrompt = """
+            You are the teacher inside Lisan Grammar. You teach English grammar to Arabic-speaking learners in a friendly, simple, and respectful way.
+            Learner: $userName
+            Response Language: $effectiveResponseLang
+
+            Profile Context: $profileContext
+            $studyModeStatusStr
+
+            At the beginning of every new conversation, greet the learner with:
+            السلام عليكم ورحمة الله وبركاته
+            Then say:
+            Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar.
+
+            For every grammar lesson or explanation:
+            1. Explain the English rule in simple English.
+            2. Say exactly: "Likewise in Arabic, you have learned…" (or "كذلك في اللغة العربية، قد تعلمتم...")
+            3. Compare the English rule with the closest Arabic grammar rule or sentence structure.
+            4. Explain the similarities and differences clearly.
+            5. Give at least three English examples with Arabic translations.
+            6. Point out common mistakes Arabic speakers may make.
+            7. Give one short practice question.
+            8. Wait for the learner’s answer and correct it kindly.
+
+            LANGUAGE & TONE RULES:
+            - Use Modern Standard Arabic (العربية الفصحى) for Arabic explanations and translations.
+            - Do not use difficult grammar terms unless you explain them simply.
+            - Keep answers short, clear, encouraging, and suitable for beginners.
+            - If the learner writes Arabic, understand it and reply with Arabic support as needed.
+
+            STRICT LANGUAGE & FORMATTING MANDATES:
+            1. DO NOT MIX ENGLISH AND ARABIC/URDU WITHIN ONE SENTENCE OR LINE.
+               - Separate English and Arabic/Urdu into clearly labeled, distinct sections or paragraphs.
+               - English paragraphs must use English script only.
+               - Arabic/Urdu paragraphs (توضيح بالعربية) must use natural Arabic/Urdu script only.
+               - Each Arabic/Urdu translation must be directly below its English sentence on its own separate line.
+
+            2. NO MARKDOWN SYMBOLS IN LEARNER MESSAGES:
+               - Do NOT use raw asterisks (*), markdown headers (###), bold tags (**), blockquotes (>), or hashtags.
+               - Use clean, plain text section titles, simple numbers (1., 2.), and clean line breaks.
+               - Do NOT show internal reasoning or thinking process.
+        """.trimIndent()
+
+        val fullContents = listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = systemPrompt)))) + history
+        val modelName = MODEL_FLASH
+        val endpointCalled = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+        
+        val request = GenerateContentRequest(
+            contents = fullContents,
+            generationConfig = GenerationConfig(temperature = 0.5f)
+        )
+        
+        try {
+            val response = callWithModelFallback(apiKey, request, modelName)
+            val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: throw Exception("Gemini returned an empty response")
+            
+            PREVIOUS_USER_MESSAGE = lastUserMessage
+            PREVIOUS_ASSISTANT_RESPONSE = text
+
+            val debugMetadata = com.example.data.model.TutorDebugMetadata(
+                requestId = requestId,
+                submittedMessage = lastUserMessage,
+                provider = "Gemini",
+                modelName = modelName,
+                endpointCalled = endpointCalled,
+                httpStatus = "200 OK",
+                source = "gemini-live",
+                responseId = "gemini-res-" + java.util.UUID.randomUUID().toString().take(12),
+                errorMessage = null
+            )
+
+            com.example.data.model.TutorResponseResult(responseText = text, debugMetadata = debugMetadata)
+        } catch (e: Exception) {
+            Log.e(TAG, "getTutorResponse error: ${e.message}, falling back to smart local tutor response")
+            val fallbackText = generateSmartLocalTutorResponse(history, mode, language, userName, learnerProfileSummary)
+            val debugMetadata = com.example.data.model.TutorDebugMetadata(
+                requestId = requestId,
+                submittedMessage = lastUserMessage,
+                provider = "Lisan Smart Fallback",
+                modelName = "offline-smart-engine",
+                endpointCalled = endpointCalled,
+                httpStatus = "200 OK (Fallback)",
+                source = "local-smart-fallback",
+                responseId = "fallback-" + java.util.UUID.randomUUID().toString().take(12),
+                errorMessage = e.message
+            )
+            com.example.data.model.TutorResponseResult(responseText = fallbackText, debugMetadata = debugMetadata)
+        }
     }
 
     private fun generateSmartLocalTutorResponse(
@@ -484,105 +1128,160 @@ object RetrofitClient {
 
         // 3. Has vs Have
         if ((lowerMsg.contains("has") && lowerMsg.contains("have")) || lowerMsg.contains("difference between has and have")) {
-            return when (effectiveLang) {
-                "Urdu" -> """
-                    **'Has' اور 'Have' میں فرق:**
-                    
-                    - **Has**: واحد اسم یا ضمائر (*He, She, It*) کے ساتھ استعمال ہوتا ہے۔
-                      - *مثال:* He **has** a car. (اس کے پاس کار ہے۔)
-                      
-                    - **Have**: جمع اسم یا ضمائر (*I, You, We, They*) کے ساتھ استعمال ہوتا ہے۔
-                      - *مثال:* They **have** a house. (ان کے پاس گھر ہے۔)
-                      - *مثال:* I **have** two books. (میرے پاس دو کتابیں ہیں۔)
-                """.trimIndent()
-                "Arabic" -> """
-                    **الفرق بين Has و Have:**
-                    
-                    - **Has**: تستخدم مع المفرد (He, She, It والأسماء المفردة).
-                      - مثال: He **has** a car.
-                      
-                    - **Have**: تستخدم مع (I, You, We, They والأسماء الجمع).
-                      - مثال: They **have** a house.
-                      - مثال: I **have** a book.
-                """.trimIndent()
-                else -> """
-                    **'Has' vs 'Have' Usage:**
-                    
-                    - **Has**: Used with singular subjects (*He, She, It*, or singular nouns).
-                      - *Example:* He **has** a car.
-                      - *Example:* She **has** a new book.
-                      
-                    - **Have**: Used with plural subjects or pronouns (*I, You, We, They*, or plural nouns).
-                      - *Example:* They **have** a house.
-                      - *Example:* I **have** two books.
-                """.trimIndent()
-            }
+            return """
+Has vs Have Usage
+
+English Explanation
+
+We use Has with singular subjects (he, she, it, or singular nouns).
+We use Have with plural subjects and pronouns (I, you, we, they, or plural nouns).
+
+اردو وضاحت
+
+انگریزی میں Has واحد اسم یا ضمائر (he, she, it) کے ساتھ استعمال ہوتا ہے۔
+جبکہ Have جمع اسم یا ضمائر (I, you, we, they) کے ساتھ استعمال ہوتا ہے۔
+
+Examples
+
+Positive Examples
+
+1. He has a new book.
+   اس کے پاس ایک نئی کتاب ہے۔
+
+2. They have a house.
+   ان کے پاس ایک گھر ہے۔
+
+3. I have two pens.
+   میرے پاس دو قلم ہیں۔
+
+Arabic Grammar Connection
+
+In Arabic, possessive meaning is often shown with prepositions like لـ or عِنْدَ.
+
+عِنْدَهُ كِتَابٌ جَدِيدٌ.
+He has a new book.
+
+اردو وضاحت
+
+عربی میں ملکیت ظاہر کرنے کے لیے "عند" یا "ل" کا استعمال ہوتا ہے، جبکہ انگریزی میں Has اور Have استعمال ہوتے ہیں۔
+            """.trimIndent()
         }
 
         // 4. In / On / At (Prepositions)
         if (lowerMsg.contains("in on at") || lowerMsg.contains("preposition")) {
-            return when (effectiveLang) {
-                "Urdu" -> """
-                    **In, On, At کا استعمال:**
-                    
-                    - **At**: مخصوص وقت یا جگہ کے لیے (مثال: at 5 PM, at home).
-                    - **On**: دنوں اور تاریخوں کے لیے (مثال: on Monday, on July 4th).
-                    - **In**: مہینوں، سالوں اور شہروں کے لیے (مثال: in 2026, in London).
-                """.trimIndent()
-                "Arabic" -> """
-                    **استخدام At و On و In:**
-                    
-                    - **At**: للأوقات المحددة والأماكن (مثل: at 5 PM, at home).
-                    - **On**: للأيام والتواريخ (مثل: on Monday, on May 1st).
-                    - **In**: للشهور والسنوات والمدن (مثل: in 2026, in London).
-                """.trimIndent()
-                else -> """
-                    **In, On, At Quick Guide:**
-                    
-                    - **At**: Precise times & specific places (e.g., at 5 PM, at home).
-                    - **On**: Days and dates (e.g., on Monday, on July 4th).
-                    - **In**: Months, years, centuries & enclosed areas (e.g., in 2026, in London).
-                """.trimIndent()
-            }
+            return """
+Prepositions: In, On, At
+
+English Explanation
+
+We use At for specific times and exact locations.
+We use On for days and dates.
+We use In for months, years, cities, and long periods.
+
+اردو وضاحت
+
+انگریزی میں At مخصوص وقت یا جگہ کے لیے استعمال ہوتا ہے۔
+On دنوں اور تاریخوں کے لیے استعمال ہوتا ہے۔
+In مہینوں، سالوں، شہروں اور طویل دورانیے کے لیے استعمال ہوتا ہے۔
+
+Examples
+
+1. She arrives at 5 PM.
+   وہ شام پانچ بجے پہنچتی ہے۔
+
+2. I will see you on Monday.
+   میں آپ سے پیر کے دن ملوں گا۔
+
+3. They live in Lahore.
+   وہ لاہور میں رہتے ہیں۔
+            """.trimIndent()
         }
 
         // 5. Present Perfect Tense
         if (lowerMsg.contains("present perfect")) {
-            return when (effectiveLang) {
-                "Urdu" -> """
-                    **Present Perfect Tense (فعل حال مکمل):**
-                    
-                    یہ زمانہ ایسے کاموں کو بیان کرنے کے لیے استعمال ہوتا ہے جو حال ہی میں مکمل ہوئے ہوں۔
-                    
-                    **ساخت:** Subject + Has/Have + 3rd form of verb (V3)
-                    
-                    **مثالیں:**
-                    - I **have finished** my homework. (میں اپنا کام مکمل کر چکا ہوں۔)
-                    - She **has arrived**. (وہ پہنچ چکی ہے۔)
-                """.trimIndent()
-                "Arabic" -> """
-                    **المضارع التام (Present Perfect Tense):**
-                    
-                    يعبر عن حدث اكتمل في الماضي وله ارتباط بالحاضر.
-                    
-                    **التركيب:** Subject + Has/Have + Past Participle (V3)
-                    
-                    **أمثلة:**
-                    - I **have finished** my homework.
-                    - She **has arrived**.
-                """.trimIndent()
-                else -> """
-                    **Present Perfect Tense:**
-                    
-                    Used for actions completed in the recent past that have a connection to the present.
-                    
-                    **Structure:** Subject + Has/Have + Past Participle (V3)
-                    
-                    **Examples:**
-                    - I **have finished** my assignment.
-                    - She **has arrived**.
-                """.trimIndent()
-                }
+            return """
+Present Perfect Tense
+
+English Explanation
+
+We use the present perfect tense for actions completed in the recent past that have a connection to the present time.
+
+اردو وضاحت
+
+فعل حال مکمل ایسے کاموں کے لیے استعمال ہوتا ہے جو حال ہی میں مکمل ہوئے ہوں اور ان کا اثر یا تعلق موجودہ وقت سے ہو۔
+
+When We Use It
+
+1. Actions completed recently
+2. Life experiences up to now
+
+اردو میں استعمال
+
+1. حال ہی میں مکمل ہونے والے کام
+2. ماضی کے وہ تجربات جن کا تعلق حال سے ہے
+
+Sentence Pattern
+
+Positive:
+Subject + has / have + 3rd form of verb + object
+
+Negative:
+Subject + has not / have not + 3rd form of verb + object
+
+Question:
+Has / Have + subject + 3rd form of verb + object?
+
+Examples
+
+Positive Examples
+
+1. I have finished my homework.
+   میں اپنا کام مکمل کر چکا ہوں۔
+
+2. She has arrived in Lahore.
+   وہ لاہور پہنچ چکی ہے۔
+
+Negative Examples
+
+1. He has not written the report.
+   اس نے رپورٹ نہیں لکھی ہے۔
+
+2. They have not eaten dinner.
+   انہوں نے کھانا نہیں کھایا ہے۔
+
+Question Examples
+
+1. Have you completed the lesson?
+   کیا آپ نے سبق مکمل کر لیا ہے؟
+
+2. Has she called you?
+   کیا اس نے آپ کو فون کیا ہے؟
+
+Common Mistakes
+
+1. Incorrect: I have completed my work yesterday.
+   Correct: I completed my work yesterday.
+   اردو وضاحت: جب وقت (yesterday) واضح ہو تو Present Perfect کے بجائے Past Simple استعمال کریں۔
+
+Arabic Grammar Connection
+
+In Arabic, a completed past action with present relevance is often expressed using قَدْ with فعل ماضٍ.
+
+قَدْ أَتَمَمْتُ الْوَاجِبَ.
+I have completed the homework.
+
+اردو وضاحت
+
+عربی میں "قد" کے ساتھ فعلِ ماضی استعمال کرنے سے حالیہ مکمل شدہ کام کا مفہوم پیدا ہوتا ہے جو انگریزی کے Present Perfect Tense سے مشابہ ہے۔
+
+Practice
+
+1. Complete the sentence: She ___ (has / have) finished her work.
+2. Make this negative: They have left the room.
+3. Make a question: You have read this book.
+
+Reply with your answers, and I will check them.
+            """.trimIndent()
         }
 
         // 6. Sentence Correction request

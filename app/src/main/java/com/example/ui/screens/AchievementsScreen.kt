@@ -16,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,8 +30,7 @@ fun AchievementsScreen(
     modifier: Modifier = Modifier
 ) {
     val streak by viewModel.dailyStreak.collectAsState()
-    val score by viewModel.quizScore.collectAsState()
-    
+    val achievements by viewModel.achievements.collectAsState()
     val scrollState = rememberScrollState()
 
     Column(
@@ -42,49 +40,139 @@ fun AchievementsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Achievements Header
-        EditorialCard {
+        // 1. Achievements Header (Improved)
+        EditorialCard(containerColor = EditorialPrimary.copy(alpha = 0.05f), borderColor = EditorialPrimary.copy(alpha = 0.2f)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "ACHIEVEMENTS • کامیابیاں",
-                        fontSize = 10.sp,
+                        text = "ACHIEVEMENTS",
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp,
+                        letterSpacing = 2.0.sp,
                         color = EditorialTextMuted
                     )
                     Text(
                         text = "آپ کے تمغے اور ریکارڈز",
-                        fontSize = 18.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = EditorialPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "ہر سبق کے ساتھ آپ اپنی کامیابیوں کا ایک نیا سنگ میل عبور کرتے ہیں۔",
+                        fontSize = 13.sp,
+                        color = EditorialTextSecondary
                     )
                 }
                 Icon(
                     imageVector = Icons.Default.EmojiEvents,
                     contentDescription = null,
                     tint = Color(0xFFFFD700),
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(60.dp)
                 )
             }
         }
 
-        // 2. Streak Milestone
+        // 2. Streak Milestone Card
         StreakMilestoneCard(streak)
 
-        // 3. Badges Grid
-        EditorialSectionTitle(text = "UNLOCKED BADGES")
-        BadgeGrid()
+        // 3. Unlocked Badges Section
+        val unlockedList = achievements.filter { it.isUnlocked }
+        if (unlockedList.isNotEmpty()) {
+            EditorialSectionTitle(text = "UNLOCKED BADGES (کھلے ہوئے تمغے)")
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                unlockedList.chunked(2).forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowItems.forEach { ach ->
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = Color(0xFFE8F5E9),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.5.dp, Color(0xFF81C784))
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(text = ach.icon, fontSize = 32.sp)
+                                    Text(
+                                        text = ach.title,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EditorialPrimary
+                                    )
+                                    Text(
+                                        text = ach.description,
+                                        fontSize = 11.sp,
+                                        color = EditorialTextSecondary,
+                                        lineHeight = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                        if (rowItems.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
 
-        // 4. Milestone Progress Bars
-        EditorialSectionTitle(text = "NEXT GOALS")
-        MilestoneProgressBar(label = "Master 50 Topics", progress = 0.8f, current = "40/50")
-        MilestoneProgressBar(label = "Answer 500 Questions", progress = 0.3f, current = "150/500")
-        MilestoneProgressBar(label = "30 Day Streak", progress = streak / 30f, current = "$streak/30")
+        // 4. Milestone Progress / Locked Goals
+        val lockedList = achievements.filter { !it.isUnlocked }
+        if (lockedList.isNotEmpty()) {
+            EditorialSectionTitle(text = "NEXT GOALS (اگلے اہداف)")
+            lockedList.forEach { ach ->
+                EditorialCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = ach.icon, fontSize = 20.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = ach.title,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialPrimary
+                                )
+                            }
+                            Text(
+                                text = "${ach.currentProgress}/${ach.maxProgress}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple
+                            )
+                        }
+                        Text(
+                            text = ach.description,
+                            fontSize = 11.sp,
+                            color = EditorialTextSecondary
+                        )
+                        LinearProgressIndicator(
+                            progress = { ach.currentProgress.toFloat() / ach.maxProgress.coerceAtLeast(1) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(CircleShape),
+                            color = EditorialAccentPurple,
+                            trackColor = EditorialContainer
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -105,67 +193,6 @@ private fun StreakMilestoneCard(streak: Int) {
                 Text(text = "روزانہ کا تسلسل (Daily Streak)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
                 Text(text = "آپ نے مسلسل $streak دن پڑھائی کی ہے!", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
             }
-        }
-    }
-}
-
-@Composable
-private fun BadgeGrid() {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            BadgeItem("Early Bird", Icons.Default.WbTwilight, Color(0xFF90CAF9), Modifier.weight(1f))
-            BadgeItem("Grammar Pro", Icons.Default.AutoStories, Color(0xFFA5D6A7), Modifier.weight(1f))
-            BadgeItem("Quiz Master", Icons.Default.FactCheck, Color(0xFFCE93D8), Modifier.weight(1f))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            BadgeItem("Fast Learner", Icons.Default.Bolt, Color(0xFFFFCC80), Modifier.weight(1f))
-            BadgeItem("Consistent", Icons.Default.TrendingUp, Color(0xFFB0BEC5), Modifier.weight(1f))
-            BadgeItem("Translator", Icons.Default.Translate, Color(0xFFF48FB1), Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun BadgeItem(name: String, icon: ImageVector, color: Color, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        color = EditorialSurface,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, EditorialBorder)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Surface(
-                color = color.copy(alpha = 0.15f),
-                shape = CircleShape,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
-                }
-            }
-            Text(text = name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-        }
-    }
-}
-
-@Composable
-private fun MilestoneProgressBar(label: String, progress: Float, current: String) {
-    EditorialCard {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = label, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                Text(text = current, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
-            }
-            LinearProgressIndicator(
-                progress = { progress.coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-                color = EditorialAccentPurple,
-                trackColor = EditorialContainer
-            )
         }
     }
 }

@@ -72,5 +72,6 @@ data class LearnerProfile(
     val totalInteractions: Int = 0,
     val correctAnswersCount: Int = 0,
     val totalQuestionsAnswered: Int = 0,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val interactionTimestamps: List<Long> = emptyList()
 )

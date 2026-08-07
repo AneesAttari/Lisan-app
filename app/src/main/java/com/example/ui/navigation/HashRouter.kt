@@ -1,0 +1,101 @@
+package com.example.ui.navigation
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * A Hash-based router designed for Lisan Grammar.
+ * It simulates a single-page application (SPA) routing mechanism
+ * using web-like hash URLs to navigate between Android Jetpack Compose screens.
+ */
+object HashRouter {
+    // Current active route path
+    private val _currentRoute = MutableStateFlow("#/lessons")
+    val currentRoute: StateFlow<String> = _currentRoute.asStateFlow()
+
+    // Navigation history to allow back-navigation if needed
+    private val history = mutableListOf("#/lessons")
+
+    /**
+     * Navigates to a new hash route.
+     * Supported routes:
+     * - `#/lessons` (Lesson Dashboard)
+     * - `#/analyzer` (Sentence Analyzer)
+     * - `#/tutor` (AI Tutor Chat)
+     * - `#/voice-tutor` (Voice Conversational Tutor)
+     * - `#/idioms` (Idioms & Expressions)
+     * - `#/library` (My Library)
+     * - `#/daily` (Lisan Daily)
+     * - `#/quizzes` (Quizzes)
+     * - `#/revision` (Revision Planner)
+     * - `#/achievements` (Achievements)
+     * - `#/progress` (Progress)
+     * - `#/settings` (Settings)
+     * - `#/help` (Help & Feedback)
+     */
+    fun navigate(route: String) {
+        val cleanRoute = if (route.startsWith("#")) route else "#/$route"
+        if (_currentRoute.value != cleanRoute) {
+            _currentRoute.value = cleanRoute
+            if (history.isEmpty() || history.last() != cleanRoute) {
+                history.add(cleanRoute)
+            }
+        }
+    }
+
+    /**
+     * Navigates back to the previous route in the history.
+     */
+    fun goBack(): Boolean {
+        return if (history.size > 1) {
+            history.removeAt(history.lastIndex)
+            _currentRoute.value = history.last()
+            true
+        } else {
+            false
+        }
+    }
+
+    /**
+     * Maps a web-like hash route to a MainActivity tab index.
+     */
+    fun routeToTab(route: String): Int {
+        return when (route) {
+            "#/lessons" -> 0
+            "#/analyzer" -> 1
+            "#/tutor" -> 2
+            "#/idioms" -> 3
+            "#/library" -> 4
+            "#/daily" -> 5
+            "#/quizzes" -> 6
+            "#/revision" -> 7
+            "#/achievements" -> 8
+            "#/progress" -> 9
+            "#/settings" -> 10
+            "#/help" -> 11
+            else -> 0
+        }
+    }
+
+    /**
+     * Maps a MainActivity tab index to a web-like hash route.
+     */
+    fun tabToRoute(tab: Int): String {
+        return when (tab) {
+            0 -> "#/lessons"
+            1 -> "#/analyzer"
+            2 -> "#/tutor"
+            3 -> "#/idioms"
+            4 -> "#/library"
+            5 -> "#/daily"
+            6 -> "#/quizzes"
+            7 -> "#/revision"
+            8 -> "#/achievements"
+            9 -> "#/progress"
+            10 -> "#/settings"
+            11 -> "#/help"
+            else -> "#/lessons"
+        }
+    }
+}
