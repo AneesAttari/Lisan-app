@@ -30,6 +30,17 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ScrollState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.testTag
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.border
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -175,7 +186,8 @@ internal fun bidiIsolate(text: String): String {
 private fun parseMarkdownToAnnotatedString(
     text: String,
     textColor: Color,
-    boldColor: Color
+    boldColor: Color,
+    codeColor: Color = boldColor
 ): AnnotatedString {
     return buildAnnotatedString {
         var i = 0
@@ -224,7 +236,7 @@ private fun parseMarkdownToAnnotatedString(
                     i++
                 }
                 val content = text.substring(start, i)
-                pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = EditorialAccentPurple, fontWeight = FontWeight.SemiBold))
+                pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = codeColor, fontWeight = FontWeight.SemiBold))
                 append(bidiIsolate(content))
                 pop()
                 if (i < len) i += 1
@@ -750,4 +762,65 @@ fun EditorialDarkPracticeBox(
             }
         }
     }
+}
+
+/**
+ * Universal WhatsApp-Style Narrow Key / Scroll To Bottom Floating Action Button
+ */
+@Composable
+fun ScrollToBottomFAB(
+    visible: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(),
+        exit = fadeOut() + scaleOut(),
+        modifier = modifier
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = EditorialTheme.colors.surface,
+            contentColor = EditorialTheme.colors.accentPurple,
+            shadowElevation = 6.dp,
+            border = BorderStroke(1.dp, EditorialTheme.colors.border),
+            modifier = Modifier
+                .size(44.dp)
+                .testTag("scroll_to_bottom_button")
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardDoubleArrowDown,
+                    contentDescription = "Scroll to Bottom",
+                    tint = EditorialTheme.colors.accentPurple,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ScrollToBottomFAB(
+    scrollState: ScrollState,
+    modifier: Modifier = Modifier
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val isVisible by remember {
+        derivedStateOf {
+            scrollState.maxValue > 100 && scrollState.value < scrollState.maxValue - 100
+        }
+    }
+
+    ScrollToBottomFAB(
+        visible = isVisible,
+        onClick = {
+            coroutineScope.launch {
+                scrollState.animateScrollTo(scrollState.maxValue)
+            }
+        },
+        modifier = modifier
+    )
 }

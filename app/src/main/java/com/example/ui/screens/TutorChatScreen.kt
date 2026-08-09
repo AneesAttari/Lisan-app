@@ -87,6 +87,7 @@ fun TutorChatScreen(
     val activeTutorMode by viewModel.activeTutorMode.collectAsState()
     val activeLanguage by viewModel.activeLanguage.collectAsState()
     val isStudyModeOn by viewModel.isStudyModeOn.collectAsState()
+    val isPersonalizationEnabled by viewModel.isStudyPersonalizationEnabled.collectAsState()
     val detectedInputLanguage by viewModel.detectedInputLanguage.collectAsState()
     val effectiveResponseLanguage by viewModel.effectiveResponseLanguage.collectAsState()
     val chatHistory by viewModel.chatHistory.collectAsState()
@@ -574,7 +575,7 @@ fun TutorChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFFAFAF9))
+                    .background(EditorialBackground)
                     .imePadding()
             ) {
                 // PREMIUM HEADER BAR
@@ -587,10 +588,10 @@ fun TutorChatScreen(
                 ) {
                     // Back Button (circular)
                     Surface(
-                        color = Color.White,
+                        color = EditorialSurface,
                         shape = CircleShape,
                         shadowElevation = 2.dp,
-                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                        border = BorderStroke(1.dp, EditorialBorder),
                         modifier = Modifier
                             .size(44.dp)
                             .clickable {
@@ -610,10 +611,10 @@ fun TutorChatScreen(
 
                     // Title pill (soft rounded)
                     Surface(
-                        color = Color.White,
+                        color = EditorialSurface,
                         shape = RoundedCornerShape(20.dp),
                         shadowElevation = 1.dp,
-                        border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+                        border = BorderStroke(1.dp, EditorialBorder),
                         modifier = Modifier.height(40.dp)
                     ) {
                         Row(
@@ -646,10 +647,10 @@ fun TutorChatScreen(
                     ) {
                         // New Chat Button
                         Surface(
-                            color = Color.White,
+                            color = EditorialSurface,
                             shape = CircleShape,
                             shadowElevation = 2.dp,
-                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                            border = BorderStroke(1.dp, EditorialBorder),
                             modifier = Modifier
                                 .size(44.dp)
                                 .clickable { viewModel.clearChat() }
@@ -667,10 +668,10 @@ fun TutorChatScreen(
 
                         // Sliders/Settings Icon (circular)
                         Surface(
-                            color = Color.White,
+                            color = EditorialSurface,
                             shape = CircleShape,
                             shadowElevation = 2.dp,
-                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                            border = BorderStroke(1.dp, EditorialBorder),
                             modifier = Modifier
                                 .size(44.dp)
                                 .clickable { showTutorPreferences = true }
@@ -756,14 +757,14 @@ fun TutorChatScreen(
 
                                     Surface(
                                         modifier = Modifier.weight(1f, fill = false),
-                                        color = if (isUser) EditorialPrimary else Color(0xFFF3F2FF),
+                                        color = if (isUser) EditorialPrimary else EditorialContainer,
                                         shape = RoundedCornerShape(
                                             topStart = 20.dp,
                                             topEnd = 20.dp,
                                             bottomStart = if (isUser) 20.dp else 4.dp,
                                             bottomEnd = if (isUser) 4.dp else 20.dp
                                         ),
-                                        border = if (isUser) null else BorderStroke(1.dp, Color(0xFFE2E8F0))
+                                        border = if (isUser) null else BorderStroke(1.dp, EditorialBorder)
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
                                             Row(
@@ -806,15 +807,27 @@ fun TutorChatScreen(
                                             }
 
                                             Spacer(modifier = Modifier.height(4.dp))
+                                            val recommendationRoute = if (!isUser) parseRecommendationRoute(textContent) else null
+                                            val displayableText = if (!isUser) cleanRecommendationTags(textContent) else textContent
+
                                             FormattedMessageContent(
-                                                text = textContent,
+                                                text = displayableText,
                                                 isUser = isUser
                                             )
                                             
                                             if (!isUser) {
+                                                recommendationRoute?.let { route ->
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                    RecommendationActionChip(
+                                                        route = route,
+                                                        onClick = {
+                                                            com.example.ui.navigation.HashRouter.navigate(route)
+                                                        }
+                                                    )
+                                                }
                                                 Spacer(modifier = Modifier.height(8.dp))
                                                 TutorMessageControls(
-                                                    text = textContent,
+                                                    text = displayableText,
                                                     messageId = System.identityHashCode(message).toString(),
                                                     viewModel = viewModel
                                                 )
@@ -884,54 +897,32 @@ fun TutorChatScreen(
                             }
                         }
                     }
-                }
 
-                // Conditional Scroll to bottom button (WhatsApp style)
-                val coroutineScope = rememberCoroutineScope()
-                val isScrollToBottomVisible by remember {
-                    derivedStateOf {
-                        val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-                        if (totalChatItems <= 1) false
-                        else {
-                            lastVisibleItem == null || lastVisibleItem.index < totalChatItems - 2
+                    // Conditional Scroll to bottom button (WhatsApp style floating over chat)
+                    val coroutineScope = rememberCoroutineScope()
+                    val isScrollToBottomVisible by remember {
+                        derivedStateOf {
+                            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+                            if (totalChatItems <= 1) false
+                            else {
+                                lastVisibleItem == null || lastVisibleItem.index < totalChatItems - 1
+                            }
                         }
                     }
-                }
 
-                AnimatedVisibility(
-                    visible = isScrollToBottomVisible,
-                    enter = fadeIn() + scaleIn(),
-                    exit = fadeOut() + scaleOut(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .wrapContentHeight()
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        FloatingActionButton(
-                            onClick = {
-                                coroutineScope.launch {
-                                    if (totalChatItems > 0) {
-                                        listState.animateScrollToItem(totalChatItems - 1)
-                                    }
+                    ScrollToBottomFAB(
+                        visible = isScrollToBottomVisible,
+                        onClick = {
+                            coroutineScope.launch {
+                                if (totalChatItems > 0) {
+                                    listState.animateScrollToItem(totalChatItems - 1)
                                 }
-                            },
-                            containerColor = EditorialPrimary,
-                            contentColor = Color.White,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(16.dp)
-                                .size(44.dp)
-                                .testTag("scroll_to_bottom_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.KeyboardDoubleArrowDown,
-                                contentDescription = "Scroll to Bottom",
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                    )
                 }
 
                 if (!isNetworkAvailable) {
@@ -961,9 +952,9 @@ fun TutorChatScreen(
 
                 // STICKY COMPOSER BAR (Directly above keyboard)
                 Surface(
-                    color = Color.White,
+                    color = EditorialSurface,
                     shadowElevation = 8.dp,
-                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    border = BorderStroke(1.dp, EditorialBorder),
                     modifier = Modifier
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.ime)
@@ -1104,7 +1095,7 @@ fun TutorChatScreen(
                             ) {
                                 // Plus Button [ + ]
                                 Surface(
-                                    color = Color(0xFFF3F4F6),
+                                    color = EditorialContainer,
                                     shape = CircleShape,
                                     modifier = Modifier
                                         .size(40.dp)
@@ -1123,9 +1114,9 @@ fun TutorChatScreen(
 
                                 // Input Field [ Type a message… ]
                                 Surface(
-                                    color = Color(0xFFF9FAFB),
+                                    color = EditorialContainer,
                                     shape = RoundedCornerShape(20.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                    border = BorderStroke(1.dp, EditorialBorder),
                                     modifier = Modifier
                                         .weight(1f)
                                         .heightIn(min = 40.dp)
@@ -1189,7 +1180,7 @@ fun TutorChatScreen(
 
                                 // Microphone Button [ 🎤 ]
                                 Surface(
-                                    color = Color(0xFFF3F4F6),
+                                    color = EditorialContainer,
                                     shape = CircleShape,
                                     modifier = Modifier
                                         .size(40.dp)
@@ -1235,7 +1226,7 @@ fun TutorChatScreen(
                                 if (inputText.isBlank()) {
                                     // Blue Conversational Voice Tutor Button [ 🎙️ ]
                                     Surface(
-                                        color = Color(0xFF2563EB),
+                                        color = EditorialAccentPurple,
                                         shape = CircleShape,
                                         modifier = Modifier
                                             .size(40.dp)
@@ -1255,7 +1246,7 @@ fun TutorChatScreen(
                                     // Send Button [ Send ]
                                     val isSendEnabled = !isChatLoading && isNetworkAvailable
                                     Surface(
-                                        color = if (isSendEnabled) EditorialAccentPurple else Color(0xFFE5E7EB),
+                                        color = if (isSendEnabled) EditorialAccentPurple else EditorialBorder,
                                         shape = CircleShape,
                                         modifier = Modifier
                                             .size(40.dp)
@@ -1278,7 +1269,7 @@ fun TutorChatScreen(
                                                 Icon(
                                                     imageVector = Icons.AutoMirrored.Filled.Send,
                                                     contentDescription = "Send",
-                                                    tint = if (isSendEnabled) Color.White else Color(0xFF9CA3AF),
+                                                    tint = if (isSendEnabled) Color.White else EditorialTextMuted,
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                             }
@@ -1408,33 +1399,108 @@ fun TutorChatScreen(
 
                             HorizontalDivider(color = EditorialBorder)
 
-                            // Study Mode Toggle
-                            Row(
+                            // Study Mode & Personalization Settings Block
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "Study Mode • گرامر موڈ",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EditorialPrimary
-                                    )
-                                    Text(
-                                        "Structured grammar explanations and exercises",
-                                        fontSize = 11.sp,
-                                        color = EditorialTextSecondary
+                                // 1. Study Mode Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 48.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                "Study Mode • گرامر موڈ",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EditorialPrimary
+                                            )
+                                            Surface(
+                                                color = if (isStudyModeOn) EditorialAccentPurple else Color(0xFF94A3B8),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isStudyModeOn) Icons.Default.CheckCircle else Icons.Default.Close,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                    Text(
+                                                        text = if (isStudyModeOn) "Active" else "Inactive",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            "Study Mode gives your tutor a focused teaching style and can use your selected learning progress to personalize practice.",
+                                            fontSize = 11.sp,
+                                            color = EditorialTextSecondary,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Switch(
+                                        checked = isStudyModeOn,
+                                        onCheckedChange = { viewModel.setStudyMode(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = EditorialAccentPurple
+                                        ),
+                                        modifier = Modifier.testTag("chat_study_mode_switch")
                                     )
                                 }
-                                Switch(
-                                    checked = isStudyModeOn,
-                                    onCheckedChange = { viewModel.setStudyMode(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = EditorialAccentPurple
+
+                                // 2. Personalization Switch Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 48.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "Personalize using my progress • میری کارکردگی کا استعمال",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = EditorialPrimary
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            "Uses your real stats, streaks, lessons completed, and weak areas to customize lessons. If disabled, tutor remains strict but uses only active chat text.",
+                                            fontSize = 11.sp,
+                                            color = EditorialTextSecondary,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Switch(
+                                        checked = isPersonalizationEnabled,
+                                        onCheckedChange = { viewModel.setStudyPersonalizationEnabled(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = EditorialAccentPurple
+                                        ),
+                                        modifier = Modifier.testTag("chat_personalization_switch")
                                     )
-                                )
+                                }
                             }
 
                             HorizontalDivider(color = EditorialBorder)
@@ -1608,44 +1674,107 @@ fun TutorChatScreen(
                             border = BorderStroke(1.dp, EditorialBorderAccent),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // Study Mode Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 48.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "Study Mode",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EditorialPrimary
+                                            )
+                                            Surface(
+                                                color = if (isStudyModeOn) EditorialAccentPurple else Color(0xFF94A3B8),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isStudyModeOn) Icons.Default.CheckCircle else Icons.Default.Close,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                    Text(
+                                                        text = if (isStudyModeOn) "Active" else "Inactive",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "Study Mode",
-                                            fontSize = 14.sp,
+                                            text = "Enables structured grammar explanations",
+                                            fontSize = 11.sp,
+                                            color = EditorialTextSecondary
+                                        )
+                                    }
+                                    Switch(
+                                        checked = isStudyModeOn,
+                                        onCheckedChange = { viewModel.setStudyMode(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = EditorialAccentPurple
+                                        ),
+                                        modifier = Modifier.testTag("study_mode_switch")
+                                    )
+                                }
+
+                                HorizontalDivider(color = EditorialBorder.copy(alpha = 0.5f))
+
+                                // Personalize Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 48.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Personalize using progress",
+                                            fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = EditorialPrimary
                                         )
-                                        Surface(
-                                            color = if (isStudyModeOn) EditorialAccentPurple else EditorialTextMuted.copy(alpha = 0.2f),
-                                            shape = RoundedCornerShape(4.dp)
-                                        ) {
-                                            Text(
-                                                text = if (isStudyModeOn) "On" else "Off",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isStudyModeOn) Color.White else EditorialTextMuted,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Align tutor with your real level and weaknesses",
+                                            fontSize = 11.sp,
+                                            color = EditorialTextSecondary
+                                        )
                                     }
+                                    Switch(
+                                        checked = isPersonalizationEnabled,
+                                        onCheckedChange = { viewModel.setStudyPersonalizationEnabled(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = EditorialAccentPurple
+                                        ),
+                                        modifier = Modifier.testTag("plus_personalization_switch")
+                                    )
                                 }
-                                Switch(
-                                    checked = isStudyModeOn,
-                                    onCheckedChange = { viewModel.setStudyMode(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = EditorialAccentPurple
-                                    ),
-                                    modifier = Modifier.testTag("study_mode_switch")
-                                )
                             }
                         }
 
@@ -2154,7 +2283,7 @@ fun GeneratingLightingGlow(language: String) {
     )
 
     Surface(
-        color = Color(0xFFF3F2FF),
+        color = EditorialContainer,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp),
         border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = alpha)),
         modifier = Modifier.fillMaxWidth(0.6f)
@@ -2265,7 +2394,7 @@ fun FormattedMessageContent(text: String, isUser: Boolean) {
                 )
             } else if (line.startsWith("Positive:") || line.startsWith("Negative:") || line.startsWith("Question:")) {
                 Surface(
-                    color = Color(0xFFF1F5F9),
+                    color = EditorialContainer,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                 ) {
@@ -2289,6 +2418,82 @@ fun FormattedMessageContent(text: String, isUser: Boolean) {
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+        }
+    }
+}
+
+fun cleanRecommendationTags(text: String): String {
+    return text.replace(Regex("\\[RECOMMEND:\\s*[^]]+\\]"), "").trim()
+}
+
+fun parseRecommendationRoute(text: String): String? {
+    val match = Regex("\\[RECOMMEND:\\s*([^]]+)\\]").find(text)
+    val route = match?.groupValues?.get(1)?.trim() ?: return null
+    
+    // Strict allowlist validation of in-app navigation routes
+    val allowedRoutes = setOf(
+        "#/lessons",
+        "#/analyzer",
+        "#/quizzes",
+        "#/revision",
+        "#/daily",
+        "#/picture-vocabulary",
+        "#/pronunciation",
+        "#/idioms",
+        "#/lisan-journey",
+        "#/progress"
+    )
+    return if (allowedRoutes.contains(route)) route else null
+}
+
+@Composable
+fun RecommendationActionChip(
+    route: String,
+    onClick: () -> Unit
+) {
+    val (label, icon) = when {
+        route.contains("lessons") -> "Practice Lessons • اسباق کی مشق" to Icons.Default.PlayArrow
+        route.contains("analyzer") -> "Analyze Sentences • جملوں کا تجزیہ" to Icons.Default.Settings
+        route.contains("quizzes") -> "Take Grammar Quiz • کوئز شروع کریں" to Icons.Default.CheckCircle
+        route.contains("revision") -> "Revision Planner • دہرائی کا منصوبہ" to Icons.Default.PlayArrow
+        route.contains("daily") -> "Daily Challenges • روزانہ کے چیلنجز" to Icons.Default.Add
+        route.contains("picture-vocabulary") -> "Picture Vocabulary • تصویری ذخیرہ الفاظ" to Icons.Default.Add
+        route.contains("pronunciation") -> "Practice Pronunciation • تلفظ کی مشق" to Icons.Default.VolumeUp
+        route.contains("idioms") -> "Learn Idioms • محاورے سیکھیں" to Icons.Default.PlayArrow
+        route.contains("lisan-journey") -> "View Achievements • کامیابیاں دیکھیں" to Icons.Default.CheckCircle
+        route.contains("progress") -> "Progress Dashboard • کارکردگی کا گراف" to Icons.Default.Settings
+        else -> "Go to Section • سیکشن پر جائیں" to Icons.Default.PlayArrow
+    }
+
+    Surface(
+        onClick = onClick,
+        color = EditorialAccentPurple.copy(alpha = 0.08f),
+        border = BorderStroke(1.2.dp, EditorialAccentPurple),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .defaultMinSize(minHeight = 48.dp)
+            .testTag("recommend_chip_${route.replace("/", "_").replace("#", "")}")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = EditorialAccentPurple,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = EditorialAccentPurple
+            )
         }
     }
 }

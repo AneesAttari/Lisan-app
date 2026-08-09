@@ -11,6 +11,8 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.example.data.local.*
 import com.example.data.model.*
+import com.example.data.model.DashboardSummary
+import com.example.data.model.AnswerResult
 import com.example.data.remote.RetrofitClient
 import com.example.data.model.CurriculumData
 import com.example.data.repository.DailyGrammarRepository
@@ -40,9 +42,49 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
     private val savedIdiomRepository = SavedIdiomRepository(database.savedIdiomDao())
     private val libraryRepository = com.example.data.repository.LibraryRepository(database.libraryDao(), database.likedDao())
+    private val dailyQuizChallengeRepository = com.example.data.repository.DailyQuizChallengeRepository(database)
     private val dailyGrammarRepository = com.example.data.repository.DailyGrammarRepository(database.dailyChallengeAssignmentDao())
     private val dailyVerbRepository = com.example.data.repository.DailyVerbRepository(database.dailyVerbAssignmentDao())
     private val chatMessageRepository = com.example.data.local.ChatMessageRepository(database.chatMessageDao())
+    val revisionRepository = com.example.data.repository.RevisionRepository(database)
+    
+    val topicProgress: StateFlow<List<TopicProgressEntity>> = revisionRepository.topicProgressFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        
+    private val _dashboardSummary = MutableStateFlow<DashboardSummary?>(null)
+    val dashboardSummary: StateFlow<DashboardSummary?> = _dashboardSummary.asStateFlow()
+
+    private val _activeSessionQuestions = MutableStateFlow<List<Pair<RevisionQuestionEntity, RevisionSessionQuestionEntity>>>(emptyList())
+    val activeSessionQuestions: StateFlow<List<Pair<RevisionQuestionEntity, RevisionSessionQuestionEntity>>> = _activeSessionQuestions.asStateFlow()
+
+    private val _dailyChallengeProgress = MutableStateFlow<DailyQuizChallengeProgressEntity?>(null)
+    val dailyChallengeProgress: StateFlow<DailyQuizChallengeProgressEntity?> = _dailyChallengeProgress.asStateFlow()
+
+    private val _todayAssignment = MutableStateFlow<DailyQuizAssignmentEntity?>(null)
+    val todayAssignment: StateFlow<DailyQuizAssignmentEntity?> = _todayAssignment.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val userId = "current_user" // Assume a fixed user for now
+            _dailyChallengeProgress.value = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
+        }
+    }
+
+    private val _currentSession = MutableStateFlow<RevisionSessionEntity?>(null)
+    val currentSession: StateFlow<RevisionSessionEntity?> = _currentSession.asStateFlow()
+
+    private val _currentQuestionIndex = MutableStateFlow(0)
+    val currentQuestionIndex: StateFlow<Int> = _currentQuestionIndex.asStateFlow()
+
+    private val _selectedOptionIndex = MutableStateFlow<Int?>(null)
+    val selectedOptionIndex: StateFlow<Int?> = _selectedOptionIndex.asStateFlow()
+
+    private val _answerResult = MutableStateFlow<AnswerResult?>(null)
+    val answerResult: StateFlow<AnswerResult?> = _answerResult.asStateFlow()
+
+    private val _isSessionCompleted = MutableStateFlow(false)
+    val isSessionCompleted: StateFlow<Boolean> = _isSessionCompleted.asStateFlow()
+
     val tutorAudioManager = TutorAudioManager(application)
     val learnerProfileManager = com.example.data.repository.LearnerProfileManager(application)
     val learnerProfile = learnerProfileManager.learnerProfile
@@ -52,11 +94,32 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     val appSettingsManager = com.example.data.repository.AppSettingsManager(application)
     val appSettings = appSettingsManager.settings
 
+    val settingsRepository = com.example.data.repository.SettingsRepository(application)
+    val userSettings: StateFlow<com.example.data.repository.UserSettings> = settingsRepository.userSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.example.data.repository.UserSettings())
+
     // --- TTS Manager ---
     val ttsManager = TutorTtsManager(application.applicationContext)
     val activeSpeakingId: StateFlow<String?> = ttsManager.currentlySpeaking
 
+    private val lisanJourneyRepository = com.example.data.repository.LisanJourneyRepository(database.lisanJourneyDao())
+    val userStats: StateFlow<UserAchievementStatsEntity?> = lisanJourneyRepository.userStats
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    private val _last7DaysActivity = MutableStateFlow<List<Pair<String, Int>>>(emptyList())
+    val last7DaysActivity: StateFlow<List<Pair<String, Int>>> = _last7DaysActivity.asStateFlow()
+
+    val overallAccuracyPct: StateFlow<Int> = learnerProfile.map { profile ->
+        if (profile.totalQuestionsAnswered > 0) {
+            ((profile.correctAnswersCount.toFloat() / profile.totalQuestionsAnswered) * 100).toInt()
+        } else 0
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
+
     init {
+        viewModelScope.launch {
+            lisanJourneyRepository.initializeDefinitionsIfNeeded()
+            loadLast7DaysActivity()
+        }
         viewModelScope.launch {
             authState.collect { state ->
                 val name = when (state) {
@@ -76,11 +139,110 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            appSettings.collect { settings ->
+            userSettings.collect { settings ->
                 ttsManager.applySpeakerPreset(settings.selectedSpeaker)
-                ttsManager.setVoiceVolume(settings.voiceVolume)
-                ttsManager.setPlaybackSpeed(settings.voiceSpeed)
-                ttsManager.setPitch(settings.voicePitch)
+                ttsManager.setPlaybackSpeed(settings.speechRate)
+                ttsManager.setPitch(settings.pitch)
+
+                // Schedule / cancel WorkManager daily reminder
+                if (settings.dailyReminderEnabled) {
+                    com.example.utils.RevisionReminderScheduler.scheduleDailyReminder(
+                        getApplication(),
+                        settings.reminderHour,
+                        settings.reminderMinute
+                    )
+                } else {
+                    com.example.utils.RevisionReminderScheduler.cancelDailyReminder(getApplication())
+                }
+
+                if (settings.dailyChallengeReminderEnabled) {
+                    com.example.utils.RevisionReminderScheduler.scheduleDailyChallengeReminder(getApplication())
+                } else {
+                    com.example.utils.RevisionReminderScheduler.cancelDailyChallengeReminder(getApplication())
+                }
+            }
+        }
+    }
+
+    fun updateUserSettings(transform: (com.example.data.repository.UserSettings) -> com.example.data.repository.UserSettings) {
+        viewModelScope.launch {
+            settingsRepository.updateSettings(transform)
+        }
+    }
+
+    fun resetUserSettings() {
+        viewModelScope.launch {
+            settingsRepository.resetToDefaults()
+        }
+    }
+
+    fun clearLessonCache(onComplete: () -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                database.cachedLessonDao().clearAllLessons()
+            } catch (_: Exception) {}
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onComplete()
+            }
+        }
+    }
+
+    fun exportLearningData(onResult: (java.io.File?) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val exportObj = org.json.JSONObject()
+                exportObj.put("appName", "Lisan AI / Lisan Grammar")
+                exportObj.put("exportDate", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
+                exportObj.put("displayName", userSettings.value.displayName)
+                exportObj.put("learningLevel", userSettings.value.learningLevel)
+                exportObj.put("nativeLanguage", userSettings.value.nativeLanguage)
+                exportObj.put("learningGoal", userSettings.value.learningGoal)
+
+                val notes = database.savedNoteDao().getAllNotes().first()
+                val notesArr = org.json.JSONArray()
+                notes.forEach { n ->
+                    val obj = org.json.JSONObject()
+                    obj.put("titleEn", n.titleEn)
+                    obj.put("titleAr", n.titleAr)
+                    obj.put("englishText", n.englishText)
+                    obj.put("arabicComparisonText", n.arabicComparisonText)
+                    obj.put("category", n.category)
+                    notesArr.put(obj)
+                }
+                exportObj.put("savedNotes", notesArr)
+
+                val idioms = database.savedIdiomDao().getAllSavedIdioms().first()
+                val idiomsArr = org.json.JSONArray()
+                idioms.forEach { i ->
+                    val obj = org.json.JSONObject()
+                    obj.put("idiomId", i.idiomId)
+                    obj.put("savedAt", i.savedAt)
+                    idiomsArr.put(obj)
+                }
+                exportObj.put("savedIdioms", idiomsArr)
+
+                val file = java.io.File(getApplication<Application>().cacheDir, "lisan_learning_export.json")
+                file.writeText(exportObj.toString(2))
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    onResult(file)
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    onResult(null)
+                }
+            }
+        }
+    }
+
+    fun deleteAllDataAndReset(onComplete: () -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                database.clearAllTables()
+                settingsRepository.resetToDefaults()
+                learnerProfileManager.clearLearningHistory()
+            } catch (_: Exception) {}
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onComplete()
             }
         }
     }
@@ -149,12 +311,209 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _isMoreMenuOpen = MutableStateFlow(false)
     val isMoreMenuOpen: StateFlow<Boolean> = _isMoreMenuOpen.asStateFlow()
 
+    // --- Pronunciation Practice ---
+    private val pronunciationHistoryRepository = com.example.data.repository.PronunciationHistoryRepository(database.pronunciationHistoryDao())
+    val pronunciationHistory: StateFlow<List<com.example.data.model.PronunciationHistoryItem>> = pronunciationHistoryRepository.allHistory
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    private val _pronunciationCategory = MutableStateFlow("custom") // "custom", "word", "idiom", "sentence", "history"
+    val pronunciationCategory: StateFlow<String> = _pronunciationCategory.asStateFlow()
+
+    private val _pronunciationSearchQuery = MutableStateFlow("")
+    val pronunciationSearchQuery: StateFlow<String> = _pronunciationSearchQuery.asStateFlow()
+
+    private val _selectedPronunciationItem = MutableStateFlow<com.example.data.model.PronunciationItem?>(null)
+    val selectedPronunciationItem: StateFlow<com.example.data.model.PronunciationItem?> = _selectedPronunciationItem.asStateFlow()
+
+    private val _customPronunciationText = MutableStateFlow("")
+    val customPronunciationText: StateFlow<String> = _customPronunciationText.asStateFlow()
+
+    private val _pronunciationEvaluationResult = MutableStateFlow<com.example.utils.PronunciationResult?>(null)
+    val pronunciationEvaluationResult: StateFlow<com.example.utils.PronunciationResult?> = _pronunciationEvaluationResult.asStateFlow()
+
+    private val _isRecordingPronunciation = MutableStateFlow(false)
+    val isRecordingPronunciation: StateFlow<Boolean> = _isRecordingPronunciation.asStateFlow()
+
+    fun setPronunciationCategory(category: String) {
+        _pronunciationCategory.value = category
+        _selectedPronunciationItem.value = null
+        _pronunciationEvaluationResult.value = null
+    }
+
+    fun setPronunciationSearchQuery(query: String) {
+        _pronunciationSearchQuery.value = query
+    }
+
+    fun selectPronunciationItem(item: com.example.data.model.PronunciationItem?) {
+        _selectedPronunciationItem.value = item
+        _pronunciationEvaluationResult.value = null
+    }
+
+    fun setCustomPronunciationText(text: String) {
+        _customPronunciationText.value = text
+        _selectedPronunciationItem.value = null
+        _pronunciationEvaluationResult.value = null
+    }
+
+    fun playPronunciationTts(text: String, id: String) {
+        if (activeSpeakingId.value == id) {
+            ttsManager.stop()
+        } else {
+            ttsManager.speak(text, id)
+        }
+    }
+
+    fun stopPronunciationTts() {
+        ttsManager.stop()
+    }
+
+    fun startListeningForPronunciation(targetText: String, category: String) {
+        if (targetText.isBlank()) return
+        _pronunciationEvaluationResult.value = null
+
+        val r = speechRecognizer
+        if (r == null) {
+            _isRecordingPronunciation.value = false
+            _pronunciationEvaluationResult.value = com.example.utils.PronunciationResult(
+                score = 0,
+                feedbackWords = emptyList(),
+                matchCount = 0,
+                missingCount = 0,
+                extraCount = 0,
+                incorrectCount = 0,
+                teacherComment = "Voice practice is not available on this device right now. You can still listen and practice by repeating aloud."
+            )
+            return
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Please pronounce: $targetText")
+        }
+
+        try {
+            r.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) { _isRecordingPronunciation.value = true }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() { _isRecordingPronunciation.value = false }
+                override fun onError(error: Int) {
+                    _isRecordingPronunciation.value = false
+                    val errorComment = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 
+                            "I couldn't hear your voice clearly. Please try speaking closer to the microphone. حاول مرة أخرى!"
+                        else -> "Speech recognition error. Please try again. حاول مرة أخرى!"
+                    }
+                    val targetWords = targetText.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                    _pronunciationEvaluationResult.value = com.example.utils.PronunciationResult(
+                        score = 0,
+                        feedbackWords = targetWords.map { com.example.utils.WordFeedback(it, com.example.utils.WordStatus.MISSING) },
+                        matchCount = 0,
+                        missingCount = targetWords.size,
+                        extraCount = 0,
+                        incorrectCount = 0,
+                        teacherComment = errorComment
+                    )
+                    setupSpeechRecognizer()
+                }
+                override fun onResults(results: Bundle?) {
+                    _isRecordingPronunciation.value = false
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val spoken = matches?.firstOrNull() ?: ""
+                    val feedbackStyle = userSettings.value.pronunciationFeedbackStyle
+                    val evaluation = com.example.utils.PronunciationEvaluator.evaluate(spoken, targetText, feedbackStyle)
+                    _pronunciationEvaluationResult.value = evaluation
+
+                    // Persist history in Room database!
+                    viewModelScope.launch {
+                        val historyItem = com.example.data.model.PronunciationHistoryItem(
+                            id = UUID.randomUUID().toString(),
+                            targetText = targetText,
+                            spokenText = spoken,
+                            score = evaluation.score,
+                            category = category,
+                            timestamp = System.currentTimeMillis(),
+                            accuracyFeedback = evaluation.teacherComment
+                        )
+                        pronunciationHistoryRepository.insert(historyItem)
+                    }
+                    setupSpeechRecognizer()
+                }
+                override fun onPartialResults(partialResults: Bundle?) {}
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+            r.startListening(intent)
+        } catch (e: Exception) {
+            _isRecordingPronunciation.value = false
+            _pronunciationEvaluationResult.value = com.example.utils.PronunciationResult(
+                score = 0,
+                feedbackWords = emptyList(),
+                matchCount = 0,
+                missingCount = 0,
+                extraCount = 0,
+                incorrectCount = 0,
+                teacherComment = "Speech error: ${e.localizedMessage ?: "Device speech engine failed."}"
+            )
+            setupSpeechRecognizer()
+        }
+    }
+
+    fun stopListeningForPronunciation() {
+        try {
+            speechRecognizer?.stopListening()
+        } catch (_: Exception) {}
+        _isRecordingPronunciation.value = false
+        setupSpeechRecognizer()
+    }
+
+    fun deletePronunciationHistoryItem(id: String) {
+        viewModelScope.launch {
+            pronunciationHistoryRepository.delete(id)
+        }
+    }
+
+    fun clearPronunciationHistory() {
+        viewModelScope.launch {
+            pronunciationHistoryRepository.clearAll()
+        }
+    }
+
     fun toggleMoreMenu(open: Boolean) { _isMoreMenuOpen.value = open }
 
     // --- Daily Challenge ---
     private val dailyChallengeDao = database.dailyChallengeDao()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    private val todayDateKey = dateFormat.format(Date())
+    val todayDateKey: String get() = dateFormat.format(Date())
+
+    private val _selectedDailyDate = MutableStateFlow(dateFormat.format(Date()))
+    val selectedDailyDate: StateFlow<String> = _selectedDailyDate.asStateFlow()
+
+    fun selectDailyDate(dateKey: String) {
+        _selectedDailyDate.value = dateKey
+        loadLisanDaily(dateKey)
+    }
+
+    fun selectPreviousDay() {
+        try {
+            val date = dateFormat.parse(_selectedDailyDate.value) ?: Date()
+            val cal = Calendar.getInstance().apply { time = date; add(Calendar.DAY_OF_YEAR, -1) }
+            selectDailyDate(dateFormat.format(cal.time))
+        } catch (e: Exception) { }
+    }
+
+    fun selectNextDay() {
+        try {
+            val date = dateFormat.parse(_selectedDailyDate.value) ?: Date()
+            val cal = Calendar.getInstance().apply { time = date; add(Calendar.DAY_OF_YEAR, 1) }
+            selectDailyDate(dateFormat.format(cal.time))
+        } catch (e: Exception) { }
+    }
+
+    fun selectToday() {
+        selectDailyDate(dateFormat.format(Date()))
+    }
 
     private val _dailyChallengeQuestions = MutableStateFlow<List<DailyChallengeQuestion>>(emptyList())
     val dailyChallengeQuestions: StateFlow<List<DailyChallengeQuestion>> = _dailyChallengeQuestions.asStateFlow()
@@ -178,53 +537,13 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     val dailyChallengeResults: StateFlow<List<DailyChallengeResultEntity>> = _dailyChallengeResults.asStateFlow()
 
     private fun loadDailyChallenge() {
-        loadDailyVerb()
-        viewModelScope.launch {
-            _dailyChallengeState.value = DailyChallengeState.LOADING
-            try {
-                val questions = dailyGrammarRepository.getDailyQuestions()
-                if (questions.isNotEmpty()) {
-                    _dailyChallengeQuestions.value = questions
-                    // Check if already completed today
-                    val todayResults = dailyChallengeDao.getResultsByDate(todayDateKey).first()
-                    if (todayResults.size >= questions.size) {
-                        _dailyChallengeState.value = DailyChallengeState.COMPLETED
-                    } else {
-                        _dailyChallengeState.value = DailyChallengeState.READY
-                    }
-                } else {
-                    _dailyChallengeState.value = DailyChallengeState.ERROR
-                }
-            } catch (e: Exception) {
-                _dailyChallengeState.value = DailyChallengeState.ERROR
-            }
-        }
+        loadLisanDaily(_selectedDailyDate.value)
     }
 
-    
     private fun loadDailyVerb() {
-        viewModelScope.launch {
-            try {
-                val assignment = dailyVerbRepository.getTodayVerbAssignment()
-                val verb = dailyVerbRepository.getVerbById(assignment.verbId)
-                _dailyVerb.value = verb
-                _isDailyVerbSaved.value = assignment.savedAt != null
-                _isDailyVerbCompleted.value = assignment.completedAt != null
-                
-                // load helper chat history for today
-                _dailyHelperChatHistory.value = listOf(
-                    ChatMessageEntity(
-                        role = "model",
-                        text = "السلام عليكم ورحمة الله وبركاته\n\nI am here to help you with today’s Daily Lisan task.\nمیں آج کے ڈیلی لسان ٹاسک میں آپ کی مدد کے لیے موجود ہوں۔"
-                    )
-                )
-            } catch (e: Exception) {
-                // Ignore for now
-            }
-        }
+        loadLisanDaily(_selectedDailyDate.value)
     }
 
-    
     fun playVerbAudio(verbId: String) {
         val verb = _dailyVerb.value ?: return
         if (activeSpeakingId.value == verb.id) {
@@ -235,14 +554,16 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    
     fun completeDailyVerb() {
         val verb = _dailyVerb.value ?: return
         viewModelScope.launch {
-            val assignment = database.dailyVerbAssignmentDao().getAssignmentByDateSync("current-user-id", todayDateKey)
+            val userId = learnerProfile.value.userId
+            val dateKey = _selectedDailyDate.value
+            val assignment = database.dailyVerbAssignmentDao().getAssignmentByDateSync(userId, dateKey)
             if (assignment != null && assignment.completedAt == null) {
                 database.dailyVerbAssignmentDao().updateAssignment(assignment.copy(completedAt = System.currentTimeMillis()))
                 _isDailyVerbCompleted.value = true
+                triggerDailyCompletionRewardIfEligible()
             }
         }
     }
@@ -250,7 +571,9 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDailyVerbSaved() {
         val verb = _dailyVerb.value ?: return
         viewModelScope.launch {
-            val assignment = database.dailyVerbAssignmentDao().getAssignmentByDateSync("current-user-id", todayDateKey)
+            val userId = learnerProfile.value.userId
+            val dateKey = _selectedDailyDate.value
+            val assignment = database.dailyVerbAssignmentDao().getAssignmentByDateSync(userId, dateKey)
             if (assignment != null) {
                 val now = System.currentTimeMillis()
                 val newSavedAt = if (assignment.savedAt != null) null else now
@@ -305,7 +628,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observeDailyChallengeResults() {
         viewModelScope.launch {
-            dailyChallengeDao.getResultsByDate(todayDateKey).collect {
+            dailyChallengeDao.getResultsByDate(_selectedDailyDate.value).collect {
                 _dailyChallengeResults.value = it
             }
         }
@@ -335,7 +658,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
 
             // Save result
             val result = DailyChallengeResultEntity(
-                date = todayDateKey,
+                date = _selectedDailyDate.value,
                 questionId = currentQuestion.id,
                 topic = currentQuestion.topic,
                 type = currentQuestion.type.name,
@@ -493,10 +816,18 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _proficiencyLevel = MutableStateFlow(ProficiencyLevel.BEGINNER)
     val proficiencyLevel: StateFlow<ProficiencyLevel> = _proficiencyLevel.asStateFlow()
 
-    fun setSelectedTab(index: Int) { _selectedTab.value = index }
+    fun setSelectedTab(index: Int) {
+        _selectedTab.value = index
+        val route = com.example.ui.navigation.HashRouter.tabToRoute(index)
+        if (com.example.ui.navigation.HashRouter.currentRoute.value != route) {
+            com.example.ui.navigation.HashRouter.navigate(route)
+        }
+    }
     fun toggleTheme() {
-        _isDarkTheme.value = !_isDarkTheme.value
-        prefs.edit().putBoolean("is_dark_theme", _isDarkTheme.value).apply()
+        val nextVal = !_isDarkTheme.value
+        _isDarkTheme.value = nextVal
+        prefs.edit().putBoolean("is_dark_theme", nextVal).apply()
+        updateUserSettings { it.copy(themeMode = if (nextVal) "Dark" else "Light") }
     }
     fun setProficiencyLevel(level: ProficiencyLevel) { _proficiencyLevel.value = level }
 
@@ -667,6 +998,9 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _isStudyModeOn = MutableStateFlow(prefs.getBoolean("tutor_study_mode_on", false))
     val isStudyModeOn: StateFlow<Boolean> = _isStudyModeOn.asStateFlow()
 
+    private val _isStudyPersonalizationEnabled = MutableStateFlow(prefs.getBoolean("study_mode_use_personalization", true))
+    val isStudyPersonalizationEnabled: StateFlow<Boolean> = _isStudyPersonalizationEnabled.asStateFlow()
+
     private val _tutorMode = MutableStateFlow(
         TutorMode.valueOf(prefs.getString("tutor_mode_key", TutorMode.QUICK_HELP.name) ?: TutorMode.QUICK_HELP.name)
     )
@@ -706,6 +1040,59 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     fun setStudyMode(enabled: Boolean) {
         _isStudyModeOn.value = enabled
         prefs.edit().putBoolean("tutor_study_mode_on", enabled).apply()
+    }
+
+    fun setStudyPersonalizationEnabled(enabled: Boolean) {
+        _isStudyPersonalizationEnabled.value = enabled
+        prefs.edit().putBoolean("study_mode_use_personalization", enabled).apply()
+    }
+
+    fun buildPersonalizedStudyContext(): String {
+        if (!_isStudyPersonalizationEnabled.value) {
+            return "PERSONALIZED LEARNER CONTEXT: Disabled by user privacy preference. Avoid mentioning any learning stats, lessons completed, or history. Guide the user based only on active chat messages."
+        }
+        val profile = learnerProfile.value
+        val stats = userStats.value ?: com.example.data.model.UserAchievementStatsEntity()
+        
+        val sb = StringBuilder()
+        sb.append("[GENUINE PERSISTED APP CONTEXT]\n")
+        sb.append("- Level: ").append(profile.learningLevel.overall).append("\n")
+        
+        if (dailyStreak.value > 0) {
+            sb.append("- Streak: ").append(dailyStreak.value).append(" Days\n")
+        }
+        if (stats.totalGrammarLessonsCompleted > 0) {
+            sb.append("- Lessons Completed: ").append(stats.totalGrammarLessonsCompleted).append("\n")
+        }
+        if (profile.totalQuestionsAnswered > 0) {
+            val accuracyPct = ((profile.correctAnswersCount.toFloat() / profile.totalQuestionsAnswered) * 100).toInt()
+            sb.append("- Questions Answered: ").append(profile.totalQuestionsAnswered)
+              .append(" (Accuracy: ").append(accuracyPct).append("%)\n")
+        }
+        if (stats.totalPictureVocabularyWordsLearned > 0) {
+            sb.append("- Picture Vocabulary Words Learned: ").append(stats.totalPictureVocabularyWordsLearned).append("\n")
+        }
+        if (stats.totalRevisionSessionsCompleted > 0) {
+            sb.append("- Revision Sessions Completed: ").append(stats.totalRevisionSessionsCompleted).append("\n")
+        }
+        if (stats.totalDailyChallengesCompleted > 0) {
+            sb.append("- Daily Challenges Completed: ").append(stats.totalDailyChallengesCompleted).append("\n")
+        }
+        if (stats.totalAchievementsUnlocked > 0) {
+            sb.append("- Unlocked Achievements: ").append(stats.totalAchievementsUnlocked).append("\n")
+        }
+        
+        if (profile.commonMistakes.isNotEmpty()) {
+            val weakTopicsStr = profile.commonMistakes.take(4).joinToString { "${it.topic} (${it.pattern})" }
+            sb.append("- Verified Mistake Patterns: ").append(weakTopicsStr).append("\n")
+        }
+        
+        if (profile.recentLearning.isNotEmpty()) {
+            val recentLearningStr = profile.recentLearning.take(5).joinToString { "${it.type}: ${it.topic} (${it.status})" }
+            sb.append("- Recent Activity Logs: ").append(recentLearningStr).append("\n")
+        }
+        
+        return sb.toString().trim()
     }
 
     fun setActiveLanguage(lang: String) {
@@ -762,7 +1149,11 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
             _isChatLoading.value = true
             _chatError.value = null
             try {
-                val profileSummary = learnerProfileManager.buildPersonalizedPromptContext()
+                val profileSummary = if (_isStudyModeOn.value) {
+                    buildPersonalizedStudyContext()
+                } else {
+                    learnerProfileManager.buildPersonalizedPromptContext()
+                }
                 val result = RetrofitClient.getTutorResponse(
                     history = _chatHistory.value,
                     mode = _activeTutorMode.value,
@@ -1220,6 +1611,54 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         if (current.contains(id)) current.remove(id) else current.add(id)
         _completedTopicIds.value = current
         learnerProfileManager.recordLessonActivity(id, isCompleted)
+        if (isCompleted) {
+            viewModelScope.launch {
+                lisanJourneyRepository.recordEvent(
+                    eventType = "LESSON_COMPLETED",
+                    featureSource = "GRAMMAR_LESSON",
+                    entityId = id,
+                    deduplicationKey = "lesson_${id}_${System.currentTimeMillis()}"
+                )
+                loadLast7DaysActivity()
+            }
+        }
+    }
+
+    fun loadLast7DaysActivity() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val calendarTemp = Calendar.getInstance()
+            val dates = mutableListOf<String>()
+            for (i in 6 downTo 0) {
+                dates.add(dateFormat.format(calendarTemp.time))
+                calendarTemp.add(Calendar.DAY_OF_YEAR, -1)
+            }
+            dates.reverse()
+
+            val result = mutableListOf<Pair<String, Int>>()
+            for (dateStr in dates) {
+                val summary = database.lisanJourneyDao().getDailySummary(dateStr)
+                val count = summary?.totalMeaningfulActivities ?: 0
+                val parsedDate = dateFormat.parse(dateStr) ?: Date()
+                val dayName = getUrduDayName(parsedDate)
+                result.add(dayName to count)
+            }
+            _last7DaysActivity.value = result
+        }
+    }
+
+    private fun getUrduDayName(date: Date): String {
+        val cal = Calendar.getInstance().apply { time = date }
+        return when (cal.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.MONDAY -> "پیر"
+            Calendar.TUESDAY -> "منگل"
+            Calendar.WEDNESDAY -> "بدھ"
+            Calendar.THURSDAY -> "جمعرات"
+            Calendar.FRIDAY -> "جمعہ"
+            Calendar.SATURDAY -> "ہفتہ"
+            Calendar.SUNDAY -> "اتوار"
+            else -> ""
+        }
     }
 
     fun clearLearningHistory() {
@@ -1313,6 +1752,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     fun stopSpeech() { ttsManager.stop() }
 
     // --- Lisan Daily ---
+    private val dailyVerbAssignmentDao = database.dailyVerbAssignmentDao()
     private val dailyIdiomAssignmentDao = database.dailyIdiomAssignmentDao()
     private val dailyChallengeAssignmentDao = database.dailyChallengeAssignmentDao()
     private val revisionItemDao = database.revisionItemDao()
@@ -1393,34 +1833,34 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         return System.currentTimeMillis() + delayMs
     }
 
-    suspend fun getOrCreateTodayIdiomAssignment(userId: String, level: ProficiencyLevel, weakTopics: List<String>): Idiom? {
+    private fun getDayIndex(dateKey: String): Int {
+        return try {
+            val date = dateFormat.parse(dateKey) ?: Date()
+            val epoch = dateFormat.parse("2025-01-01") ?: Date()
+            val diffMs = date.time - epoch.time
+            val days = (diffMs / (1000 * 60 * 60 * 24)).toInt()
+            kotlin.math.abs(days)
+        } catch (e: Exception) {
+            kotlin.math.abs(dateKey.hashCode())
+        }
+    }
+
+    suspend fun getOrCreateTodayIdiomAssignment(userId: String, dateKey: String = _selectedDailyDate.value, level: ProficiencyLevel = proficiencyLevel.value, weakTopics: List<String> = emptyList()): Idiom? {
         idiomMutex.lock()
         try {
-            val existing = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, todayDateKey)
+            val existing = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, dateKey)
             if (existing != null) {
                 return uniqueIdioms.find { it.id == existing.idiomId }
             }
-            val previouslyAssigned = dailyIdiomAssignmentDao.getAllAssignmentsSync(userId).map { it.idiomId }.toSet()
-            val unseen = uniqueIdioms.filter { it.id !in previouslyAssigned }
-            if (unseen.isEmpty()) return null
-            
-            val scored = unseen.map { idiom ->
-                var score = 0
-                val levelMatch = when (level) {
-                    ProficiencyLevel.BEGINNER -> idiom.level == IdiomLevel.BEGINNER
-                    ProficiencyLevel.INTERMEDIATE -> idiom.level == IdiomLevel.INTERMEDIATE
-                    ProficiencyLevel.ADVANCED -> idiom.level == IdiomLevel.ADVANCED
-                }
-                if (levelMatch) score += 10
-                if (weakTopics.any { idiom.category.label.contains(it, ignoreCase = true) }) score += 5
-                idiom to score
-            }
-            val selected = scored.maxByOrNull { it.second }?.first ?: unseen.first()
-            
+            if (uniqueIdioms.isEmpty()) return null
+
+            val dayIndex = getDayIndex(dateKey)
+            val selected = uniqueIdioms[dayIndex % uniqueIdioms.size]
+
             val assignment = DailyIdiomAssignment(
                 userId = userId,
                 idiomId = selected.id,
-                assignedDate = todayDateKey
+                assignedDate = dateKey
             )
             dailyIdiomAssignmentDao.insertAssignment(assignment)
             return selected
@@ -1429,70 +1869,77 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         }
     }
 
-    suspend fun getOrCreateTodayChallengeAssignment(userId: String, level: ProficiencyLevel, weakTopics: List<String>): DailyChallengeQuestion? {
+    suspend fun getOrCreateTodayChallengeAssignment(userId: String, dateKey: String = _selectedDailyDate.value, level: ProficiencyLevel = proficiencyLevel.value, weakTopics: List<String> = emptyList()): DailyChallengeQuestion? {
         challengeMutex.lock()
         try {
-            val existing = dailyChallengeAssignmentDao.getAssignmentByDateSync(userId, todayDateKey)
-            if (existing != null) {
-                return dailyGrammarRepository.getAllQuestions().find { it.id == existing.questionId }
-            }
-            
-            val allResults = dailyChallengeResults.value
-            val completedIds = allResults.map { it.questionId }.toSet()
-            val unseen = dailyGrammarRepository.getAllQuestions().filter { it.id !in completedIds }
-            val pool = if (unseen.isNotEmpty()) unseen else dailyGrammarRepository.getAllQuestions()
-            
-            val scored = pool.map { q ->
-                var score = 0
-                val qLevel = when (q.topic) {
-                    "Present Simple", "Articles", "Prepositions", "Vocabulary" -> ProficiencyLevel.BEGINNER
-                    "Past Simple", "Sentence Correction", "Modal Verbs", "Question Forms" -> ProficiencyLevel.INTERMEDIATE
-                    else -> ProficiencyLevel.ADVANCED
-                }
-                if (qLevel == level) score += 10
-                if (weakTopics.any { it.equals(q.topic, ignoreCase = true) }) score += 5
-                q to score
-            }
-            val selected = scored.maxByOrNull { it.second }?.first ?: pool.first()
-            
-            val assignment = DailyChallengeAssignment(
-                userId = userId,
-                questionId = selected.id,
-                assignedDate = todayDateKey
-            )
-            dailyChallengeAssignmentDao.insertAssignment(assignment)
-            return selected
+            val questions = dailyGrammarRepository.getDailyQuestions(userId, dateKey)
+            return questions.firstOrNull()
         } finally {
             challengeMutex.unlock()
         }
     }
 
-    fun loadLisanDaily() {
+    fun loadLisanDaily(dateKey: String = _selectedDailyDate.value) {
         viewModelScope.launch {
+            _dailyChallengeState.value = DailyChallengeState.LOADING
+            val userId = learnerProfile.value.userId
+            val level = proficiencyLevel.value
             val weakTopics = learnerProfile.value.commonMistakes.map { it.topic }
-            val challengeAssigned = getOrCreateTodayChallengeAssignment(
-                userId = learnerProfile.value.userId,
-                level = proficiencyLevel.value,
-                weakTopics = weakTopics
-            )
-            
-            val idiomAssigned = getOrCreateTodayIdiomAssignment(
-                userId = learnerProfile.value.userId,
-                level = proficiencyLevel.value,
-                weakTopics = weakTopics
-            )
-            
+
+            // 1. Daily Verb
+            val verbAssignment = dailyVerbRepository.getTodayVerbAssignment(userId, dateKey)
+            val verb = dailyVerbRepository.getVerbById(verbAssignment.verbId)
+            _dailyVerb.value = verb
+            _isDailyVerbSaved.value = verbAssignment.savedAt != null
+            _isDailyVerbCompleted.value = verbAssignment.completedAt != null
+
+            // 2. Daily Idiom
+            val idiomAssigned = getOrCreateTodayIdiomAssignment(userId, dateKey, level, weakTopics)
             _dailyIdiom.value = idiomAssigned
-            
             if (idiomAssigned != null) {
-                val assignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(learnerProfile.value.userId, todayDateKey)
+                val assignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, dateKey)
                 _isDailyIdiomCompleted.value = assignment?.completedAt != null
                 _isDailyIdiomSaved.value = assignment?.savedAt != null
+            } else {
+                _isDailyIdiomCompleted.value = false
+                _isDailyIdiomSaved.value = false
             }
-            
-            val reward = dailyCompletionRewardDao.getRewardByDateSync(learnerProfile.value.userId, todayDateKey)
+
+            // 3. Daily Challenge Question
+            val challengeAssigned = getOrCreateTodayChallengeAssignment(userId, dateKey, level, weakTopics)
+            if (challengeAssigned != null) {
+                _dailyChallengeQuestions.value = listOf(challengeAssigned)
+                _currentDailyQuestionIndex.value = 0
+
+                val todayResults = dailyChallengeDao.getResultsByDate(dateKey).first()
+                val existingResult = todayResults.find { it.questionId == challengeAssigned.id }
+                if (existingResult != null) {
+                    _dailyChallengeState.value = DailyChallengeState.COMPLETED
+                    _dailyUserAnswer.value = existingResult.userAnswer
+                    _isDailyCorrect.value = existingResult.isCorrect
+                    _dailyFeedback.value = challengeAssigned.explanationUr
+                } else {
+                    _dailyChallengeState.value = DailyChallengeState.READY
+                    _dailyUserAnswer.value = ""
+                    _dailyFeedback.value = null
+                    _isDailyCorrect.value = null
+                }
+            } else {
+                _dailyChallengeState.value = DailyChallengeState.ERROR
+            }
+
+            // 4. Helper Chat History
+            _dailyHelperChatHistory.value = listOf(
+                ChatMessageEntity(
+                    role = "model",
+                    text = "السلام عليكم ورحمة الله وبركاته\n\nWelcome to Lisan Daily ($dateKey). I am here to help you practice today's grammar challenge and verb!\nمیں آج کے ڈیلی ٹاسک میں آپ کی مدد کے لیے موجود ہوں۔"
+                )
+            )
+
+            // 5. Daily Completion Reward
+            val reward = dailyCompletionRewardDao.getRewardByDateSync(userId, dateKey)
             _isLisanDailyRewarded.value = reward != null
-            
+
             checkAndUnlockAchievements()
         }
     }
@@ -1501,7 +1948,8 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         val idiom = _dailyIdiom.value ?: return
         viewModelScope.launch {
             val userId = learnerProfile.value.userId
-            val assignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, todayDateKey)
+            val dateKey = _selectedDailyDate.value
+            val assignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, dateKey)
             if (assignment != null && assignment.completedAt == null) {
                 dailyIdiomAssignmentDao.updateAssignment(assignment.copy(completedAt = System.currentTimeMillis()))
                 _isDailyIdiomCompleted.value = true
@@ -1515,7 +1963,8 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         val idiom = _dailyIdiom.value ?: return
         viewModelScope.launch {
             val userId = learnerProfile.value.userId
-            val assignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, todayDateKey)
+            val dateKey = _selectedDailyDate.value
+            val assignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, dateKey)
             if (assignment != null) {
                 val now = System.currentTimeMillis()
                 val newSavedAt = if (assignment.savedAt != null) null else now
@@ -1525,22 +1974,31 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         }
     }
 
-    
-
-    
+    private fun getPreviousDateKey(dateKey: String): String {
+        return try {
+            val date = dateFormat.parse(dateKey) ?: return dateKey
+            val cal = Calendar.getInstance().apply { time = date; add(Calendar.DAY_OF_YEAR, -1) }
+            dateFormat.format(cal.time)
+        } catch (e: Exception) {
+            dateKey
+        }
+    }
 
     suspend fun triggerDailyCompletionRewardIfEligible() {
         val userId = learnerProfile.value.userId
-        val isChallengeCompleted = _isDailyCompleted.value
-        val idiomAssignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, todayDateKey)
+        val dateKey = _selectedDailyDate.value
+        val isChallengeCompleted = _dailyChallengeState.value == DailyChallengeState.COMPLETED
+        val idiomAssignment = dailyIdiomAssignmentDao.getAssignmentByDateSync(userId, dateKey)
+        val verbAssignment = dailyVerbAssignmentDao.getAssignmentByDateSync(userId, dateKey)
         val isIdiomCompleted = idiomAssignment?.completedAt != null
+        val isVerbCompleted = verbAssignment?.completedAt != null
         
-        if (isChallengeCompleted && isIdiomCompleted) {
-            val existingReward = dailyCompletionRewardDao.getRewardByDateSync(userId, todayDateKey)
+        if (isChallengeCompleted && (isIdiomCompleted || isVerbCompleted)) {
+            val existingReward = dailyCompletionRewardDao.getRewardByDateSync(userId, dateKey)
             if (existingReward == null) {
                 val reward = DailyCompletionReward(
                     userId = userId,
-                    completionDate = todayDateKey,
+                    completionDate = dateKey,
                     xpEarned = 50
                 )
                 dailyCompletionRewardDao.insertReward(reward)
@@ -1549,8 +2007,8 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
                 incrementAchievementProgress("daily_completed")
                 
                 val lastStreakDate = prefs.getInt("last_streak_date", 0)
-                val todayDateInt = todayDateKey.replace("-", "").toInt()
-                if (lastStreakDate != todayDateInt) {
+                val todayDateInt = dateKey.replace("-", "").toIntOrNull() ?: 0
+                if (lastStreakDate != todayDateInt && todayDateInt > 0) {
                     _dailyStreak.value++
                     prefs.edit().putInt("daily_streak_count", _dailyStreak.value)
                         .putInt("last_streak_date", todayDateInt).apply()
@@ -1694,6 +2152,75 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         loadStoredChatHistory()
         loadLisanDaily()
         loadAchievementsList()
+        viewModelScope.launch {
+            revisionRepository.seedQuestionBankIfNeeded()
+            loadRevisionDashboard()
+        }
+    }
+
+    fun loadRevisionDashboard() {
+        viewModelScope.launch {
+            _dashboardSummary.value = revisionRepository.getDashboardSummary()
+        }
+    }
+
+    fun startRevisionSession(sessionType: String, topicId: String?, count: Int) {
+        viewModelScope.launch {
+            try {
+                val session = revisionRepository.startRevisionSession(sessionType, topicId, count)
+                val questions = revisionRepository.getSessionQuestions(session.sessionId)
+                
+                _activeSessionQuestions.value = questions
+                _currentSession.value = session
+                _currentQuestionIndex.value = 0
+                _selectedOptionIndex.value = null
+                _answerResult.value = null
+                _isSessionCompleted.value = false
+            } catch (e: Exception) {
+                // Handle exception gracefully
+            }
+        }
+    }
+
+    fun submitRevisionAnswer(questionId: String, selectedIndex: Int) {
+        val session = _currentSession.value ?: return
+        viewModelScope.launch {
+            val result = revisionRepository.submitAnswer(session.sessionId, questionId, selectedIndex)
+            _selectedOptionIndex.value = selectedIndex
+            _answerResult.value = result
+            
+            loadRevisionDashboard()
+        }
+    }
+
+    fun nextRevisionQuestion() {
+        val nextIdx = _currentQuestionIndex.value + 1
+        if (nextIdx < _activeSessionQuestions.value.size) {
+            _currentQuestionIndex.value = nextIdx
+            _selectedOptionIndex.value = null
+            _answerResult.value = null
+        } else {
+            finishRevisionSession()
+        }
+    }
+
+    fun finishRevisionSession() {
+        val session = _currentSession.value ?: return
+        viewModelScope.launch {
+            val completed = revisionRepository.completeRevisionSession(session.sessionId)
+            _currentSession.value = completed
+            _isSessionCompleted.value = true
+            incrementAchievementProgress("revision_completed")
+        }
+    }
+
+    fun exitRevisionSession() {
+        _currentSession.value = null
+        _activeSessionQuestions.value = emptyList()
+        _currentQuestionIndex.value = 0
+        _selectedOptionIndex.value = null
+        _answerResult.value = null
+        _isSessionCompleted.value = false
     }
 
     override fun onCleared() {

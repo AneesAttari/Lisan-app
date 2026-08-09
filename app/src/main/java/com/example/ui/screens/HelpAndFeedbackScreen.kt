@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AuthState
+import com.example.ui.components.ScrollToBottomFAB
 import com.example.ui.components.EditorialCard
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
@@ -115,6 +116,8 @@ fun HelpAndFeedbackScreen(
     // Categories list for Feedback Selectors
     val categories = listOf("Bug Report", "Feature Suggestion", "General Feedback", "Other")
 
+    val scrollState = rememberScrollState()
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = EditorialBackground,
@@ -161,14 +164,18 @@ fun HelpAndFeedbackScreen(
             }
         }
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // Section Tabs: FAQ vs Feedback
             Row(
                 modifier = Modifier
@@ -561,40 +568,48 @@ fun HelpAndFeedbackScreen(
                 }
             }
         }
-    }
 
-    // Success Confirmation Modal
-    if (showSuccessModal) {
-        AlertDialog(
-            onDismissRequest = { showSuccessModal = false },
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Success",
-                        tint = Color(0xFF2E7D32),
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Text("Feedback Received")
-                }
-            },
-            text = {
-                Text("Thank you! Your feedback has been received. Our team will review your feedback and get back to you if necessary.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showSuccessModal = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)
-                ) {
-                    Text("OK")
-                }
-            },
-            modifier = Modifier.testTag("success_modal")
+        // Success Confirmation Modal
+        if (showSuccessModal) {
+            AlertDialog(
+                onDismissRequest = { showSuccessModal = false },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Success",
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Text("Feedback Received")
+                    }
+                },
+                text = {
+                    Text("Thank you! Your feedback has been received. Our team will review your feedback and get back to you if necessary.")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showSuccessModal = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)
+                    ) {
+                        Text("OK")
+                    }
+                },
+                modifier = Modifier.testTag("success_modal")
+            )
+        }
+
+        ScrollToBottomFAB(
+            scrollState = scrollState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
         )
     }
+}
 }
 
 @Composable

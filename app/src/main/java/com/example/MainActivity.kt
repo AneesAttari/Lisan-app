@@ -34,6 +34,7 @@ import com.example.ui.screens.SavedNotesScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TutorChatScreen
 import com.example.ui.screens.HelpAndFeedbackScreen
+import com.example.ui.screens.PictureVocabularyRootScreen
 import com.example.ui.theme.EditorialBackground
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.LisanViewModel
@@ -55,7 +56,9 @@ import androidx.compose.ui.text.font.FontStyle
 import com.example.ui.screens.DailyChallengeScreen
 import com.example.ui.screens.LisanDailyScreen
 import com.example.ui.screens.RevisionPlannerScreen
-import com.example.ui.screens.AchievementsScreen
+import com.example.ui.screens.LisanJourneyScreen
+import com.example.ui.screens.PronunciationPracticeScreen
+import com.example.ui.viewmodel.LisanJourneyViewModel
 import com.example.ui.navigation.HashRouter
 import com.example.ui.components.HashRouterBar
 import androidx.compose.runtime.LaunchedEffect
@@ -73,14 +76,30 @@ import com.example.data.model.AuthState
 class MainActivity : ComponentActivity() {
 
     private val viewModel: LisanViewModel by viewModels()
+    private val pictureVocabularyViewModel: com.example.ui.viewmodel.PictureVocabularyViewModel by viewModels()
+    private val lisanJourneyViewModel: LisanJourneyViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val isDarkTheme by viewModel.isDarkTheme.collectAsState()
-            MyApplicationTheme(darkTheme = isDarkTheme, dynamicColor = false) {
-                LisanMainApp(viewModel = viewModel)
+            val userSettings by viewModel.userSettings.collectAsState()
+            val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val darkTheme = when (userSettings.themeMode) {
+                "Dark" -> true
+                "Light" -> false
+                else -> isSystemDark
+            }
+            MyApplicationTheme(
+                darkTheme = darkTheme,
+                dynamicColor = userSettings.dynamicColor,
+                fontSizeSetting = userSettings.fontSize
+            ) {
+                LisanMainApp(
+                    viewModel = viewModel,
+                    pictureVocabularyViewModel = pictureVocabularyViewModel,
+                    lisanJourneyViewModel = lisanJourneyViewModel
+                )
             }
         }
     }
@@ -88,7 +107,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun LisanMainApp(viewModel: LisanViewModel) {
+fun LisanMainApp(
+    viewModel: LisanViewModel,
+    pictureVocabularyViewModel: com.example.ui.viewmodel.PictureVocabularyViewModel,
+    lisanJourneyViewModel: LisanJourneyViewModel
+) {
     var showSplashScreen by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
@@ -96,25 +119,22 @@ fun LisanMainApp(viewModel: LisanViewModel) {
         showSplashScreen = false
     }
 
-    val selectedTab by viewModel.selectedTab.collectAsState()
     val currentRoute by HashRouter.currentRoute.collectAsState()
+    val selectedTab = remember(currentRoute) { HashRouter.routeToTab(currentRoute) }
     val proficiencyLevel by viewModel.proficiencyLevel.collectAsState()
-    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val userSettings by viewModel.userSettings.collectAsState()
+    val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDarkTheme = when (userSettings.themeMode) {
+        "Dark" -> true
+        "Light" -> false
+        else -> isSystemDark
+    }
     val isMoreMenuOpen by viewModel.isMoreMenuOpen.collectAsState()
 
-    // Sync selectedTab -> HashRouter.currentRoute
+    // Sync back to ViewModel to keep its internal state in sync
     LaunchedEffect(selectedTab) {
-        val expectedRoute = HashRouter.tabToRoute(selectedTab)
-        if (currentRoute != expectedRoute) {
-            HashRouter.navigate(expectedRoute)
-        }
-    }
-
-    // Sync HashRouter.currentRoute -> selectedTab
-    LaunchedEffect(currentRoute) {
-        val expectedTab = HashRouter.routeToTab(currentRoute)
-        if (selectedTab != expectedTab) {
-            viewModel.setSelectedTab(expectedTab)
+        if (viewModel.selectedTab.value != selectedTab) {
+            viewModel.setSelectedTab(selectedTab)
         }
     }
 
@@ -157,11 +177,13 @@ fun LisanMainApp(viewModel: LisanViewModel) {
         5 to "Lisan Daily",
         6 to "Quizzes",
         7 to "Revision Planner",
-        8 to "Achievements",
+        8 to "Lisan Journey",
         9 to "Progress",
         10 to "Settings",
         11 to "Help & Feedback",
-        12 to "Past Conversations"
+        12 to "Past Conversations",
+        13 to "Pronunciation Practice",
+        14 to "Learn with Pictures"
     )
 
     if (showLevelDialog) {
@@ -172,11 +194,19 @@ fun LisanMainApp(viewModel: LisanViewModel) {
         )
     }
 
-    BackHandler(enabled = selectedTab != 0 || drawerState.isOpen) {
-        if (drawerState.isOpen) {
+    BackHandler(enabled = selectedTab != 0 || drawerState.isOpen || showAuthDialog || showProfileDialog || showLevelDialog) {
+        if (showAuthDialog) {
+            showAuthDialog = false
+        } else if (showProfileDialog) {
+            showProfileDialog = false
+        } else if (showLevelDialog) {
+            showLevelDialog = false
+        } else if (drawerState.isOpen) {
             scope.launch { drawerState.close() }
         } else if (selectedTab != 0) {
-            viewModel.setSelectedTab(0)
+            if (!HashRouter.goBack()) {
+                HashRouter.navigate("#/lessons")
+            }
         }
     }
 
@@ -213,10 +243,12 @@ fun LisanMainApp(viewModel: LisanViewModel) {
                             Spacer(modifier = Modifier.height(24.dp))
                             
                             val menuItems = listOf(
+                                Triple("Learn with Pictures", Icons.Default.Image, 14),
                                 Triple("Lisan Daily", Icons.Default.CalendarToday, 5),
+                                Triple("Pronunciation Practice", Icons.Default.Hearing, 13),
                                 Triple("Quizzes", Icons.Default.CheckCircle, 6),
                                 Triple("Revision Planner", Icons.AutoMirrored.Filled.EventNote, 7),
-                                Triple("Achievements", Icons.Default.EmojiEvents, 8),
+                                Triple("Lisan Journey", Icons.Default.EmojiEvents, 8),
                                 Triple("Progress", Icons.Default.BarChart, 9),
                                 Triple("Past Conversations", Icons.Default.History, 12),
                                 Triple("Settings", Icons.Default.Settings, 10),
@@ -228,7 +260,7 @@ fun LisanMainApp(viewModel: LisanViewModel) {
                                     label = { Text(title, fontWeight = FontWeight.SemiBold) },
                                     selected = selectedTab == index,
                                     onClick = {
-                                        viewModel.setSelectedTab(index)
+                                        HashRouter.navigate(HashRouter.tabToRoute(index))
                                         scope.launch { drawerState.close() }
                                     },
                                     icon = { Icon(icon, contentDescription = null) },
@@ -253,7 +285,7 @@ fun LisanMainApp(viewModel: LisanViewModel) {
                     containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
                     topBar = {
                         EditorialHeader(
-                            subtitle = "انگریزی اور عربی گرامر گائیڈ (English & Arabic Grammar Guide)",
+                            subtitle = "(English & Arabic Grammar Guide)",
                             title = tabTitles[selectedTab] ?: "Lisan Grammar",
                             levelBadge = proficiencyLevel.labelEn,
                             onLevelClick = { showLevelDialog = true },
@@ -275,7 +307,7 @@ fun LisanMainApp(viewModel: LisanViewModel) {
                         if (!WindowInsets.isImeVisible) {
                             EditorialBottomNav(
                                 selectedTabIndex = selectedTab,
-                                onTabSelected = { viewModel.setSelectedTab(it) }
+                                onTabSelected = { HashRouter.navigate(HashRouter.tabToRoute(it)) }
                             )
                         }
                     }
@@ -300,11 +332,13 @@ fun LisanMainApp(viewModel: LisanViewModel) {
                                 5 -> LisanDailyScreen(viewModel = viewModel)
                                 6 -> QuizScreen(viewModel = viewModel)
                                 7 -> RevisionPlannerScreen(viewModel = viewModel)
-                                8 -> AchievementsScreen(viewModel = viewModel)
+                                8 -> LisanJourneyScreen(viewModel = lisanJourneyViewModel)
                                 9 -> ProgressDashboardScreen(viewModel = viewModel)
                                 10 -> SettingsScreen(viewModel = viewModel)
                                 11 -> HelpAndFeedbackScreen(viewModel = viewModel)
                                 12 -> PastConversationsScreen(viewModel = viewModel)
+                                13 -> PronunciationPracticeScreen(viewModel = viewModel)
+                                14 -> PictureVocabularyRootScreen(viewModel = pictureVocabularyViewModel)
                                 else -> LessonScreen(viewModel = viewModel)
                             }
                         }

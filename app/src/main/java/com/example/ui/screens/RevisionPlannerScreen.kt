@@ -1,644 +1,768 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.EventNote
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.NavigateNext
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.*
+import com.example.data.model.DashboardSummary
+import com.example.data.model.AnswerResult
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialSectionTitle
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
-
-data class RevisionCard(
-    val id: Int,
-    val topic: String,
-    val questionEn: String,
-    val questionUr: String,
-    val options: List<String>,
-    val correctIndex: Int,
-    val explanationUr: String,
-    val priority: String,
-    val scheduleTime: String
-)
-
-private val comprehensiveRevisionCards = listOf(
-    RevisionCard(
-        id = 1,
-        topic = "Verb 'To Be'",
-        questionEn = "Choose the correct verb: She ___ a brilliant English student.",
-        questionUr = "صحیح فعل کا انتخاب کریں: وہ انگریزی کی ایک ذہین طالب علم ہے۔",
-        options = listOf("am", "is", "are", "be"),
-        correctIndex = 1,
-        explanationUr = "واحد ضمیر (She) کے ساتھ فعل 'is' استعمال ہوتا ہے۔",
-        priority = "High Priority",
-        scheduleTime = "Today"
-    ),
-    RevisionCard(
-        id = 2,
-        topic = "Articles",
-        questionEn = "Choose the correct article: He bought ___ apple from the market.",
-        questionUr = "صحیح آرٹیکل منتخب کریں: اس نے بازار سے ایک سیب خریدا۔",
-        options = listOf("a", "an", "the", "no article"),
-        correctIndex = 1,
-        explanationUr = "حرفِ علت (Vowel sound 'a') سے شروع ہونے والے اسم کے ساتھ 'an' لگتا ہے۔",
-        priority = "High Priority",
-        scheduleTime = "Today"
-    ),
-    RevisionCard(
-        id = 3,
-        topic = "Present Simple",
-        questionEn = "Which sentence is grammatically correct for daily habits?",
-        questionUr = "روزه مرہ کی عادت کے لیے کون سا جملہ گرامر کے لحاظ سے درست ہے؟",
-        options = listOf("He go to school daily", "He goes to school daily", "He going to school daily", "He is go to school"),
-        correctIndex = 1,
-        explanationUr = "Present Simple میں He/She/It کے ساتھ فعل میں s یا es کا اضافہ ہوتا ہے۔",
-        priority = "Medium Priority",
-        scheduleTime = "Today"
-    ),
-    RevisionCard(
-        id = 4,
-        topic = "Past Simple",
-        questionEn = "Complete: They ___ a new car last week.",
-        questionUr = "مکمل کریں: انہوں نے پچھلے ہفتے ایک نئی گاڑی خریدی۔",
-        options = listOf("buy", "buys", "bought", "buying"),
-        correctIndex = 2,
-        explanationUr = "ماضی مطلق (Past Simple) میں فعل کی دوسری فارم (bought) استعمال ہوتی ہے۔",
-        priority = "Medium Priority",
-        scheduleTime = "Tomorrow"
-    ),
-    RevisionCard(
-        id = 5,
-        topic = "Prepositions",
-        questionEn = "Choose the correct preposition: We live ___ Lahore.",
-        questionUr = "صحیح حرفِ جار منتخب کریں: ہم لاہور میں رہتے ہیں۔",
-        options = listOf("on", "at", "in", "by"),
-        correctIndex = 2,
-        explanationUr = "بڑے شہروں اور ممالک کے ساتھ حرفِ جار 'in' استعمال ہوتا ہے۔",
-        priority = "Low Priority",
-        scheduleTime = "3 Days"
-    ),
-    RevisionCard(
-        id = 6,
-        topic = "Present Continuous",
-        questionEn = "Complete: Look! The children ___ football in the ground.",
-        questionUr = "مکمل کریں: دیکھو! بچے میدان میں فٹ بال کھیل رہے ہیں۔",
-        options = listOf("play", "plays", "are playing", "played"),
-        correctIndex = 2,
-        explanationUr = "موجودہ جاری کام کے لیے are + verb-ing استعمال ہوتا ہے۔",
-        priority = "Planned",
-        scheduleTime = "4 Days"
-    ),
-    RevisionCard(
-        id = 7,
-        topic = "Possession (Has / Have)",
-        questionEn = "Choose the correct verb: Ali ___ three books.",
-        questionUr = "صحیح فعل منتخب کریں: علی کے پاس تین کتابیں ہیں۔",
-        options = listOf("have", "has", "had", "having"),
-        correctIndex = 1,
-        explanationUr = "واحد اسم (Ali) کے ساتھ ملکیت ظاہر کرنے کے لیے 'has' استعمال ہوتا ہے۔",
-        priority = "Planned",
-        scheduleTime = "5 Days"
-    ),
-    RevisionCard(
-        id = 8,
-        topic = "Future Simple",
-        questionEn = "Complete: Tomorrow, I ___ visit my grandparents.",
-        questionUr = "مکمل کریں: کل میں اپنے دادا دادی سے ملنے جاؤں گا۔",
-        options = listOf("will", "do", "did", "have"),
-        correctIndex = 0,
-        explanationUr = "آئندہ زمانے (Future Simple) کے لیے 'will' استعمال کیا جاتا ہے۔",
-        priority = "Planned",
-        scheduleTime = "6 Days"
-    )
-)
 
 @Composable
 fun RevisionPlannerScreen(
     viewModel: LisanViewModel,
     modifier: Modifier = Modifier
 ) {
-    val scrollState = rememberScrollState()
-    var showRevisionDialog by remember { mutableStateOf(false) }
-    var selectedTopicFilter by remember { mutableStateOf<String?>(null) }
-    var targetedCardToReview by remember { mutableStateOf<RevisionCard?>(null) }
-    var showHistoryDialog by remember { mutableStateOf(false) }
-    var reviewedCount by remember { mutableIntStateOf(0) }
-    var scheduleList by remember { mutableStateOf(comprehensiveRevisionCards) }
-    var activeTab by remember { mutableIntStateOf(0) } // 0: All, 1: Due Today, 2: Mastered
+    val currentSession by viewModel.currentSession.collectAsState()
 
-    val filteredSchedule = when (activeTab) {
-        1 -> scheduleList.filter { it.scheduleTime == "Today" }
-        2 -> scheduleList.filter { it.priority == "Low Priority" || it.priority == "Planned" }
-        else -> scheduleList
+    Box(modifier = modifier.fillMaxSize()) {
+        if (currentSession != null) {
+            RevisionSessionScreen(viewModel = viewModel)
+        } else {
+            RevisionPlannerDashboard(viewModel = viewModel)
+        }
+    }
+}
+
+@Composable
+fun RevisionPlannerDashboard(
+    viewModel: LisanViewModel
+) {
+    val dashboardSummary by viewModel.dashboardSummary.collectAsState()
+    val topicProgressList by viewModel.topicProgress.collectAsState()
+
+    // Trigger dashboard refresh on composition
+    LaunchedEffect(Unit) {
+        viewModel.loadRevisionDashboard()
     }
 
-    Column(
-        modifier = modifier
+    LazyColumn(
+        modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Review Summary Header
-        EditorialCard(
-            containerColor = EditorialAccentPurple.copy(alpha = 0.05f),
-            borderColor = EditorialAccentPurple.copy(alpha = 0.2f)
+        // 1. Header Summary Card
+        item {
+            EditorialCard(
+                containerColor = EditorialAccentPurple.copy(alpha = 0.05f),
+                borderColor = EditorialAccentPurple.copy(alpha = 0.2f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "REVISION PLANNER",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.5.sp,
+                                color = EditorialTextMuted
+                            )
+                            Text(
+                                text = "دہرائی کا منظم منصوبہ",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.EventNote,
+                            contentDescription = null,
+                            tint = EditorialAccentPurple,
+                            modifier = Modifier.size(48.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "منظم دہرائی اور اسمارٹ تکرار آپ کو انگریزی گرامر پر دائمی عبور دلاتی ہے۔",
+                        fontSize = 13.sp,
+                        color = EditorialTextSecondary
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Progress indicators
+                    val summary = dashboardSummary ?: DashboardSummary(0, 0, 0, 0, 0, 0)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Overall Grammar Mastery",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = EditorialTextPrimary
+                        )
+                        Text(
+                            text = "${summary.overallMastery}%",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialAccentPurple
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { summary.overallMastery / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = EditorialAccentPurple,
+                        trackColor = EditorialAccentPurple.copy(alpha = 0.1f)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        DashboardStatBox(
+                            count = "${summary.dueCount}",
+                            label = "Due Today",
+                            subLabel = "دہرائی ضروری",
+                            color = EditorialAccentPurple,
+                            modifier = Modifier.weight(1f)
+                        )
+                        DashboardStatBox(
+                            count = "${summary.weakCount}",
+                            label = "Weak Areas",
+                            subLabel = "کمزور قواعد",
+                            color = Color(0xFFDC2626),
+                            modifier = Modifier.weight(1f)
+                        )
+                        DashboardStatBox(
+                            count = "${summary.masteredCount}",
+                            label = "Mastered",
+                            subLabel = "کامل عبور",
+                            color = Color(0xFF059669),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. Main Revision Actions
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.startRevisionSession("mixed", null, 10) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(54.dp)
+                        .testTag("start_mixed_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Mixed Revision", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+
+                val summary = dashboardSummary
+                val dueCount = summary?.dueCount ?: 0
+                Button(
+                    onClick = { viewModel.startRevisionSession("today", null, 10) },
+                    enabled = dueCount > 0,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(54.dp)
+                        .testTag("start_due_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = EditorialAccentPurple,
+                        disabledContainerColor = EditorialAccentPurple.copy(alpha = 0.2f)
+                    )
+                ) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, tint = if (dueCount > 0) Color.White else Color.Gray)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Review Due ($dueCount)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            }
+        }
+
+        // 3. Topics List Header
+        item {
+            EditorialSectionTitle(text = "REVISION TOPICS • گرامر کے ابواب")
+        }
+
+        // 4. Topics List
+        val activeTopics = listOf(
+            Pair("verb_to_be", Pair("Verb 'To Be' (Am/Is/Are)", "فعلِ ربط")),
+            Pair("articles_a_an_the", Pair("Definite & Indefinite Articles", "حروفِ تنکیر و تعریف")),
+            Pair("present_simple", Pair("Present Simple Tense", "فعلِ حال سادہ")),
+            Pair("present_continuous", Pair("Present Continuous", "فعلِ حال جاری"))
+        )
+
+        items(activeTopics) { (topicId, names) ->
+            val (titleEn, titleUr) = names
+            val progress = topicProgressList.find { it.topicId == topicId }
+            
+            TopicRevisionCard(
+                topicId = topicId,
+                titleEn = titleEn,
+                titleUr = titleUr,
+                progress = progress,
+                onStartSession = {
+                    viewModel.startRevisionSession("topic", topicId, 10)
+                }
+            )
+        }
+
+        // 5. Coming Soon Topics (Ensuring full integrity)
+        item {
+            EditorialSectionTitle(text = "UPCOMING REVISION MODULES")
+        }
+
+        val comingSoonTopics = listOf(
+            Pair("past_simple", Pair("Past Simple Tense", "فعلِ ماضی سادہ")),
+            Pair("future_simple", Pair("Future Simple", "فعلِ مستقبل سادہ")),
+            Pair("passive_voice", Pair("Passive Voice", "فعلِ مجہول"))
+        )
+
+        items(comingSoonTopics) { (_, names) ->
+            val (titleEn, titleUr) = names
+            LockedTopicCard(titleEn = titleEn, titleUr = titleUr)
+        }
+    }
+}
+
+@Composable
+fun DashboardStatBox(
+    count: String,
+    label: String,
+    subLabel: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .background(color.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+            .border(1.dp, color.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = count,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = EditorialTextPrimary
+            )
+            Text(
+                text = subLabel,
+                fontSize = 10.sp,
+                color = EditorialTextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+fun TopicRevisionCard(
+    topicId: String,
+    titleEn: String,
+    titleUr: String,
+    progress: TopicProgressEntity?,
+    onStartSession: () -> Unit
+) {
+    EditorialCard {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "REVISION PLANNER",
-                        fontSize = 12.sp,
+                        text = titleEn,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.0.sp,
-                        color = EditorialTextMuted
+                        color = EditorialPrimary
                     )
                     Text(
-                        text = "دہرائی کا منصوبہ اور نظام",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialAccentPurple
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "منظم دہرائی آپ کو انگریزی گرامر پر کامل عبور دلاتی ہے۔",
-                        fontSize = 13.sp,
+                        text = titleUr,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
                         color = EditorialTextSecondary
                     )
                 }
-                Icon(
-                    imageVector = Icons.Default.EventNote,
-                    contentDescription = null,
-                    tint = EditorialAccentPurple,
-                    modifier = Modifier.size(56.dp)
-                )
+                
+                Box(
+                    modifier = Modifier
+                        .background(Color(0xFF059669).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "100 Qs",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
+                }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Progress Bar
+            val mastery = progress?.overallMastery ?: 0
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "Topic Mastery", fontSize = 12.sp, color = EditorialTextSecondary)
+                Text(text = "$mastery%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { mastery / 100f },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = EditorialPrimary,
+                trackColor = EditorialPrimary.copy(alpha = 0.1f)
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                RevisionStatBox(
-                    count = "${scheduleList.count { it.scheduleTime == "Today" }}",
-                    label = "Due Today",
-                    color = EditorialAccentPurple,
-                    modifier = Modifier.weight(1f)
-                )
-                RevisionStatBox(
-                    count = "$reviewedCount",
-                    label = "Reviewed",
-                    color = EditorialPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                RevisionStatBox(
-                    count = "${45 + reviewedCount}",
-                    label = "Mastered",
-                    color = Color(0xFF059669),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // 2. Action Controls (Start Session & Refresh Schedule)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = {
-                    targetedCardToReview = null
-                    showRevisionDialog = true
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Start Revision", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
-
-            OutlinedButton(
-                onClick = {
-                    scheduleList = scheduleList.shuffled()
-                },
-                modifier = Modifier
-                    .height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, EditorialBorder),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = EditorialPrimary)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "Shuffle", modifier = Modifier.size(20.dp))
-            }
-        }
-
-        // 3. Filter Tabs
-        ScrollableTabRow(
-            selectedTabIndex = activeTab,
-            edgePadding = 0.dp,
-            containerColor = Color.Transparent,
-            divider = {}
-        ) {
-            Tab(
-                selected = activeTab == 0,
-                onClick = { activeTab = 0 },
-                text = { Text("All Topics (${scheduleList.size})", fontWeight = FontWeight.Medium) }
-            )
-            Tab(
-                selected = activeTab == 1,
-                onClick = { activeTab = 1 },
-                text = { Text("Due Today (${scheduleList.count { it.scheduleTime == "Today" }})", fontWeight = FontWeight.Medium) }
-            )
-            Tab(
-                selected = activeTab == 2,
-                onClick = { activeTab = 2 },
-                text = { Text("Upcoming (${scheduleList.count { it.scheduleTime != "Today" }})", fontWeight = FontWeight.Medium) }
-            )
-        }
-
-        // 4. Review Schedule List (All items fully clickable)
-        EditorialSectionTitle(text = "REVIEW SCHEDULE & TOPICS")
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            filteredSchedule.forEach { card ->
-                ScheduleItemCard(
-                    card = card,
-                    onClick = {
-                        targetedCardToReview = card
-                        showRevisionDialog = true
-                    }
-                )
-            }
-        }
-
-        // 5. Learning History (Clickable)
-        EditorialSectionTitle(text = "LEARNING HISTORY & STATS")
-        LearningHistoryCard(
-            reviewedCount = reviewedCount,
-            onClick = { showHistoryDialog = true }
-        )
-    }
-
-    // Revision Session Dialog
-    if (showRevisionDialog) {
-        val sessionCards = if (targetedCardToReview != null) {
-            listOf(targetedCardToReview!!)
-        } else {
-            scheduleList.filter { it.scheduleTime == "Today" }.ifEmpty { scheduleList }
-        }
-
-        RevisionSessionDialog(
-            cards = sessionCards,
-            onDismiss = {
-                showRevisionDialog = false
-                targetedCardToReview = null
-            },
-            onCompleted = { count ->
-                reviewedCount += count
-                showRevisionDialog = false
-                targetedCardToReview = null
-            }
-        )
-    }
-
-    // History Details Dialog
-    if (showHistoryDialog) {
-        AlertDialog(
-            onDismissRequest = { showHistoryDialog = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Learning History & Analytics", fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                    IconButton(onClick = { showHistoryDialog = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = EditorialTextMuted)
-                    }
+                // mini stats
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MiniStat(count = "${progress?.dueCount ?: 0}", label = "Due", color = EditorialAccentPurple)
+                    MiniStat(count = "${progress?.weakCount ?: 0}", label = "Weak", color = Color(0xFFDC2626))
+                    MiniStat(count = "${progress?.unseenCount ?: 100}", label = "Unseen", color = Color.Gray)
                 }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text("Total Review Sessions Completed: $reviewedCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialTextPrimary)
-                    Text("Grammar Mastery Level: Advanced Beginner (A2)", fontSize = 13.sp, color = EditorialTextSecondary)
-                    Text("Consistency Streak: 5 Days Active 🔥", fontSize = 13.sp, color = Color(0xFF059669))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Keep practicing daily to reinforce Arabic-English grammar comparative patterns.", fontSize = 12.sp, color = EditorialTextMuted)
-                }
-            },
-            confirmButton = {
+
                 Button(
-                    onClick = { showHistoryDialog = false },
+                    onClick = onStartSession,
+                    modifier = Modifier
+                        .height(38.dp)
+                        .testTag("start_topic_${topicId}"),
+                    shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
                 ) {
-                    Text("Close")
+                    Text("Practice", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
-            },
-            containerColor = EditorialSurface
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniStat(count: String, label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .background(color, CircleShape)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = "$count $label",
+            fontSize = 11.sp,
+            color = EditorialTextSecondary
         )
     }
 }
 
 @Composable
-fun RevisionSessionDialog(
-    cards: List<RevisionCard>,
-    onDismiss: () -> Unit,
-    onCompleted: (Int) -> Unit
-) {
-    var currentIndex by remember { mutableIntStateOf(0) }
-    var selectedOption by remember { mutableStateOf<Int?>(null) }
-    var isSubmitted by remember { mutableStateOf(false) }
-    var score by remember { mutableIntStateOf(0) }
-    var isFinished by remember { mutableStateOf(false) }
-
-    val currentCard = cards.getOrNull(currentIndex)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+fun LockedTopicCard(titleEn: String, titleUr: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)),
+        border = BorderStroke(1.dp, EditorialBorder.copy(alpha = 0.5f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (isFinished) "Revision Complete! 🎉" else "Revision ${currentIndex + 1} of ${cards.size}",
+                    text = titleEn,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = EditorialPrimary
+                    color = EditorialTextMuted
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = EditorialTextMuted)
+                Text(
+                    text = titleUr,
+                    fontSize = 13.sp,
+                    color = EditorialTextMuted
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Coming Soon",
+                    tint = EditorialTextMuted,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Seeding Bank",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = EditorialTextMuted
+                )
+            }
+        }
+    }
+}
+
+// ====================================
+// REVISION SESSION SCREEN (ACTIVE MCQ)
+// ====================================
+
+@Composable
+fun RevisionSessionScreen(
+    viewModel: LisanViewModel
+) {
+    val currentSession by viewModel.currentSession.collectAsState()
+    val activeQuestions by viewModel.activeSessionQuestions.collectAsState()
+    val currentIdx by viewModel.currentQuestionIndex.collectAsState()
+    val selectedOptionIdx by viewModel.selectedOptionIndex.collectAsState()
+    val answerResult by viewModel.answerResult.collectAsState()
+    val isCompleted by viewModel.isSessionCompleted.collectAsState()
+
+    val session = currentSession ?: return
+
+    if (isCompleted) {
+        RevisionSessionCompletionScreen(
+            session = session,
+            onExit = { viewModel.exitRevisionSession() }
+        )
+    } else if (activeQuestions.isNotEmpty() && currentIdx < activeQuestions.size) {
+        val (question, _) = activeQuestions[currentIdx]
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            // 1. Session Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { viewModel.exitRevisionSession() },
+                    modifier = Modifier.testTag("exit_session_button")
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Exit Session")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when (session.sessionType) {
+                            "topic" -> "Grammar Topic Revision"
+                            "mixed" -> "Mixed Grammar Review"
+                            "today" -> "Spaced Repetition Review"
+                            else -> "Revision Session"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialAccentPurple
+                    )
+                    Text(
+                        text = "Question ${currentIdx + 1} of ${activeQuestions.size}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialPrimary
+                    )
                 }
             }
-        },
-        text = {
-            if (isFinished || currentCard == null) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("ماشاء اللہ! آپ نے کامیابی سے دہرائی مکمل کر لی ہے۔", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary, textAlign = TextAlign.Center)
-                    Text("Correct Answers: $score / ${cards.size}", fontSize = 14.sp, color = EditorialTextSecondary)
-                    Button(
-                        onClick = { onCompleted(cards.size) },
-                        colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
-                    ) {
-                        Text("Finish & Save Progress")
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Topic Tag
-                    Surface(
-                        color = EditorialAccentPurple.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = currentCard.topic.uppercase(),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = EditorialAccentPurple,
-                            letterSpacing = 1.2.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
 
-                    // English Question (Separate Paragraph)
-                    Text(
-                        text = currentCard.questionEn,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialTextPrimary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { (currentIdx + 1) / activeQuestions.size.toFloat() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = EditorialAccentPurple,
+                trackColor = EditorialAccentPurple.copy(alpha = 0.1f)
+            )
 
-                    // Urdu Question (Separate Paragraph on its own line)
-                    Text(
-                        text = currentCard.questionUr,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = EditorialTextSecondary,
-                        textAlign = TextAlign.Start,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+            Spacer(modifier = Modifier.height(16.dp))
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Options
-                    currentCard.options.forEachIndexed { idx, option ->
-                        val isSelected = selectedOption == idx
-                        val isCorrect = idx == currentCard.correctIndex
-                        val btnBg = when {
-                            isSubmitted && isCorrect -> Color(0xFFD1FAE5)
-                            isSubmitted && isSelected && !isCorrect -> Color(0xFFFEE2E2)
-                            isSelected -> EditorialPrimary.copy(alpha = 0.1f)
-                            else -> EditorialSurface
+            // 2. Interactive MCQ Area
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    
+                    // Question Card
+                    EditorialCard(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp)
+                        ) {
+                            Text(
+                                text = question.stem,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialPrimary,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            question.context?.let { ctx ->
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = ctx,
+                                    fontSize = 15.sp,
+                                    color = EditorialTextSecondary,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
-                        val borderCol = when {
-                            isSubmitted && isCorrect -> Color(0xFF059669)
-                            isSubmitted && isSelected && !isCorrect -> Color(0xFFEF4444)
+                    }
+
+                    // Options list
+                    val options = question.getOptions()
+                    options.forEachIndexed { index, optionText ->
+                        val isSelected = selectedOptionIdx == index
+                        val hasAnswered = answerResult != null
+                        val isThisCorrect = answerResult?.correctOptionIndex == index
+                        
+                        val optionLetter = when (index) {
+                            0 -> "A"
+                            1 -> "B"
+                            2 -> "C"
+                            else -> "D"
+                        }
+
+                        val containerColor = when {
+                            hasAnswered && isThisCorrect -> Color(0xFFD1FAE5) // light green
+                            hasAnswered && isSelected && !isThisCorrect -> Color(0xFFFEE2E2) // light red
+                            isSelected -> EditorialPillBg
+                            else -> MaterialTheme.colorScheme.surface
+                        }
+
+                        val borderColor = when {
+                            hasAnswered && isThisCorrect -> Color(0xFF059669)
+                            hasAnswered && isSelected && !isThisCorrect -> Color(0xFFDC2626)
                             isSelected -> EditorialPrimary
                             else -> EditorialBorder
                         }
 
-                        Surface(
-                            onClick = {
-                                if (!isSubmitted) selectedOption = idx
-                            },
-                            color = btnBg,
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, borderCol),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = option,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = EditorialTextPrimary,
-                                modifier = Modifier.padding(12.dp)
-                            )
+                        val icon = when {
+                            hasAnswered && isThisCorrect -> Icons.Default.CheckCircle
+                            hasAnswered && isSelected && !isThisCorrect -> Icons.Default.Cancel
+                            else -> null
                         }
-                    }
 
-                    // Explanation Block (Clean Urdu Explanation)
-                    if (isSubmitted) {
-                        Surface(
-                            color = Color(0xFFF0F9FF),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFFBAE6FD)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = "وضاحت (Explanation):",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0369A1)
-                                )
-                                Text(
-                                    text = currentCard.explanationUr,
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF0369A1)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (!isFinished && currentCard != null) {
-                if (!isSubmitted) {
-                    Button(
-                        onClick = {
-                            if (selectedOption != null) {
-                                isSubmitted = true
-                                if (selectedOption == currentCard.correctIndex) {
-                                    score++
+                        val iconColor = if (isThisCorrect) Color(0xFF059669) else Color(0xFFDC2626)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 52.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(containerColor)
+                                .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+                                .clickable(enabled = !hasAnswered) {
+                                    viewModel.submitRevisionAnswer(question.id, index)
                                 }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .testTag("option_button_$index"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Letter bubble
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(
+                                        if (isSelected) EditorialPrimary else EditorialBorder.copy(alpha = 0.5f),
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = optionLetter,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) Color.White else EditorialTextPrimary
+                                )
                             }
-                        },
-                        enabled = selectedOption != null,
-                        colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
-                    ) {
-                        Text("Check Answer")
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Text(
+                                text = optionText,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = EditorialTextPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            icon?.let {
+                                Icon(imageVector = it, contentDescription = null, tint = iconColor)
+                            }
+                        }
                     }
-                } else {
-                    Button(
-                        onClick = {
-                            if (currentIndex < cards.size - 1) {
-                                currentIndex++
-                                selectedOption = null
-                                isSubmitted = false
-                            } else {
-                                isFinished = true
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
-                    ) {
-                        Text(if (currentIndex < cards.size - 1) "Next Question" else "See Results")
+
+                    // 3. Post-Answer Feedback
+                    answerResult?.let { res ->
+                        FeedbackPanel(res = res)
                     }
                 }
             }
-        },
-        containerColor = EditorialSurface
-    )
-}
 
-@Composable
-private fun RevisionStatBox(count: String, label: String, color: Color, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        color = color.copy(alpha = 0.08f),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.2f))
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = count, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
-            Text(text = label, fontSize = 10.sp, color = EditorialTextMuted)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 4. Action Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                if (answerResult != null) {
+                    val isLast = currentIdx == activeQuestions.size - 1
+                    Button(
+                        onClick = { viewModel.nextRevisionQuestion() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag(if (isLast) "complete_session_button" else "next_question_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
+                    ) {
+                        Text(
+                            text = if (isLast) "Complete Session" else "Next Question",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.NavigateNext, contentDescription = null)
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ScheduleItemCard(card: RevisionCard, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        color = EditorialSurface,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, EditorialBorder)
+fun FeedbackPanel(res: AnswerResult) {
+    EditorialCard(
+        containerColor = if (res.isCorrect) Color(0xFFF0FDF4) else Color(0xFFFEF2F2),
+        borderColor = if (res.isCorrect) Color(0xFFBBF7D0) else Color(0xFFFECACA)
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Surface(
-                    color = EditorialPillBg,
-                    shape = CircleShape,
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Schedule, contentDescription = null, tint = EditorialPrimary, modifier = Modifier.size(18.dp))
-                    }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(text = card.topic, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                    Text(text = card.priority, fontSize = 11.sp, color = EditorialTextMuted)
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (res.isCorrect) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                    contentDescription = null,
+                    tint = if (res.isCorrect) Color(0xFF059669) else Color(0xFFDC2626)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (res.isCorrect) "صحیح جواب! (Correct)" else "غلط جواب! (Incorrect)",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (res.isCorrect) Color(0xFF059669) else Color(0xFFDC2626)
+                )
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Surface(
-                    color = if (card.scheduleTime == "Today") EditorialAccentPurple.copy(alpha = 0.1f) else EditorialBorder.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Text(
-                        text = card.scheduleTime,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (card.scheduleTime == "Today") EditorialAccentPurple else EditorialTextMuted,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Default.NavigateNext,
-                    contentDescription = "Open Revision",
-                    tint = EditorialTextMuted,
-                    modifier = Modifier.size(20.dp)
+            Text(
+                text = res.explanationEnglish,
+                fontSize = 14.sp,
+                color = EditorialTextPrimary,
+                lineHeight = 20.sp
+            )
+
+            HorizontalDivider(color = EditorialBorder.copy(alpha = 0.5f))
+
+            Text(
+                text = res.explanationUrdu,
+                fontSize = 14.sp,
+                color = EditorialTextPrimary,
+                lineHeight = 22.sp
+            )
+
+            if (res.explanationArabic.isNotBlank()) {
+                HorizontalDivider(color = EditorialBorder.copy(alpha = 0.5f))
+                Text(
+                    text = "موازنة مع اللغة العربية (Arabic Comparison):",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = EditorialAccentPurple
+                )
+                Text(
+                    text = res.explanationArabic,
+                    fontSize = 13.sp,
+                    color = EditorialTextSecondary,
+                    lineHeight = 18.sp
                 )
             }
         }
@@ -646,38 +770,88 @@ private fun ScheduleItemCard(card: RevisionCard, onClick: () -> Unit) {
 }
 
 @Composable
-private fun LearningHistoryCard(reviewedCount: Int, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        color = EditorialSurface,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, EditorialBorder)
+fun RevisionSessionCompletionScreen(
+    session: RevisionSessionEntity,
+    onExit: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(Color(0xFF059669).copy(alpha = 0.1f), CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                Surface(
-                    color = EditorialPrimary.copy(alpha = 0.1f),
-                    shape = CircleShape,
-                    modifier = Modifier.size(40.dp)
+                Icon(
+                    imageVector = Icons.Default.EmojiEvents,
+                    contentDescription = null,
+                    tint = Color(0xFF059669),
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+
+            Text(
+                text = "Revision Complete!",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = EditorialPrimary
+            )
+
+            Text(
+                text = "شاندار دہرائی! گرامر کے قوانین اب آپ کے ذہن میں مزید پختہ ہو گئے ہیں۔",
+                fontSize = 15.sp,
+                color = EditorialTextSecondary,
+                textAlign = TextAlign.Center,
+                lineHeight = 22.sp
+            )
+
+            EditorialCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.History, contentDescription = null, tint = EditorialPrimary, modifier = Modifier.size(20.dp))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "CORRECT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text(text = "${session.scoreCorrect}", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF059669))
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(40.dp).background(EditorialBorder))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = "INCORRECT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text(text = "${session.scoreIncorrect}", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(40.dp).background(EditorialBorder))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        val pct = if (session.actualQuestionCount > 0) (session.scoreCorrect * 100) / session.actualQuestionCount else 0
+                        Text(text = "SCORE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text(text = "$pct%", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
                     }
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Learning History & Activity", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialTextPrimary)
-                    Text("Total sessions reviewed today: $reviewedCount", fontSize = 12.sp, color = EditorialTextMuted)
-                }
             }
-            Icon(Icons.Default.NavigateNext, contentDescription = null, tint = EditorialTextMuted)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onExit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("exit_session_button"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
+            ) {
+                Text("Return to Planner", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
         }
     }
 }

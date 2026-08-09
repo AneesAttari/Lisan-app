@@ -14,14 +14,18 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -53,6 +57,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -65,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
 import com.example.data.model.Content
 import com.example.data.model.Part
@@ -74,6 +82,10 @@ import com.example.ui.viewmodel.LisanViewModel
 import com.example.ui.viewmodel.VoiceInputLanguage
 import com.example.ui.viewmodel.VoiceSessionState
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 
 private fun isLineRtl(text: String): Boolean {
     return text.any { it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' || it in '\u08A0'..'\u08FF' || it in '\uFB50'..'\uFDFF' || it in '\uFE70'..'\uFEFF' }
@@ -83,7 +95,8 @@ private fun isLineRtl(text: String): Boolean {
 fun LisanAnimatedOrb(
     state: VoiceSessionState,
     rmsVolume: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isCompact: Boolean = false
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "orb_animation")
 
@@ -116,18 +129,21 @@ fun LisanAnimatedOrb(
         else -> breatheScale
     }
 
+    val orbSize = if (isCompact) 110.dp else 210.dp
+    val haloSize = if (isCompact) 140.dp else 270.dp
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .scale(scale)
-            .size(230.dp)
+            .size(orbSize)
             .testTag("lisan_animated_orb_container")
     ) {
         // Outer ambient halo
         val haloAlpha = if (state == VoiceSessionState.LISTENING) 0.25f + (rmsVolume * 0.2f) else 0.15f
         Box(
             modifier = Modifier
-                .size(290.dp)
+                .size(haloSize)
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
@@ -195,6 +211,86 @@ fun LisanAnimatedOrb(
     }
 }
 
+enum class ConnectionStateStatus { IDLE, CONNECTING, CONNECTED, ERROR }
+
+private fun isNetworkAvailable(context: Context): Boolean {
+    val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    val activeNetwork = connectivityManager?.activeNetwork ?: return false
+    val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
+
+@Composable
+fun FlutterGlowingSphere(
+    pulseScale: Float,
+    connectionStatus: ConnectionStateStatus,
+    rmsVolume: Float,
+    voiceSessionState: VoiceSessionState,
+    modifier: Modifier = Modifier
+) {
+    val gradientColors = if (connectionStatus == ConnectionStateStatus.ERROR) {
+        listOf(
+            0.2f to Color(0xFFFECACA),
+            0.7f to Color(0xFFEF4444),
+            1.0f to Color(0xFF991B1B)
+        )
+    } else {
+        listOf(
+            0.2f to Color(0xFF6B9CFF),
+            0.7f to Color(0xFF1E52F6),
+            1.0f to Color(0xFF0030BF)
+        )
+    }
+
+    val finalScale = if (connectionStatus == ConnectionStateStatus.CONNECTED) {
+        when (voiceSessionState) {
+            VoiceSessionState.LISTENING -> pulseScale + (rmsVolume * 0.15f)
+            VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> pulseScale * 1.05f
+            else -> pulseScale
+        }
+    } else {
+        pulseScale
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .scale(finalScale)
+            .size(180.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(220.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF1E52F6).copy(alpha = 0.45f),
+                            Color(0xFF1E52F6).copy(alpha = 0.15f),
+                            Color.Transparent
+                        )
+                    ),
+                    shape = CircleShape
+                )
+        )
+
+        Box(
+            modifier = Modifier
+                .size(180.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colorStops = gradientColors.toTypedArray()
+                    ),
+                    shape = CircleShape
+                )
+                .border(
+                    BorderStroke(1.5.dp, Color.White.copy(alpha = 0.6f)),
+                    shape = CircleShape
+                )
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun VoiceTutorDialog(
     viewModel: LisanViewModel,
@@ -213,6 +309,9 @@ fun VoiceTutorDialog(
         else -> "en-US"
     }
 
+    var connectionStatus by remember { mutableStateOf(ConnectionStateStatus.CONNECTING) }
+    var connectionErrorMessage by remember { mutableStateOf("") }
+
     // ISOLATED VOICE TUTOR HISTORY STATE
     var voiceHistory by remember { mutableStateOf<List<Content>>(emptyList()) }
     var userSpeechText by remember { mutableStateOf("") }
@@ -223,32 +322,42 @@ fun VoiceTutorDialog(
     var rmsVolume by remember { mutableFloatStateOf(0f) }
     var autoListenEnabled by remember { mutableStateOf(true) }
     var currentSpeed by remember { mutableFloatStateOf(1.0f) }
+    var listeningTimeoutJob by remember { mutableStateOf<Job?>(null) }
+
+    val reconnectVoiceAssistant: () -> Unit = {
+        scope.launch {
+            connectionStatus = ConnectionStateStatus.CONNECTING
+            connectionErrorMessage = ""
+            viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
+            kotlinx.coroutines.delay(2000)
+            if (!isNetworkAvailable(context)) {
+                connectionStatus = ConnectionStateStatus.ERROR
+                connectionErrorMessage = "Connection timed out. Please retry."
+                viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
+            } else {
+                connectionStatus = ConnectionStateStatus.CONNECTED
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                val welcome = "السلام عليكم ورحمة الله وبركاته\nWelcome back to Lisan Grammar. I am ready to help you learn English grammar by comparing it with Arabic grammar."
+                tutorSpeechText = welcome
+                viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                viewModel.ttsManager.speak(welcome)
+            }
+        }
+    }
 
     var showSettingsMenu by remember { mutableStateOf(false) }
     var showPlusMenu by remember { mutableStateOf(false) }
     var showEndSessionConfirmation by remember { mutableStateOf(false) }
     var showPronunciationDialog by remember { mutableStateOf(false) }
     var showVoiceSelectionDialog by remember { mutableStateOf(false) }
-    var showFirstTimeVoiceDialog by remember {
-        mutableStateOf(
-            !context.getSharedPreferences("lisan_prefs", Context.MODE_PRIVATE)
-                .getBoolean("voice_selection_prompt_shown", false)
-        )
-    }
+    var showFirstTimeVoiceDialog by remember { mutableStateOf(false) }
+
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     val isSpeechRecognizerAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
     val currentlySpeakingText by viewModel.ttsManager.currentlySpeaking.collectAsState()
-
-    LaunchedEffect(currentlySpeakingText) {
-        if (currentlySpeakingText == null && voiceSessionState == VoiceSessionState.SPEAKING) {
-            viewModel.setVoiceSessionState(VoiceSessionState.READY)
-            if (autoListenEnabled && !isMuted) {
-                speechRecognizer?.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH))
-                viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
-            }
-        }
-    }
 
     var hasAudioPermission by remember {
         mutableStateOf(
@@ -257,13 +366,6 @@ fun VoiceTutorDialog(
                 Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
         )
-    }
-
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1000)
-        val welcome = "Hello! Welcome to Lisan AI Tutor. I am ready to practice English and Arabic with you!"
-        viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
-        viewModel.ttsManager.speak(welcome)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -294,44 +396,70 @@ fun VoiceTutorDialog(
         }
     }
 
+    val handleNoSpeechDetected: () -> Unit = {
+        listeningTimeoutJob?.cancel()
+        rmsVolume = 0f
+        userSpeechText = ""
+        val fallbackText = "I couldn't hear your voice. Please try speaking again."
+        errorMessage = fallbackText
+        tutorSpeechText = fallbackText
+        if (!isMuted) {
+            viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+            viewModel.ttsManager.speak(fallbackText, speed = currentSpeed)
+        } else {
+            viewModel.setVoiceSessionState(VoiceSessionState.READY)
+        }
+    }
+
     val sendVoiceInput: (String) -> Unit = { text ->
-        if (text.isNotBlank()) {
-            userSpeechText = text
+        val trimmed = text.trim()
+        if (trimmed.isBlank() || trimmed == "Listening...") {
+            handleNoSpeechDetected()
+        } else {
+            userSpeechText = trimmed
             manualInputText = ""
             viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
             errorMessage = ""
 
-            val userContent = Content(role = "user", parts = listOf(Part(text = text)))
+            val userContent = Content(role = "user", parts = listOf(Part(text = trimmed)))
             val updatedHistory = voiceHistory + userContent
             voiceHistory = updatedHistory
 
-            scope.launch {
+            scope.launch(Dispatchers.IO) {
                 try {
-                    val profileSummary = viewModel.learnerProfileManager.buildPersonalizedPromptContext()
+                    val profileSummary = if (isStudyModeOn) {
+                        viewModel.buildPersonalizedStudyContext()
+                    } else {
+                        viewModel.learnerProfileManager.buildPersonalizedPromptContext()
+                    }
                     val reply = RetrofitClient.getVoiceTutorResponse(
                         history = updatedHistory,
                         userName = viewModel.userName.value,
-                        learnerProfileSummary = profileSummary
+                        learnerProfileSummary = profileSummary,
+                        isStudyModeOn = isStudyModeOn
                     )
                     
                     val cleanReply = reply.replace(Regex("\\[(pause_short|pause_long|pitch_high|pitch_low|pitch_normal)\\]"), "").replace(Regex("\\s+"), " ").trim()
                     Log.d("VoiceTutorDialog", "Received tutor reply: $cleanReply")
-                    tutorSpeechText = cleanReply
                     
-                    val modelContent = Content(role = "model", parts = listOf(Part(text = reply)))
-                    voiceHistory = updatedHistory + modelContent
+                    withContext(Dispatchers.Main) {
+                        tutorSpeechText = cleanReply
+                        val modelContent = Content(role = "model", parts = listOf(Part(text = reply)))
+                        voiceHistory = updatedHistory + modelContent
 
-                    if (!isMuted) {
-                        viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
-                        Log.d("VoiceTutorDialog", "Telling TTS Manager to speak")
-                        viewModel.ttsManager.speak(reply, speed = currentSpeed)
-                    } else {
-                        Log.d("VoiceTutorDialog", "Muted, not speaking")
-                        viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                        if (!isMuted) {
+                            viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                            Log.d("VoiceTutorDialog", "Telling TTS Manager to speak")
+                            viewModel.ttsManager.speak(reply, speed = currentSpeed)
+                        } else {
+                            Log.d("VoiceTutorDialog", "Muted, not speaking")
+                            viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                        }
                     }
                 } catch (e: Exception) {
-                    errorMessage = "Could not connect to voice tutor. Please try again."
-                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    withContext(Dispatchers.Main) {
+                        handleNoSpeechDetected()
+                    }
                 }
             }
         }
@@ -348,15 +476,14 @@ fun VoiceTutorDialog(
             if (!text.isNullOrBlank()) {
                 sendVoiceInput(text)
             } else {
-                viewModel.setVoiceSessionState(VoiceSessionState.READY)
-                errorMessage = "I could not understand that. Please try again."
+                handleNoSpeechDetected()
             }
         } else {
-            viewModel.setVoiceSessionState(VoiceSessionState.READY)
+            handleNoSpeechDetected()
         }
     }
 
-    val initSpeechRecognizer: () -> SpeechRecognizer = {
+    val initSpeechRecognizer: () -> SpeechRecognizer? = {
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
@@ -365,66 +492,106 @@ fun VoiceTutorDialog(
             Log.e("VoiceTutor", "Error releasing speech recognizer", e)
         }
 
-        val recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
-        recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+        var recognizer: SpeechRecognizer? = null
+        try {
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+                recognizer.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                    }
+
+                    override fun onBeginningOfSpeech() {
+                        listeningTimeoutJob?.cancel() // Speech started, cancel timeout
+                        if (userSpeechText.isBlank()) {
+                            userSpeechText = "Listening..."
+                        }
+                    }
+
+                    override fun onRmsChanged(rmsdB: Float) {
+                        if (rmsdB > -2f) {
+                            rmsVolume = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                        }
+                    }
+
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+
+                    override fun onEndOfSpeech() {
+                        listeningTimeoutJob?.cancel()
+                        rmsVolume = 0f
+                        if (voiceSessionState == VoiceSessionState.LISTENING) {
+                            viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
+                        }
+                    }
+
+                    override fun onError(error: Int) {
+                        Log.e("VoiceTutor", "Speech recognizer error: $error")
+                        val errorDescription = when (error) {
+                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error. Please check your microphone."
+                            SpeechRecognizer.ERROR_CLIENT -> "Client-side error. Google Speech Services might be updating or busy."
+                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required."
+                            SpeechRecognizer.ERROR_NETWORK -> "Network error. Please check your internet connection."
+                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout. Please check your connection."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Please speak clearly."
+                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition service is busy. Please try again."
+                            SpeechRecognizer.ERROR_SERVER -> "Server error. Please try again later."
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected. Please speak closer to your microphone."
+                            else -> "Speech recognition error ($error). Please try again."
+                        }
+                        
+                        if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                            handleNoSpeechDetected()
+                        } else {
+                            Log.w("VoiceTutor", "Technical speech error ($errorDescription), falling back to system speech input")
+                            listeningTimeoutJob?.cancel()
+                            rmsVolume = 0f
+                            launchGoogleSpeechInput()
+                        }
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        listeningTimeoutJob?.cancel()
+                        rmsVolume = 0f
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull() ?: if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") userSpeechText else null
+                        if (!text.isNullOrBlank()) {
+                            sendVoiceInput(text)
+                        } else {
+                            handleNoSpeechDetected()
+                        }
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull()
+                        if (!text.isNullOrBlank()) {
+                            userSpeechText = text
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            } else {
+                Log.e("VoiceTutor", "Speech recognizer is not available on this device.")
             }
-
-            override fun onBeginningOfSpeech() {
-                if (userSpeechText.isBlank()) {
-                    userSpeechText = "Listening..."
-                }
-            }
-
-            override fun onRmsChanged(rmsdB: Float) {
-                if (rmsdB > -2f) {
-                    rmsVolume = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
-                }
-            }
-
-            override fun onBufferReceived(buffer: ByteArray?) {}
-
-            override fun onEndOfSpeech() {
-                rmsVolume = 0f
-                if (voiceSessionState == VoiceSessionState.LISTENING) {
-                    viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
-                }
-            }
-
-            override fun onError(error: Int) {
-                rmsVolume = 0f
-                viewModel.setVoiceSessionState(VoiceSessionState.READY)
-                if (error == SpeechRecognizer.ERROR_NO_MATCH) {
-                    errorMessage = "I could not understand that. Please try again."
-                } else if (error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    errorMessage = "No speech was detected. Please try again."
-                }
-            }
-
-            override fun onResults(results: Bundle?) {
-                rmsVolume = 0f
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull() ?: if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") userSpeechText else null
-                if (!text.isNullOrBlank()) {
-                    sendVoiceInput(text)
-                } else {
-                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
-                }
-            }
-
-            override fun onPartialResults(partialResults: Bundle?) {
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull()
-                if (!text.isNullOrBlank()) {
-                    userSpeechText = text
-                }
-            }
-
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
+        } catch (e: Exception) {
+            Log.e("VoiceTutor", "Error initializing speech recognizer", e)
+        }
         speechRecognizer = recognizer
         recognizer
+    }
+
+    val stopListening: () -> Unit = {
+        listeningTimeoutJob?.cancel()
+        try {
+            speechRecognizer?.stopListening()
+        } catch (e: Exception) {
+            Log.e("VoiceTutor", "Error in stopListening", e)
+        }
+        rmsVolume = 0f
+        if (voiceSessionState == VoiceSessionState.LISTENING) {
+            viewModel.setVoiceSessionState(VoiceSessionState.READY)
+        }
     }
 
     val startListening: () -> Unit = {
@@ -441,36 +608,51 @@ fun VoiceTutorDialog(
             viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
             rmsVolume = 0f
 
-            val recognizer = speechRecognizer ?: initSpeechRecognizer()
-            try {
-                recognizer.cancel()
-            } catch (e: Exception) {
-                Log.e("VoiceTutor", "Error cancelling recognizer", e)
-            }
-
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
-                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            // Start an 8-second timeout. If speech doesn't begin/result, trigger no-speech handler.
+            listeningTimeoutJob?.cancel()
+            listeningTimeoutJob = scope.launch(Dispatchers.Main) {
+                delay(8000) // 8 seconds timeout
+                if (voiceSessionState == VoiceSessionState.LISTENING) {
+                    handleNoSpeechDetected()
+                }
             }
 
             try {
-                recognizer.startListening(intent)
-            } catch (e: Exception) {
-                Log.e("VoiceTutor", "Error starting speech recognition", e)
-                launchGoogleSpeechInput()
-            }
-        }
-    }
+                val recognizer = speechRecognizer ?: initSpeechRecognizer()
+                if (recognizer == null) {
+                    listeningTimeoutJob?.cancel()
+                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    errorMessage = "Speech recognition is not fully supported on this device. Please use keyboard typing instead."
+                } else {
+                    try {
+                        recognizer.cancel()
+                    } catch (e: Exception) {
+                        Log.e("VoiceTutor", "Error cancelling recognizer", e)
+                    }
 
-    val stopListening: () -> Unit = {
-        speechRecognizer?.stopListening()
-        rmsVolume = 0f
-        if (voiceSessionState == VoiceSessionState.LISTENING) {
-            viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
+                        putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
+                        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    }
+
+                    try {
+                        recognizer.startListening(intent)
+                    } catch (e: Exception) {
+                        Log.e("VoiceTutor", "Error starting speech recognition", e)
+                        listeningTimeoutJob?.cancel()
+                        launchGoogleSpeechInput()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("VoiceTutor", "Microphone or Speech Recognition setup failed", e)
+                listeningTimeoutJob?.cancel()
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                errorMessage = "Failed to start microphone. Please try again."
+            }
         }
     }
 
@@ -500,6 +682,48 @@ fun VoiceTutorDialog(
                 viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
                 errorMessage = "Google speech recognition is unavailable on this device."
             }
+        }
+    }
+
+    var wasSpeaking by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentlySpeakingText) {
+        if (currentlySpeakingText != null) {
+            wasSpeaking = true
+        } else if (wasSpeaking) {
+            wasSpeaking = false
+            if (voiceSessionState == VoiceSessionState.SPEAKING) {
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                if (autoListenEnabled && !isMuted && hasAudioPermission) {
+                    startListening()
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(hasAudioPermission) {
+        if (hasAudioPermission && voiceSessionState == VoiceSessionState.READY && connectionStatus == ConnectionStateStatus.CONNECTED && !wasSpeaking) {
+            startListening()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        connectionStatus = ConnectionStateStatus.CONNECTING
+        kotlinx.coroutines.delay(2000)
+        
+        if (!isNetworkAvailable(context)) {
+            connectionStatus = ConnectionStateStatus.ERROR
+            connectionErrorMessage = "Connection timed out. Please retry."
+            viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
+        } else {
+            connectionStatus = ConnectionStateStatus.CONNECTED
+            if (!hasAudioPermission) {
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            val welcome = "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
+            tutorSpeechText = welcome
+            viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+            viewModel.ttsManager.speak(welcome)
         }
     }
 
@@ -558,6 +782,30 @@ fun VoiceTutorDialog(
         )
     }
 
+    if (showSettingsMenu) {
+        VoiceTutorSettingsDialog(
+            viewModel = viewModel,
+            onDismiss = { showSettingsMenu = false }
+        )
+    }
+
+    BackHandler(enabled = true) {
+        stopSpeaking()
+        stopListening()
+        onDismissRequest()
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse_animation")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_scale"
+    )
+
     Dialog(
         onDismissRequest = {
             stopSpeaking()
@@ -566,247 +814,182 @@ fun VoiceTutorDialog(
         },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
+            dismissOnBackPress = false,
             dismissOnClickOutside = false
         )
     ) {
+        val view = LocalView.current
+        val dialogWindowProvider = view.parent as? DialogWindowProvider
+        SideEffect {
+            dialogWindowProvider?.window?.let { window ->
+                window.setLayout(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+        }
+
         Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color(0xFFF8FAFC)
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+                .imePadding(),
+            color = Color.White
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .systemBarsPadding()
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
+                // APP BAR (FLUTTER SPEC)
+                Row(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(Color.White)
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // TOP BAR
+                    IconButton(
+                        onClick = {
+                            stopSpeaking()
+                            stopListening()
+                            onDismissRequest()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color(0xFF3F51B5)
+                        )
+                    }
+
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            onClick = {
-                                stopSpeaking()
-                                stopListening()
-                                onDismissRequest()
-                            },
-                            color = Color.White,
-                            shape = CircleShape,
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = EditorialPrimary,
-                                    modifier = Modifier.size(20.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(
+                                    color = when (connectionStatus) {
+                                        ConnectionStateStatus.CONNECTING -> Color(0xFFFFA500) // Orange
+                                        ConnectionStateStatus.CONNECTED -> Color(0xFF4CAF50) // Green
+                                        ConnectionStateStatus.ERROR -> Color(0xFFF44336) // Red
+                                        ConnectionStateStatus.IDLE -> Color(0xFF9E9E9E) // Grey
+                                    },
+                                    shape = CircleShape
                                 )
-                            }
-                        }
-
-                    // Center Title Pill with Status
-                        Surface(
-                            color = Color(0xFFEEF2F6),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.height(38.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(
-                                            color = when(voiceSessionState) {
-                                                VoiceSessionState.LISTENING -> Color(0xFFEF4444) // Red
-                                                VoiceSessionState.PROCESSING -> Color(0xFFF59E0B) // Amber
-                                                VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> Color(0xFF6366F1) // Indigo
-                                                else -> Color(0xFF10B981) // Emerald
-                                            },
-                                            shape = CircleShape
-                                        )
-                                )
-                                Text(
-                                    text = "Lisan Voice Tutor",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EditorialPrimary,
-                                    fontFamily = FontFamily.Serif
-                                )
-                            }
-                        }
-
-                        // Settings 3-dots Button & Voice Button Row
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Voice Button Pill
-                            Surface(
-                                onClick = { showVoiceSelectionDialog = true },
-                                color = EditorialAccentPurple.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.2f)),
-                                modifier = Modifier.height(38.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.VolumeUp,
-                                        contentDescription = "Change Voice",
-                                        tint = EditorialAccentPurple,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "Voice",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EditorialAccentPurple
-                                    )
-                                }
-                            }
-
-                            Box {
-                                Surface(
-                                    onClick = { showSettingsMenu = !showSettingsMenu },
-                                    color = Color.White,
-                                    shape = CircleShape,
-                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.MoreVert,
-                                            contentDescription = "Settings",
-                                            tint = EditorialPrimary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-
-                                DropdownMenu(
-                                    expanded = showSettingsMenu,
-                                    onDismissRequest = { showSettingsMenu = false },
-                                    modifier = Modifier.background(Color.White)
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("🎙 Change AI Voice", fontWeight = FontWeight.Bold, color = EditorialAccentPurple) },
-                                        onClick = {
-                                            showSettingsMenu = false
-                                            showVoiceSelectionDialog = true
-                                        }
-                                    )
-                                    HorizontalDivider(color = Color(0xFFF1F5F9))
-                                Text(
-                                    text = "Speech Speed",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EditorialTextMuted,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("1.0× (Normal)", fontWeight = if (currentSpeed == 1.0f) FontWeight.Bold else FontWeight.Normal) },
-                                    onClick = {
-                                        currentSpeed = 1.0f
-                                        viewModel.ttsManager.setSpeechRate(1.0f)
-                                        showSettingsMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("1.25× (Fast)", fontWeight = if (currentSpeed == 1.25f) FontWeight.Bold else FontWeight.Normal) },
-                                    onClick = {
-                                        currentSpeed = 1.25f
-                                        viewModel.ttsManager.setSpeechRate(1.25f)
-                                        showSettingsMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("1.5× (Speedy)", fontWeight = if (currentSpeed == 1.5f) FontWeight.Bold else FontWeight.Normal) },
-                                    onClick = {
-                                        currentSpeed = 1.5f
-                                        viewModel.ttsManager.setSpeechRate(1.5f)
-                                        showSettingsMenu = false
-                                    }
-                                )
-                                HorizontalDivider(color = Color(0xFFF1F5F9))
-                                DropdownMenuItem(
-                                    text = { Text(if (isMuted) "Unmute Tutor Voice" else "Mute Tutor Voice") },
-                                    onClick = {
-                                        isMuted = !isMuted
-                                        if (isMuted) stopSpeaking()
-                                        showSettingsMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("End Session", color = Color.Red) },
-                                    onClick = {
-                                        showSettingsMenu = false
-                                        showEndSessionConfirmation = true
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                    // CENTER FLOATING ANIMATED BLUE ORB
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        LisanAnimatedOrb(
-                            state = voiceSessionState,
-                            rmsVolume = rmsVolume,
-                            modifier = Modifier.padding(bottom = 20.dp)
                         )
-
-                        val labelText = when (voiceSessionState) {
-                            VoiceSessionState.INACTIVE, VoiceSessionState.READY -> "Tap the microphone or type below to speak"
-                            VoiceSessionState.LISTENING -> "Listening to your voice..."
-                            VoiceSessionState.PROCESSING -> "Thinking..."
-                            VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> "Lisan Tutor is speaking..."
-                            VoiceSessionState.ERROR -> errorMessage.ifBlank { "Connection issue. Please try again." }
-                            else -> "Tap to speak"
-                        }
-
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = labelText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (voiceSessionState == VoiceSessionState.ERROR) Color(0xFFEF4444) else EditorialTextMuted,
-                            textAlign = TextAlign.Center
+                            text = "Lisan Voice Tutor",
+                            style = TextStyle(
+                                color = Color(0xFF3F51B5),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
                         )
                     }
 
-                    // RECENT TRANSCRIPT PREVIEW
-                    if (userSpeechText.isNotBlank() || tutorSpeechText.isNotBlank()) {
+                    IconButton(
+                        onClick = { showVoiceSelectionDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VolumeUp,
+                            contentDescription = "Change Voice",
+                            tint = Color(0xFF3F51B5)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showSettingsMenu = true },
+                        modifier = Modifier.testTag("voice_settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Tutor Settings",
+                            tint = Color(0xFF3F51B5)
+                        )
+                    }
+
+
+                }
+                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+
+                // BODY SECTION
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Glowing Pulsing Sphere (Flutter Spec Radial Gradient)
+                    FlutterGlowingSphere(
+                        pulseScale = pulseScale,
+                        connectionStatus = connectionStatus,
+                        rmsVolume = rmsVolume,
+                        voiceSessionState = voiceSessionState,
+                        modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+                    // Status message
+                    val labelText = when (connectionStatus) {
+                        ConnectionStateStatus.CONNECTING -> "Connecting to Lisan AI..."
+                        ConnectionStateStatus.ERROR -> connectionErrorMessage.ifBlank { "Connection timed out. Please retry." }
+                        ConnectionStateStatus.IDLE -> "Idle"
+                        ConnectionStateStatus.CONNECTED -> {
+                            when (voiceSessionState) {
+                                VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> "Lisan Tutor is speaking..."
+                                VoiceSessionState.LISTENING -> "Listening to your voice..."
+                                VoiceSessionState.PROCESSING -> "Thinking..."
+                                VoiceSessionState.ERROR -> errorMessage.ifBlank { "Connection timed out. Please retry." }
+                                else -> "Lisan AI Voice Assistant"
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = labelText,
+                        style = TextStyle(
+                            color = if (connectionStatus == ConnectionStateStatus.ERROR || voiceSessionState == VoiceSessionState.ERROR) Color(0xFFEF4444) else Color(0xFF757575),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.W500
+                        ),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+
+                    // Retry Button if ConnectionStateStatus.ERROR
+                    if (connectionStatus == ConnectionStateStatus.ERROR) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = reconnectVoiceAssistant,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF3F51B5), // Indigo
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Text("Retry Connection", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Recent transcription preview (only when connected)
+                    if (connectionStatus == ConnectionStateStatus.CONNECTED && (userSpeechText.isNotBlank() || tutorSpeechText.isNotBlank())) {
                         Surface(
-                            color = Color.White,
+                            color = Color(0xFFF8FAFC),
                             shape = RoundedCornerShape(16.dp),
                             border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 12.dp)
+                                .fillMaxWidth(0.9f)
+                                .padding(top = 24.dp)
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(14.dp)
+                            ) {
                                 if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") {
                                     Text(
                                         text = "You: $userSpeechText",
@@ -816,7 +999,7 @@ fun VoiceTutorDialog(
                                     )
                                 }
                                 if (tutorSpeechText.isNotBlank()) {
-                                    if (userSpeechText.isNotBlank()) Spacer(modifier = Modifier.height(6.dp))
+                                    if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") Spacer(modifier = Modifier.height(6.dp))
                                     Text(
                                         text = "Tutor: $tutorSpeechText",
                                         fontSize = 13.sp,
@@ -826,109 +1009,86 @@ fun VoiceTutorDialog(
                             }
                         }
                     }
+                }
 
-                    // BOTTOM CONTROL BAR
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .imePadding(),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                // BOTTOM CHAT INPUT PREVIEW BAR (FLUTTER SPEC)
+                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 1.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF5F5F5))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+
+
+                    // Rounded white Text Field
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Surface(
-                            color = Color.White,
-                            shape = RoundedCornerShape(32.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            shadowElevation = 4.dp,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Text Field
-                                OutlinedTextField(
-                                    value = manualInputText,
-                                    onValueChange = { manualInputText = it },
-                                    placeholder = {
-                                        Text(
-                                            text = "Ask Lisan Tutor...",
-                                            fontSize = 14.sp,
-                                            color = EditorialTextMuted
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Add",
-                                            tint = EditorialTextMuted,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    },
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = Color.Transparent,
-                                        unfocusedContainerColor = Color.Transparent,
-                                        focusedBorderColor = Color.Transparent,
-                                        unfocusedBorderColor = Color.Transparent
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                    keyboardActions = KeyboardActions(
-                                        onSend = {
-                                            if (manualInputText.isNotBlank()) {
-                                                sendVoiceInput(manualInputText)
-                                            }
-                                        }
-                                    )
+                        OutlinedTextField(
+                            value = manualInputText,
+                            onValueChange = { manualInputText = it },
+                            placeholder = {
+                                Text(
+                                    text = "Type a message...",
+                                    fontSize = 14.sp,
+                                    color = Color.Gray
                                 )
-
-                                // Speaker Mute/Unmute Button
-                                Surface(
-                                    onClick = {
-                                        isMuted = !isMuted
-                                        if (isMuted) stopSpeaking()
-                                    },
-                                    color = if (isMuted) Color(0xFFFEE2E2) else Color(0xFFF1F5F9),
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(42.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                                            contentDescription = if (isMuted) "Unmute" else "Mute",
-                                            tint = if (isMuted) Color(0xFFEF4444) else EditorialPrimary,
-                                            modifier = Modifier.size(22.dp)
-                                        )
+                            },
+                            textStyle = TextStyle(
+                                fontSize = 15.sp,
+                                color = Color.Black,
+                                textDirection = if (isLineRtl(manualInputText)) TextDirection.Rtl else TextDirection.Ltr
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                disabledBorderColor = Color.Transparent
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 40.dp),
+                            singleLine = true,
+                            enabled = (connectionStatus == ConnectionStateStatus.CONNECTED),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    if (manualInputText.isNotBlank()) {
+                                        val textToSend = manualInputText
+                                        manualInputText = ""
+                                        sendVoiceInput(textToSend)
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
                                     }
                                 }
+                            )
+                        )
+                    }
 
-                                // End Voice Session (Black Circle with White X)
-                                Surface(
-                                    onClick = {
-                                        stopSpeaking()
-                                        stopListening()
-                                        onDismissRequest()
-                                    },
-                                    color = Color.Black,
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(42.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "End Voice Session",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                    // Mic toggle button
+                    IconButton(
+                        onClick = {
+                            if (connectionStatus == ConnectionStateStatus.CONNECTED) {
+                                if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                    stopListening()
+                                } else {
+                                    startListening()
                                 }
                             }
-                        }
+                        },
+                        enabled = (connectionStatus == ConnectionStateStatus.CONNECTED)
+                    ) {
+                        Icon(
+                            imageVector = if (voiceSessionState == VoiceSessionState.LISTENING) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = "Microphone",
+                            tint = if (voiceSessionState == VoiceSessionState.LISTENING) Color.Red else Color(0xFF3F51B5)
+                        )
                     }
                 }
             }
@@ -1226,6 +1386,166 @@ fun AiVoiceWaves(
                     .fillMaxHeight(scale)
                     .background(color, RoundedCornerShape(50))
             )
+        }
+    }
+}
+
+@Composable
+fun VoiceTutorSettingsDialog(
+    viewModel: LisanViewModel,
+    onDismiss: () -> Unit
+) {
+    val isStudyModeOn by viewModel.isStudyModeOn.collectAsState()
+    val isPersonalizationEnabled by viewModel.isStudyPersonalizationEnabled.collectAsState()
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .wrapContentHeight()
+                .clip(RoundedCornerShape(24.dp)),
+            color = Color.White,
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "Voice Tutor Settings",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary,
+                            fontFamily = FontFamily.Serif
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "Customize your AI learning experience",
+                            fontSize = 12.sp,
+                            color = EditorialTextMuted
+                        )
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = EditorialPrimary)
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFFE2E8F0))
+
+                // 1. Study Mode Toggle Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Study Mode",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialPrimary
+                            )
+                            Surface(
+                                color = if (isStudyModeOn) EditorialAccentPurple else Color(0xFF94A3B8),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isStudyModeOn) Icons.Default.CheckCircle else Icons.Default.Close,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                    Text(
+                                        text = if (isStudyModeOn) "Active" else "Inactive",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Study Mode gives your tutor a focused teaching style and can use your selected learning progress to personalize practice.",
+                            fontSize = 12.sp,
+                            color = EditorialTextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = isStudyModeOn,
+                        onCheckedChange = { viewModel.setStudyMode(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = EditorialAccentPurple
+                        ),
+                        modifier = Modifier.testTag("voice_study_mode_switch")
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFFE2E8F0))
+
+                // 2. Personalization Toggle Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Personalize using my progress",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Uses your real stats, streaks, lessons completed, and weak areas to customize lessons. If disabled, tutor remains strict but uses only active chat text.",
+                            fontSize = 12.sp,
+                            color = EditorialTextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = isPersonalizationEnabled,
+                        onCheckedChange = { viewModel.setStudyPersonalizationEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = EditorialAccentPurple
+                        ),
+                        modifier = Modifier.testTag("voice_personalization_switch")
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
         }
     }
 }

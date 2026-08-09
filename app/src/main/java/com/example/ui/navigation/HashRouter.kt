@@ -29,7 +29,7 @@ object HashRouter {
      * - `#/daily` (Lisan Daily)
      * - `#/quizzes` (Quizzes)
      * - `#/revision` (Revision Planner)
-     * - `#/achievements` (Achievements)
+     * - `#/achievements` or `#/lisan-journey` (Lisan Journey)
      * - `#/progress` (Progress)
      * - `#/settings` (Settings)
      * - `#/help` (Help & Feedback)
@@ -61,6 +61,7 @@ object HashRouter {
      * Maps a web-like hash route to a MainActivity tab index.
      */
     fun routeToTab(route: String): Int {
+        if (route.startsWith("#/picture-vocabulary")) return 14
         return when (route) {
             "#/lessons" -> 0
             "#/analyzer" -> 1
@@ -70,10 +71,13 @@ object HashRouter {
             "#/daily" -> 5
             "#/quizzes" -> 6
             "#/revision" -> 7
-            "#/achievements" -> 8
+            "#/achievements", "#/lisan-journey" -> 8
             "#/progress" -> 9
             "#/settings" -> 10
             "#/help" -> 11
+            "#/past-conversations" -> 12
+            "#/pronunciation" -> 13
+            "#/picture-vocabulary" -> 14
             else -> 0
         }
     }
@@ -91,10 +95,13 @@ object HashRouter {
             5 -> "#/daily"
             6 -> "#/quizzes"
             7 -> "#/revision"
-            8 -> "#/achievements"
+            8 -> "#/lisan-journey"
             9 -> "#/progress"
             10 -> "#/settings"
             11 -> "#/help"
+            12 -> "#/past-conversations"
+            13 -> "#/pronunciation"
+            14 -> "#/picture-vocabulary"
             else -> "#/lessons"
         }
     }

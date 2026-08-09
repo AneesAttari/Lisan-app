@@ -96,7 +96,7 @@ fun LessonScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         val userNameState by viewModel.userName.collectAsState()
         val displayName = if (userNameState == "Learner" || userNameState == "Lisan Guest Learner") "" else userNameState
@@ -154,7 +154,6 @@ fun LessonScreen(
             ) {
                 Column {
                     Text("MY PROGRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted)
-                    Text("اپنی پیش رفت دیکھیں", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
                 }
                 Icon(Icons.Default.BarChart, contentDescription = null, tint = EditorialAccentPurple)
             }

@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialDivider
 import com.example.ui.components.EditorialMixedText
+import com.example.ui.components.ScrollToBottomFAB
 import com.example.ui.components.GeneratingLightingGlow
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
@@ -45,28 +46,106 @@ fun AnalyzerScreen(
     val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
     val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
 
-    val sampleSentences = listOf(
-        "The boy is reading a book.",
-        "My sister speaks English.",
-        "These students are ready.",
-        "Does Ali like tea?",
-        "Open the door."
+    val categorizedExamples = mapOf(
+        "Present Simple" to listOf(
+            "I drink tea.",
+            "She speaks English.",
+            "He works hard.",
+            "They play football.",
+            "Water boils at 100 degrees."
+        ),
+        "Present Continuous" to listOf(
+            "I am learning English.",
+            "She is reading a book.",
+            "They are playing outside.",
+            "It is raining today.",
+            "He is working on a project."
+        ),
+        "Present Perfect" to listOf(
+            "I have finished my work.",
+            "She has seen that movie.",
+            "They have visited London.",
+            "He has eaten lunch.",
+            "We have lived here for years."
+        ),
+        "Present Perfect Continuous" to listOf(
+            "I have been studying for hours.",
+            "She has been working here.",
+            "They have been playing games.",
+            "It has been snowing all day.",
+            "He has been trying to call."
+        ),
+        "Past Simple" to listOf(
+            "I went to school.",
+            "She bought a car.",
+            "They played together.",
+            "He arrived late.",
+            "We enjoyed the party."
+        ),
+        "Past Continuous" to listOf(
+            "I was watching TV.",
+            "She was reading a book.",
+            "They were playing football.",
+            "He was working yesterday.",
+            "It was raining at noon."
+        ),
+        "Past Perfect" to listOf(
+            "I had finished my work.",
+            "She had left before I arrived.",
+            "They had eaten lunch.",
+            "He had seen it before.",
+            "We had already left."
+        ),
+        "Past Perfect Continuous" to listOf(
+            "I had been working hard.",
+            "She had been reading for hours.",
+            "They had been waiting.",
+            "He had been studying all day.",
+            "It had been raining heavily."
+        ),
+        "Future Simple" to listOf(
+            "I will go tomorrow.",
+            "She will help you.",
+            "They will arrive soon.",
+            "He will call you.",
+            "We will start Monday."
+        ),
+        "Conditionals" to listOf(
+            "If it rains, I will stay home.",
+            "If I were you, I would go.",
+            "If she had studied, she would have passed.",
+            "If you heat water, it boils.",
+            "If they arrive, call me."
+        ),
+        "Direct/Indirect" to listOf(
+            "He said, \"I am happy.\"",
+            "He said that he was happy.",
+            "She asked, \"Where are you?\"",
+            "She asked where I was.",
+            "He told me to wait."
+        )
     )
+
+    val scrollState = rememberScrollState()
 
     Scaffold(
         containerColor = EditorialSurface
     ) { padding ->
-        Column(
-            modifier = modifier
+        Box(
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // Input Card
             EditorialCard {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("ENTER A SENTENCE TO LISTEN & ANALYZE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted)
                         
@@ -79,7 +158,7 @@ fun AnalyzerScreen(
                             color = EditorialContainer,
                             border = BorderStroke(1.dp, EditorialBorderSoft)
                         ) {
-                            Text("${speechRate}x Speed", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            Text("${speechRate}x Speed", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                         }
                     }
 
@@ -89,26 +168,41 @@ fun AnalyzerScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                         colors = TextFieldDefaults.colors(
-                            focusedContainerColor = EditorialSurface,
-                            unfocusedContainerColor = EditorialSurface,
+                            focusedContainerColor = EditorialContainer,
+                            unfocusedContainerColor = EditorialContainer,
                             focusedTextColor = EditorialTextPrimary,
                             unfocusedTextColor = EditorialTextPrimary,
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent
                         ),
-                        placeholder = { Text("e.g. She has finished her homework.", color = EditorialTextMuted, fontSize = 13.sp) }
+                        placeholder = { Text("e.g. She has finished her homework.", color = EditorialTextMuted, fontSize = 12.sp) }
                     )
                     
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.speak(inputSentence, "analyzer_input", speechRate) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = EditorialSurface, contentColor = EditorialTextSecondary), shape = RoundedCornerShape(12.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Listen", fontSize = 12.sp)
+                        Button(onClick = { viewModel.speak(inputSentence, "analyzer_input", speechRate) }, modifier = Modifier.weight(1f).height(40.dp), colors = ButtonDefaults.buttonColors(containerColor = EditorialSurface, contentColor = EditorialTextSecondary), shape = RoundedCornerShape(12.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Listen", fontSize = 11.sp)
                         }
-                        Button(onClick = { viewModel.runDeepAnalyzer() }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary, contentColor = Color.White), shape = RoundedCornerShape(12.dp)) {
-                            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Analyze", fontSize = 12.sp)
+                        Button(
+                            onClick = { viewModel.runDeepAnalyzer() },
+                            enabled = !isAnalyzing,
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAnalyzing) EditorialTextMuted else EditorialPrimary,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (isAnalyzing) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Analyzing...", fontSize = 11.sp)
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Analyze", fontSize = 11.sp)
+                            }
                         }
                     }
                 }
@@ -118,33 +212,44 @@ fun AnalyzerScreen(
             if (!analysisResult.isNullOrBlank()) {
                 EditorialCard {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("GRAMMATICAL ANALYSIS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted, letterSpacing = 1.4.sp)
-                        TextButton(onClick = { viewModel.setAnalyzerInput("") }) { Text("Close", fontSize = 12.sp) }
+                        Text("GRAMMATICAL ANALYSIS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted, letterSpacing = 1.0.sp)
+                        TextButton(onClick = { viewModel.setAnalyzerInput("") }, modifier = Modifier.height(30.dp)) { Text("Close", fontSize = 11.sp) }
                     }
                     EditorialDivider()
-                    EditorialMixedText(text = analysisResult!!, fontSize = 14.sp)
+                    EditorialMixedText(text = analysisResult!!, fontSize = 13.sp)
                 }
             }
 
             // Examples
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("TRY AN EXAMPLE • مثال منتخب کریں", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted)
-                sampleSentences.forEach { sentence ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { viewModel.setAnalyzerInput(sentence); viewModel.runDeepAnalyzer() },
-                        color = EditorialContainer,
-                        border = BorderStroke(1.dp, EditorialBorderSoft)
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("“$sentence”", fontSize = 14.sp, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, color = EditorialTextPrimary)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(16.dp), tint = EditorialTextMuted)
-                                Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(16.dp), tint = EditorialTextMuted)
+                categorizedExamples.forEach { (category, sentences) ->
+                    Text(category, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                    sentences.forEach { sentence ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { viewModel.setAnalyzerInput(sentence); viewModel.runDeepAnalyzer() },
+                            color = EditorialContainer,
+                            border = BorderStroke(1.dp, EditorialBorderSoft)
+                        ) {
+                            Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("“$sentence”", fontSize = 12.sp, fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic, color = EditorialTextPrimary, modifier = Modifier.weight(1f))
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(14.dp), tint = EditorialTextMuted)
+                                    Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(14.dp), tint = EditorialTextMuted)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        ScrollToBottomFAB(
+            scrollState = scrollState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        )
     }
+}
 }

@@ -118,6 +118,7 @@ fun MyApplicationTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
   // Set dynamicColor default to false to showcase the Editorial Aesthetic palette
   dynamicColor: Boolean = false,
+  fontSizeSetting: String = "Default",
   content: @Composable () -> Unit,
 ) {
   val themeColors = if (darkTheme) DarkColors else LightColors
@@ -132,7 +133,22 @@ fun MyApplicationTheme(
       else -> LightColorScheme
     }
 
-  CompositionLocalProvider(LocalEditorialColors provides themeColors) {
+  val originalDensity = androidx.compose.ui.platform.LocalDensity.current
+  val fontScaleFactor = when (fontSizeSetting) {
+      "Small" -> 0.85f
+      "Large" -> 1.15f
+      "Extra Large" -> 1.3f
+      else -> 1.0f
+  }
+  val customDensity = androidx.compose.ui.unit.Density(
+      density = originalDensity.density,
+      fontScale = originalDensity.fontScale * fontScaleFactor
+  )
+
+  CompositionLocalProvider(
+      androidx.compose.ui.platform.LocalDensity provides customDensity,
+      LocalEditorialColors provides themeColors
+  ) {
     MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
   }
 }

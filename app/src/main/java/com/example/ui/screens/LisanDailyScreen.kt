@@ -35,6 +35,7 @@ import com.example.data.model.DailyChallengeState
 import com.example.data.model.RevisionItem
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialDivider
+import com.example.ui.components.ScrollToBottomFAB
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
 import java.text.SimpleDateFormat
@@ -120,35 +121,98 @@ fun LisanDailyScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         // --- Hub Header ---
+        val selectedDailyDate by viewModel.selectedDailyDate.collectAsState()
+
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "Lisan Daily",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = EditorialPrimary,
-                fontFamily = FontFamily.Serif
-            )
-            Text(
-                text = "Small practice. Real progress.",
-                fontSize = 15.sp,
-                color = EditorialTextMuted,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = localDateStr,
-                fontSize = 13.sp,
-                color = EditorialAccentPurple,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 4.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Lisan Daily",
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialPrimary,
+                        fontFamily = FontFamily.Serif
+                    )
+                    Text(
+                        text = "Small practice. Real progress.",
+                        fontSize = 15.sp,
+                        color = EditorialTextMuted,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                IconButton(
+                    onClick = { viewModel.selectToday() },
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(EditorialContainer)
+                        .testTag("today_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Today,
+                        contentDescription = "Today",
+                        tint = EditorialPrimary
+                    )
+                }
+            }
+
+            // Date navigation controls
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                IconButton(
+                    onClick = { viewModel.selectPreviousDay() },
+                    modifier = Modifier.testTag("prev_date_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "Previous Day",
+                        tint = EditorialAccentPurple
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = EditorialContainer,
+                    border = BorderStroke(1.dp, EditorialBorder)
+                ) {
+                    Text(
+                        text = "📅 $selectedDailyDate",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialPrimary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { viewModel.selectNextDay() },
+                    modifier = Modifier.testTag("next_date_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowForward,
+                        contentDescription = "Next Day",
+                        tint = EditorialAccentPurple
+                    )
+                }
+            }
         }
 
         // --- Side-by-Side Status Summary Cards ---
@@ -1228,6 +1292,14 @@ fun LisanDailyScreen(
                 }
             }
         }
+    }
+
+        ScrollToBottomFAB(
+            scrollState = scrollState,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        )
     }
 }
 

@@ -21,6 +21,9 @@ interface CachedLessonDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLesson(lesson: CachedLessonEntity)
 
+    @Query("DELETE FROM cached_lessons")
+    suspend fun clearAllLessons()
+
     @Query("DELETE FROM cached_lessons WHERE topicId NOT IN (SELECT topicId FROM cached_lessons ORDER BY timestamp DESC LIMIT 10)")
     suspend fun trimOldLessons()
 }

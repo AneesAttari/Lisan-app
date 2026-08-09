@@ -88,7 +88,7 @@ fun DailyGrammarCard(
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isCompleted) EditorialSurface else EditorialPrimary,
-                contentColor = if (isCompleted) EditorialPrimary else EditorialSurface
+                contentColor = if (isCompleted) EditorialTextPrimary else Color.White
             ),
             border = if (isCompleted) BorderStroke(1.dp, EditorialBorder) else null
         ) {

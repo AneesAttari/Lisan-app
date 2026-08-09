@@ -113,7 +113,8 @@ object RetrofitClient {
         val candidateModels = listOf(
             preferredModel,
             "gemini-3.5-flash",
-            "gemini-3.1-pro-preview"
+            "gemini-3.1-pro-preview",
+            "gemini-flash-latest"
         ).distinct()
 
         var lastException: Exception? = null
@@ -235,13 +236,38 @@ object RetrofitClient {
     suspend fun getVoiceTutorResponse(
         history: List<Content>,
         userName: String,
-        learnerProfileSummary: String
+        learnerProfileSummary: String,
+        isStudyModeOn: Boolean = false
     ): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isEmpty()) {
-            return@withContext "السلام عليكم! Welcome to Lisan Voice Tutor. Please enter your Gemini API Key in settings to start our conversation."
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
+            return@withContext generateLocalVoiceTutorResponse(history, userName)
         }
-        val sysPrompt = """
+        val sysPrompt = if (isStudyModeOn) {
+            """
+            You are the senior English teacher inside Lisan Voice Tutor. You teach English grammar to Arabic and Urdu speaking learners.
+            Learner: $userName
+
+            [STUDY MODE ACTIVE]
+            Your role is to be a structured, strict-but-supportive, demanding, and highly focused voice tutor.
+
+            VOICE CONVERSATION GUIDELINES:
+            1. Speak like a demanding but respectful and encouraging teacher. Prioritize active English practice over casual chatting.
+            2. GENTLY CORRECT ERRORS: When the learner speaks with an error, identify it, briefly explain why in simple terms, give the correction, and ask them to repeat or try a new sentence.
+            3. COMPARATIVE SCAFFOLDING: Compare English rules with Arabic grammar using "Likewise in Arabic, you have learned..." or "كذلك في اللغة العربية، قد تعلمتم...".
+            4. Keep answers extremely brief (1 to 3 short sentences maximum) so that speech synthesis is clear and pleasant to listen to. Ask one question and wait for the user to respond.
+            5. USE TEXT-TO-SPEECH MARKERS for natural pacing and emotion:
+               - Insert `[pause_short]` for a brief, natural hesitation (e.g., "Hmm, [pause_short] let's see.").
+               - Insert `[pause_long]` for transitions.
+               - Insert `[pitch_high]` before exciting/encouraging words (e.g., "[pitch_high] Excellent!").
+               - Insert `[pitch_low]` for explanations.
+               - Insert `[pitch_normal]` to reset.
+            6. Do NOT use markdown code blocks, asterisks (*), or complex bullet lists, as this text will be read aloud by Text-To-Speech.
+
+            Learner Study Context: $learnerProfileSummary
+            """.trimIndent()
+        } else {
+            """
             You are Lisan Voice Tutor, a warm, friendly, natural human English tutor speaking with $userName, an Arabic and Urdu speaking learner.
             
             VOICE CONVERSATION GUIDELINES:
@@ -258,7 +284,8 @@ object RetrofitClient {
             6. Do NOT use markdown code blocks, asterisks (*), or complex bullet lists, as this text will be read aloud by Text-To-Speech.
             
             Learner Profile Context: $learnerProfileSummary
-        """.trimIndent()
+            """.trimIndent()
+        }
 
         val req = GenerateContentRequest(
             systemInstruction = Content(
@@ -270,11 +297,66 @@ object RetrofitClient {
         try {
             val response = callWithModelFallback(apiKey, req, MODEL_FLASH)
             response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                ?: "I'm listening! Please say that again or ask me anything."
+                ?: generateLocalVoiceTutorResponse(history, userName)
         } catch (e: Exception) {
-            Log.e(TAG, "getVoiceTutorResponse error: ${e.message}")
-            "Sorry, I had trouble hearing that. Could you please try again?"
+            Log.e(TAG, "getVoiceTutorResponse error: ${e.message}, falling back to smart local voice responder")
+            generateLocalVoiceTutorResponse(history, userName)
         }
+    }
+
+    fun generateLocalVoiceTutorResponse(
+        history: List<Content>,
+        userName: String
+    ): String {
+        val lastUserMsg = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
+        val lowerMsg = lastUserMsg.lowercase(java.util.Locale.ROOT).trim()
+
+        if (lowerMsg.isEmpty() || lowerMsg == "listening...") {
+            return "I couldn't hear your voice clearly. Please try speaking again or tell me what grammar rule you would like to practice."
+        }
+
+        // Greetings
+        if (lowerMsg in listOf("hi", "hello", "hey", "assalam", "سلام", "asalam", "asalamu", "ayyo") || lowerMsg.startsWith("hi ") || lowerMsg.startsWith("hello ")) {
+            return "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar! I will help you learn English grammar by comparing it with Arabic grammar. What topic should we study today? Subject Pronouns, Verb To Be, Nouns, or Adjectives?"
+        }
+
+        // How are you
+        if (lowerMsg.contains("how are you") || lowerMsg.contains("how are u") || lowerMsg.contains("how is it going")) {
+            return "الحمد لله, I am doing excellent, $userName! Ready to help you learn English grammar. What topic would you like to explore today?"
+        }
+
+        // Pronouns / Subject Pronouns
+        if (lowerMsg.contains("pronoun") || lowerMsg.contains("ضمير") || lowerMsg.contains("ضمائر") || lowerMsg.contains("i you he she")) {
+            return "Let's learn Subject Pronouns! In English, we use pronouns like I, You, He, She, It, We, and They. Likewise in Arabic, you have learned separate pronouns like أنا، أنت، هو، وهي. For example, 'He is a student' corresponds to 'هو طالب'. Arabic speakers sometimes drop the pronoun, but in English the subject pronoun is required. Practice question: How do you say 'She is a teacher' in English?"
+        }
+
+        // Verb "To Be"
+        if (lowerMsg.contains("verb to be") || lowerMsg.contains("verb 'to be'") || lowerMsg.contains("am is are") || lowerMsg.contains("be verb")) {
+            return "The Verb To Be uses 'am', 'is', and 'are' in the present tense. Likewise in Arabic, you have learned nominal sentences (الجملة الاسمية) like 'الولد سعيد' without a present verb. In English, we must say 'The boy is happy'. Common mistake: saying 'The boy happy'. Practice question: Choose the correct word: 'They (is/are) happy'."
+        }
+
+        // Plural Nouns
+        if (lowerMsg.contains("plural") || lowerMsg.contains("جمع") || lowerMsg.contains("plurals") || lowerMsg.contains("noun")) {
+            return "In English, most plural nouns simply add -s or -es. Likewise in Arabic, you have learned sound plurals like معلمون. Examples: book to books, car to cars, pen to pens. Arabic speakers sometimes confuse irregular plurals like child to children. Practice question: What is the plural of 'book'?"
+        }
+
+        // Adjectives
+        if (lowerMsg.contains("adjective") || lowerMsg.contains("صفة") || lowerMsg.contains("نعت") || lowerMsg.contains("adjectives")) {
+            return "In English, adjectives come before the noun (a big house). Likewise in Arabic, you have learned that the adjective follows the noun (بيت كبير). Examples: a tall man (رجل طويل), a red car (سيارة حمراء), a new book (كتاب جديد). Common mistake: placing the adjective after the noun. Practice question: Translate 'كتاب جديد' to English."
+        }
+
+        // Present Continuous
+        if (lowerMsg.contains("present continuous") || lowerMsg.contains("ing") || lowerMsg.contains("is reading") || lowerMsg.contains("present progressive")) {
+            return "Present Continuous uses 'am/is/are + verb-ing' for actions happening now. Likewise in Arabic, you use the present verb الفعل المضارع مثل 'أنا أقرأ الآن'. Examples: I am reading (أنا أقرأ), She is sleeping (هي تنام), They are eating (هم يأكلون). Practice question: How do you say 'I am learning English'?"
+        }
+
+        // Correct student practice answer
+        if (lowerMsg.contains("she is a teacher") || lowerMsg.contains("are") || lowerMsg.contains("books") || lowerMsg.contains("a new book") || lowerMsg.contains("new book") || lowerMsg.contains("i am learning")) {
+            return "ممتاز! Excellent answer! That is completely correct. You are making wonderful progress in English grammar! What grammar topic would you like to practice next?"
+        }
+
+        // General conversational response following teacher structure
+        return "Thank you for asking about \"$lastUserMsg\". Let's learn this together! In English, every sentence requires a clear subject and verb. Likewise in Arabic, you have learned that nominal and verbal sentence structures organize thoughts logically. Examples: 1. I understand (أنا أفهم). 2. She learns (هي تتعلم). 3. We practice together (نحن نتدرب معاً). Common mistake: omitting the helper verb. Practice question: Can you try making a simple 3-word English sentence using 'is'?"
     }
 
     suspend fun analyzeDeepGrammar(inputSentence: String, level: String): String = withContext(Dispatchers.IO) {
@@ -282,68 +364,40 @@ object RetrofitClient {
         if (apiKey.isNotEmpty()) {
             try {
                 val prompt = """
-                    You are the Lisan Grammar Sentence Analyzer.
-                    Analyze this input for a Pakistani Urdu-speaking Muslim learner (beginner English): "$inputSentence"
+                    You are an expert English-Arabic-Urdu Linguistic and Grammar Analyzer API.
+                    Analyze this input for a learner: "$inputSentence"
                     
-                    CRITICAL RULES:
-                    1. First validate if it's a single word, phrase, full sentence, question, command, or incomplete text.
-                    2. NEVER GUESS grammar carelessly. Do not create invented grammar explanations.
-                    3. Identify the COMPLETE noun phrase as subject (never label a, an, the, this, that, my, your alone as the subject).
-                    4. Separate helping verbs from the main verb. DO NOT label helping verbs (is, are, was, does, did, will, have) as the main verb.
-                    5. Identify direct objects, complements (after linking verbs like be/seem), and adverbials correctly. Do not call complements or adverbials "objects".
-                    6. Arabic grammar references must be optional, short, and used only when genuinely useful.
-                    7. Do not show internal analysis, debug data, confidence values, parser labels, or token metadata.
-                    8. Use English content in LTR, Urdu content in RTL. Use separate blocks for them.
+                    CORE OPERATIONAL RULES:
+                    1. NO ENGLISH TEXT IN URDU/ARABIC FIELDS: Never mix English words or echo the original English sentence inside Urdu or Arabic fields.
+                    2. ACCURATE GRAMMAR PARSING: Perform true grammatical parsing. Identify exact subjects, verbs, complements, and tenses correctly.
+                    3. CONCISE FOR FAST LATENCY: Keep explanations brief, structured, and direct. Avoid conversational fluff.
+                    4. STRICT ARABIC GRAMMAR EQUIVALENT (إعراب ونحو): Explicitly map the English sentence structure to classical Arabic grammar rules using exact Arabic terms.
                     
-                    FORMAT FOR A SENTENCE (Strictly follow this structure. Do NOT include '[ 🔊 Listen ] [ 🎙 Practise ]' as the app UI will provide those buttons.):
+                    REQUIRED OUTPUT FORMAT:
                     
-                    **Your sentence:** $inputSentence
+                    **Urdu Meaning:**
+                    [Provide a clean, natural Urdu translation of the full sentence]
                     
-                    **Urdu meaning:**
-                    [Urdu meaning here]
+                    **Sentence Type:**
+                    [e.g., Assertive / Statement (جملہ خبریہ)]
                     
-                    **Sentence type:** [Statement / Question / Command / Negative]
+                    **Main Parts Breakdown:**
+                    • Subject (فاعل): [Identify the exact noun/pronoun subject]
+                    • Verb / Predicate (فعل): [Identify the main verb and auxiliary verbs]
+                    • Complement / Object (مفعول / متعلقات): [Identify the object or complement, or state "None"]
                     
-                    **Main parts:**
-                    - **Subject:** [Complete subject phrase]
-                      [Optional breakdown of subject, e.g., - Article: The, - Main noun: boy]
-                    - **Verb phrase:** [Complete verb phrase]
-                      [Optional breakdown, e.g., - Helping verb: is, - Main verb: reading]
-                    - **Object / Complement:** [Complete object or complement, if present]
-                    - **Extra detail:** [Adverbial or time/place information, if useful]
+                    **Tense & Aspect (زمانہ):**
+                    [Exact English Tense] ([Urdu name for tense])
                     
-                    **Tense or time meaning:** [Tense name and simple explanation]
+                    **Simple Explanation (سادہ وضاحت):**
+                    [A 1-2 sentence breakdown in clear Urdu explaining how the subject and verb interact]
                     
-                    **Simple explanation:**
-                    [Clear Urdu explanation. Keep it short. Only include Arabic comparison if genuinely helpful.]
+                    **Arabic Grammar Connection (التناظر النحوي):**
+                    • Arabic Equivalent Term: [Exact Arabic term like مبتدأ وخبر or جملة فعلية]
+                    • Explanation in Urdu: [Explain how this English concept parallels Arabic grammar rules in Urdu]
                     
-                    **Common mistake to avoid:**
-                    [If relevant, explain briefly in Urdu/English]
-                    
-                    **Practice Question:**
-                    [One short question to check understanding]
-                    
-                    <details>
-                    <summary>See word details</summary>
-                    [Optional word-by-word breakdown - only show accurate roles, do not give conflicting labels]
-                    </details>
-                    
-                    FORMAT FOR A SINGLE WORD (If input is just one word):
-                    **Word:** $inputSentence
-                    **Meaning:** [Urdu meaning]
-                    **Word type:** [Grammar type, e.g., verb, noun]
-                    **Example:** [One short English example]
-                    **ترجمہ:** [Urdu translation of example]
-                    
-                    FORMAT FOR A PHRASE (If input is not a full sentence, e.g. "in the morning"):
-                    This is a phrase, not a complete sentence.
-                    [Explain what it does in English]
-                    
-                    یہ ایک فقرہ ہے، مکمل جملہ نہیں۔
-                    [Urdu explanation]
-                    
-                    **Main parts:**
-                    [Breakdown of the phrase parts]
+                    **Common Mistake to Avoid (عام غلطی):**
+                    [Explain 1 common grammatical mistake learners make in Urdu]
                 """.trimIndent()
                 val request = GenerateContentRequest(contents = listOf(Content(parts = listOf(Part(text = prompt)))))
                 val response = callWithModelFallback(apiKey, request, MODEL_PRO)
@@ -1001,13 +1055,70 @@ object RetrofitClient {
         }
 
         val profileContext = learnerProfileSummary ?: "Student profile: Level Beginner."
-        val studyModeStatusStr = if (isStudyModeOn) {
-            "MODE: STUDY MODE (تفصیلی سبق). Goal: Provide detailed teaching."
+        val systemPrompt = if (isStudyModeOn) {
+            """
+            You are the senior English teacher inside Lisan Grammar, teaching English grammar to Arabic/Urdu-speaking learners.
+            Learner: $userName
+            Response Language: $effectiveResponseLang
+
+            [STUDY MODE ACTIVE]
+            Your role is to be a structured, strict-but-supportive, demanding, and highly focused teacher.
+
+            CONVERSATION START PROTOCOL:
+            At the beginning of every new conversation, greet the learner with exactly:
+            السلام عليكم ورحمة الله وبركاته
+            Then say exactly:
+            Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar.
+
+            TEACHING PROTOCOLS:
+            1. PRIORITIZE ACTIVE LEARNING: Avoid casual small talk or just giving answers. Direct the student's focus to grammatical principles and guide them to reason through explanations.
+            2. TEACH ONE CONCEPT AT A TIME: Break grammar concepts down into clear, manageable steps. Focus on quality over quantity.
+            3. ERROR DIAGNOSIS & RECOVERY: When the learner makes an error:
+               - Identify the error clearly.
+               - Explain WHY it is incorrect in simple terms, comparing it with Arabic grammar if helpful.
+               - Give the corrected version.
+               - Ask the learner to write a fresh sentence using the correction or retry the question.
+            4. ACTIVE COGNITION: Ask the learner to complete a fill-in-the-blank, translate a short sentence, or form a custom sentence using the grammar rule before you give them the full explanation.
+            5. COMPARATIVE SCAFFOLDING & STRUCTURE:
+               For every grammar lesson or explanation:
+               - Explain the English rule in simple English.
+               - Say exactly: "Likewise in Arabic, you have learned…" (or "كذلك في اللغة العربية، قد تعلمتم...")
+               - Compare the English rule with the closest Arabic grammar rule or sentence structure.
+               - Explain the similarities and differences clearly.
+               - Give at least three English examples with Arabic translations on their own separate lines.
+               - Point out common mistakes Arabic speakers may make.
+               - Give one short practice question.
+               - Wait for the learner's answer and correct it kindly.
+            6. LANGUAGE COMPLEXITY: Adapt your vocabulary and grammar complexity to the student's level.
+            7. MULTILINGUAL SUPPORT: Use Modern Standard Arabic (العربية الفصحى) or simple Urdu for explanations and translations. Keep English examples clear and readable.
+
+            RECOMMENDED ACTION TAGS:
+            If you want to suggest that the learner go to a specific section in the app to practice, append one of the following exact recommendation tags at the very end of your message:
+            - To practice lessons: [RECOMMEND: #/lessons]
+            - To analyze sentences: [RECOMMEND: #/analyzer]
+            - To take grammar quizzes: [RECOMMEND: #/quizzes]
+            - To do revision: [RECOMMEND: #/revision]
+            - To complete daily tasks: [RECOMMEND: #/daily]
+            - To practice picture vocabulary: [RECOMMEND: #/picture-vocabulary]
+            - To practice pronunciation: [RECOMMEND: #/pronunciation]
+            - To learn idioms: [RECOMMEND: #/idioms]
+            - To view achievements: [RECOMMEND: #/lisan-journey]
+            - To check progress dashboard: [RECOMMEND: #/progress]
+            Only recommend a maximum of 1 relevant action tag. Do not invent your own tags.
+
+            [PERSISTED LEARNER STUDY CONTEXT]
+            $profileContext
+
+            STRICT CONSTRAINTS:
+            - NEVER claim any lessons, streaks, achievements, or progress that are not explicitly present in the Learner Study Context.
+            - NEVER expose internal database IDs, raw statistics, or say "I accessed your app data". Address the learner naturally.
+            - Keep responses clear, professional, and visually structured.
+            - DO NOT MIX ENGLISH AND ARABIC/URDU WITHIN ONE SENTENCE OR LINE. Separate English and Arabic/Urdu into clearly labeled, distinct sections or paragraphs.
+            - NO MARKDOWN SYMBOLS IN LEARNER MESSAGES: Do NOT use raw asterisks (*), markdown headers (###), bold tags (**), blockquotes (>), or hashtags. Use clean, plain text section titles, simple numbers (1., 2.), and clean line breaks.
+            """.trimIndent()
         } else {
-            "MODE: QUICK HELP (فوری مدد). Goal: Provide FAST, SHORT, and DIRECT answers. Minimal explanation."
-        }
-        
-        val systemPrompt = """
+            val studyModeStatusStr = "MODE: QUICK HELP (فوری مدد). Goal: Provide FAST, SHORT, and DIRECT answers. Minimal explanation."
+            """
             You are the teacher inside Lisan Grammar. You teach English grammar to Arabic-speaking learners in a friendly, simple, and respectful way.
             Learner: $userName
             Response Language: $effectiveResponseLang
@@ -1044,10 +1155,11 @@ object RetrofitClient {
                - Each Arabic/Urdu translation must be directly below its English sentence on its own separate line.
 
             2. NO MARKDOWN SYMBOLS IN LEARNER MESSAGES:
-               - Do NOT use raw asterisks (*), markdown headers (###), bold tags (**), blockquotes (>), or hashtags.
+               - Do NOT use raw asterisks (*), markdown headers (###), bold tags (**), bold formatting (**), blockquotes (>), or hashtags.
                - Use clean, plain text section titles, simple numbers (1., 2.), and clean line breaks.
                - Do NOT show internal reasoning or thinking process.
-        """.trimIndent()
+            """.trimIndent()
+        }
 
         val fullContents = listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = systemPrompt)))) + history
         val modelName = MODEL_FLASH

@@ -3,9 +3,12 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,19 +28,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ConversationSessionEntity
 import com.example.ui.components.EditorialCard
-import com.example.ui.components.EditorialDivider
-import com.example.ui.components.EditorialMixedText
+import com.example.ui.components.ScrollToBottomFAB
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PastConversationsScreen(
     viewModel: LisanViewModel,
     modifier: Modifier = Modifier
 ) {
+    val colors = EditorialTheme.colors
     val sessions by viewModel.conversationSessions.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var selectedTopicFilter by remember { mutableStateOf("All") } // "All", "Grammar", "Idiom", "Pronunciation", "Revision"
@@ -47,6 +53,12 @@ fun PastConversationsScreen(
     var newTitleInput by remember { mutableStateOf("") }
 
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
+
+    var isLoading by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        delay(400) // Smooth loading transition
+        isLoading = false
+    }
 
     val filteredSessions = remember(sessions, searchQuery, selectedTopicFilter) {
         sessions.filter { session ->
@@ -61,11 +73,11 @@ fun PastConversationsScreen(
     if (sessionToDelete != null) {
         AlertDialog(
             onDismissRequest = { sessionToDelete = null },
-            title = { Text("Delete Conversation?", fontWeight = FontWeight.Bold, color = EditorialPrimary) },
-            text = { Text("This will permanently delete this conversation and detach its content from your Tutor memory.", color = EditorialTextSecondary) },
+            title = { Text("Delete Conversation?", fontWeight = FontWeight.Bold, color = colors.primary) },
+            text = { Text("This will permanently delete this conversation and detach its content from your Tutor memory.", color = colors.textSecondary) },
             dismissButton = {
                 TextButton(onClick = { sessionToDelete = null }) {
-                    Text("Cancel", color = EditorialAccentPurple)
+                    Text("Cancel", color = colors.accentPurple)
                 }
             },
             confirmButton = {
@@ -86,22 +98,28 @@ fun PastConversationsScreen(
     if (sessionToRename != null) {
         AlertDialog(
             onDismissRequest = { sessionToRename = null },
-            title = { Text("Rename Conversation", fontWeight = FontWeight.Bold, color = EditorialPrimary) },
+            title = { Text("Rename Conversation", fontWeight = FontWeight.Bold, color = colors.primary) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter a new title for this discussion:", color = EditorialTextSecondary, fontSize = 13.sp)
+                    Text("Enter a new title for this discussion:", color = colors.textSecondary, fontSize = 13.sp)
                     OutlinedTextField(
                         value = newTitleInput,
                         onValueChange = { newTitleInput = it },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("rename_input")
+                        modifier = Modifier.fillMaxWidth().testTag("rename_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = colors.surface,
+                            unfocusedContainerColor = colors.surface,
+                            focusedBorderColor = colors.accentPurple,
+                            unfocusedBorderColor = colors.borderSoft
+                        )
                     )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { sessionToRename = null }) {
-                    Text("Cancel", color = EditorialAccentPurple)
+                    Text("Cancel", color = colors.accentPurple)
                 }
             },
             confirmButton = {
@@ -114,7 +132,7 @@ fun PastConversationsScreen(
                         }
                         sessionToRename = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary)
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
                 ) {
                     Text("Save", color = Color.White)
                 }
@@ -122,229 +140,376 @@ fun PastConversationsScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFFFCFBF9)) // Warm-white surface
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Page Header
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = "Past Conversations",
-                fontSize = 24.sp,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1E1B4B) // Deep Indigo
-            )
-            Text(
-                text = "Continue learning where you left off.",
-                fontSize = 14.sp,
-                color = EditorialTextSecondary
-            )
-        }
-
-        // Search and Filter Card
-        EditorialCard {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search conversations...", fontSize = 13.sp, color = EditorialTextMuted) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = EditorialTextMuted) },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = EditorialTextMuted)
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedBorderColor = EditorialAccentPurple,
-                        unfocusedBorderColor = EditorialBorderSoft
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("conversation_search_input")
-                )
-
-                // Topic Filter Pills
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Topic:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted)
-                    listOf("All", "Grammar", "Idiom", "Pronunciation", "Revision", "Daily Challenge").forEach { topic ->
-                        val isSelected = selectedTopicFilter == topic
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { selectedTopicFilter = topic },
-                            color = if (isSelected) Color(0xFF818CF8) else Color(0xFFEFF6FF), // Lavender accents vs soft pale-blue
-                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF818CF8) else EditorialBorderSoft),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = topic,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else Color(0xFF1E1B4B),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Conversations List
-        if (filteredSessions.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = EditorialTextMuted
-                    )
-                    Text(
-                        text = if (searchQuery.isNotEmpty()) "No past conversations match your search" else "No past conversations yet. Start chatting with AI Tutor!",
-                        fontSize = 14.sp,
-                        color = EditorialTextSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("past_conversations_list"),
+    if (isLoading) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(colors.background),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(filteredSessions) { session ->
-                    Surface(
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.continueConversationSession(session.id) }
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                CircularProgressIndicator(
+                    color = colors.accentPurple,
+                    strokeWidth = 3.dp,
+                    modifier = Modifier.size(48.dp)
+                )
+                Text(
+                    text = "Retrieving past conversations...",
+                    fontSize = 14.sp,
+                    color = colors.textSecondary
+                )
+            }
+        }
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(colors.background)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = 800.dp)
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Past Conversations",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Search & Filters Card
+                EditorialCard(
+                    containerColor = colors.surface,
+                    borderColor = colors.borderSoft
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search conversations...", fontSize = 13.sp, color = colors.textMuted) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = colors.textMuted) },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = colors.textMuted)
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = colors.surface,
+                                unfocusedContainerColor = colors.surface,
+                                focusedBorderColor = colors.accentPurple,
+                                unfocusedBorderColor = colors.borderSoft
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("conversation_search_input")
+                        )
+
+                        // Horizontally scrollable topic pills to prevent vertical squishing
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Surface(
-                                        color = Color(0xFFEFF6FF),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = session.topicLabel,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF1E1B4B),
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = dateFormat.format(Date(session.updatedAt)),
-                                        fontSize = 11.sp,
-                                        color = EditorialTextMuted
-                                    )
-                                }
-
-                                Text(
-                                    text = "${session.messageCount} messages · Tutor chat",
-                                    fontSize = 11.sp,
-                                    color = EditorialAccentPurple,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
                             Text(
-                                text = session.title,
-                                fontSize = 16.sp,
+                                text = "Topic:",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E1B4B)
+                                color = colors.textMuted
                             )
-
-                            Text(
-                                text = session.preview,
-                                fontSize = 13.sp,
-                                color = EditorialTextSecondary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            EditorialDivider()
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Actions: Rename & Delete
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton(
-                                        onClick = {
-                                            sessionToRename = session
-                                            newTitleInput = session.title
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = EditorialTextSecondary)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Rename", fontSize = 12.sp, color = EditorialTextSecondary)
-                                    }
-
-                                    TextButton(
-                                        onClick = { sessionToDelete = session },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Red)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Delete", fontSize = 12.sp, color = Color.Red)
-                                    }
-                                }
-
-                                // Continue Action Button
-                                Button(
-                                    onClick = { viewModel.continueConversationSession(session.id) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                            listOf("All", "Grammar", "Idiom", "Pronunciation", "Revision", "Daily Challenge").forEach { topic ->
+                                val isSelected = selectedTopicFilter == topic
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { selectedTopicFilter = topic },
+                                    color = if (isSelected) colors.accentPurple else colors.pillBg,
+                                    border = BorderStroke(1.dp, if (isSelected) colors.accentPurple else colors.borderSoft),
+                                    shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Continue", fontSize = 13.sp, color = Color.White)
+                                    Text(
+                                        text = topic,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) Color.White else colors.textPrimary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
                                 }
                             }
                         }
                     }
+                }
+
+                // Conversations List / Empty State
+                if (filteredSessions.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Surface(
+                                color = colors.pillBg,
+                                shape = CircleShape,
+                                modifier = Modifier.size(72.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Forum,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(32.dp),
+                                        tint = colors.accentPurple
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = if (searchQuery.isNotEmpty()) "No Matching Conversations" else "Your Learning History is Empty",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.primary,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Text(
+                                text = if (searchQuery.isNotEmpty()) {
+                                    "We couldn't find any conversations matching \"$searchQuery\"."
+                                } else {
+                                    "You haven't had any tutor discussions yet. Chat with AI Tutor to get instant explanations, and view your records here!"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textSecondary,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (searchQuery.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = {
+                                        searchQuery = ""
+                                        selectedTopicFilter = "All"
+                                    },
+                                    border = BorderStroke(1.dp, colors.accentPurple),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.height(40.dp)
+                                ) {
+                                    Text("Clear Search", color = colors.accentPurple)
+                                }
+                            } else {
+                                Button(
+                                    onClick = { viewModel.setSelectedTab(2) }, // Tab 2: AI Tutor Chat
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.height(44.dp)
+                                ) {
+                                    Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Start Learning", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val listState = rememberLazyListState()
+                    val coroutineScope = rememberCoroutineScope()
+                    val isScrollToBottomVisible by remember {
+                        derivedStateOf {
+                            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+                            if (filteredSessions.isEmpty()) false
+                            else {
+                                lastVisibleItem == null || lastVisibleItem.index < filteredSessions.size - 1
+                            }
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("past_conversations_list"),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(bottom = 16.dp)
+                        ) {
+                            items(filteredSessions) { session ->
+                            Surface(
+                                color = colors.surface,
+                                border = BorderStroke(1.dp, colors.borderSoft),
+                                shape = RoundedCornerShape(20.dp),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.continueConversationSession(session.id) }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(18.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            color = when (session.topicLabel.lowercase()) {
+                                                "grammar" -> Color(0xFFEFF6FF)
+                                                "idiom" -> Color(0xFFFDF2F8)
+                                                "pronunciation" -> Color(0xFFECFDF5)
+                                                "revision" -> Color(0xFFFFFBEB)
+                                                else -> colors.pillBg
+                                            },
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = session.topicLabel,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = colors.textPrimary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                maxLines = 1
+                                            )
+                                        }
+                                        Text(
+                                            text = dateFormat.format(Date(session.updatedAt)),
+                                            fontSize = 11.sp,
+                                            color = colors.textMuted,
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${session.messageCount} messages",
+                                            fontSize = 11.sp,
+                                            color = colors.accentPurple,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    Text(
+                                        text = session.title,
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.textPrimary
+                                    )
+
+                                    Text(
+                                        text = session.preview,
+                                        fontSize = 13.sp,
+                                        color = colors.textSecondary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+
+                                    HorizontalDivider(
+                                        color = colors.borderSoft,
+                                        thickness = 1.dp,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            TextButton(
+                                                onClick = {
+                                                    sessionToRename = session
+                                                    newTitleInput = session.title
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Edit,
+                                                    contentDescription = "Rename",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = colors.textSecondary
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Rename", fontSize = 12.sp, color = colors.textSecondary)
+                                            }
+
+                                            TextButton(
+                                                onClick = { sessionToDelete = session },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = Color(0xFFEF4444)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Delete", fontSize = 12.sp, color = Color(0xFFEF4444))
+                                            }
+                                        }
+
+                                        Button(
+                                            onClick = { viewModel.continueConversationSession(session.id) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = colors.accentPurple),
+                                            shape = RoundedCornerShape(12.dp),
+                                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = "Continue",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Continue", fontSize = 13.sp, color = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ScrollToBottomFAB(
+                        visible = isScrollToBottomVisible,
+                        onClick = {
+                            coroutineScope.launch {
+                                if (filteredSessions.isNotEmpty()) {
+                                    listState.animateScrollToItem(filteredSessions.size - 1)
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                    )
                 }
             }
         }
     }
+}
 }

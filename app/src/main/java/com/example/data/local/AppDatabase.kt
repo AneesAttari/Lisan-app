@@ -13,12 +13,35 @@ import com.example.data.model.RevisionItem
 import com.example.data.model.AchievementUnlock
 import com.example.data.model.DailyCompletionReward
 
+import com.example.data.model.DailyQuizAssignmentEntity
+import com.example.data.model.DailyQuizChallengeProgressEntity
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.LibraryItem
 import com.example.data.model.LikedItem
 import com.example.data.model.ConversationSessionEntity
 import com.example.data.model.CachedLessonEntity
 import com.example.data.model.DailyVerbAssignment
+import com.example.data.model.PronunciationHistoryItem
+import com.example.data.model.RevisionQuestionEntity
+import com.example.data.model.QuestionProgressEntity
+import com.example.data.model.RevisionSessionEntity
+import com.example.data.model.RevisionSessionQuestionEntity
+import com.example.data.model.TopicProgressEntity
+
+import com.example.data.model.PictureVocabularyCategoryEntity
+import com.example.data.model.PictureVocabularyItemEntity
+import com.example.data.model.PictureVocabularyQuestionEntity
+import com.example.data.model.PictureVocabularyQuestionProgressEntity
+import com.example.data.model.PictureVocabularySessionEntity
+import com.example.data.model.PictureVocabularySessionQuestionEntity
+import com.example.data.model.AchievementDefinitionEntity
+import com.example.data.model.AchievementProgressEntity
+import com.example.data.model.LearningEventEntity
+import com.example.data.model.DailyLearningSummaryEntity
+import com.example.data.model.TutorTimeScheduleEntity
+import com.example.data.model.TutorTimeDailyCompletionEntity
+import com.example.data.model.RewardTransactionEntity
+import com.example.data.model.UserAchievementStatsEntity
 
 @Database(
     entities = [
@@ -35,9 +58,31 @@ import com.example.data.model.DailyVerbAssignment
         DailyCompletionReward::class,
         ConversationSessionEntity::class,
         CachedLessonEntity::class,
-        DailyVerbAssignment::class
+        DailyVerbAssignment::class,
+        PronunciationHistoryItem::class,
+        RevisionQuestionEntity::class,
+        QuestionProgressEntity::class,
+        RevisionSessionEntity::class,
+        RevisionSessionQuestionEntity::class,
+        TopicProgressEntity::class,
+        PictureVocabularyCategoryEntity::class,
+        PictureVocabularyItemEntity::class,
+        PictureVocabularyQuestionEntity::class,
+        PictureVocabularyQuestionProgressEntity::class,
+        PictureVocabularySessionEntity::class,
+        PictureVocabularySessionQuestionEntity::class,
+        AchievementDefinitionEntity::class,
+        AchievementProgressEntity::class,
+        LearningEventEntity::class,
+        DailyLearningSummaryEntity::class,
+        TutorTimeScheduleEntity::class,
+        TutorTimeDailyCompletionEntity::class,
+        RewardTransactionEntity::class,
+        UserAchievementStatsEntity::class,
+        DailyQuizChallengeProgressEntity::class,
+        DailyQuizAssignmentEntity::class
     ], 
-    version = 9, 
+    version = 16, 
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -55,6 +100,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun conversationSessionDao(): ConversationSessionDao
     abstract fun cachedLessonDao(): CachedLessonDao
     abstract fun dailyVerbAssignmentDao(): DailyVerbAssignmentDao
+    abstract fun pronunciationHistoryDao(): PronunciationHistoryDao
+    abstract fun revisionQuestionDao(): RevisionQuestionDao
+    abstract fun questionProgressDao(): QuestionProgressDao
+    abstract fun revisionSessionDao(): RevisionSessionDao
+    abstract fun revisionSessionQuestionDao(): RevisionSessionQuestionDao
+    abstract fun topicProgressDao(): TopicProgressDao
+    abstract fun pictureVocabularyDao(): PictureVocabularyDao
+    abstract fun lisanJourneyDao(): LisanJourneyDao
+    abstract fun dailyQuizChallengeDao(): DailyQuizChallengeDao
 
     companion object {
         @Volatile

@@ -1,13 +1,23 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,67 +31,267 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.AppSettings
-import com.example.data.model.AuthState
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.example.data.repository.UserSettings
 import com.example.ui.components.EditorialCard
-import com.example.ui.components.AuthDialog
-import com.example.ui.components.ProfileDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
-import com.example.utils.ServerVoice
+import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: LisanViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val settings by viewModel.appSettings.collectAsState()
+    val userSettings by viewModel.userSettings.collectAsState()
     val learnerProfile by viewModel.learnerProfile.collectAsState()
-    val authState by viewModel.authManager.authState.collectAsState()
-
-    val selectedVoiceEn by viewModel.ttsManager.selectedVoiceIdEn.collectAsState()
-    val selectedVoiceAr by viewModel.ttsManager.selectedVoiceIdAr.collectAsState()
-    val selectedVoiceUr by viewModel.ttsManager.selectedVoiceIdUr.collectAsState()
-    val availableVoices by viewModel.ttsManager.availableVoices.collectAsState()
+    val isOnline by viewModel.isNetworkAvailable.collectAsState()
+    val ttsCurrentlySpeaking by viewModel.ttsManager.currentlySpeaking.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var showResetDialog by remember { mutableStateOf(false) }
-    var showClearHistoryDialog by remember { mutableStateOf(false) }
-    var showAuthDialog by remember { mutableStateOf(false) }
-    var showProfileDialog by remember { mutableStateOf(false) }
-    var showInfoDialogTitle by remember { mutableStateOf<String?>(null) }
-    var showInfoDialogBody by remember { mutableStateOf<String?>(null) }
 
-    val englishVoices = availableVoices.filter { it.languageCode == "en-US" }
-    val arabicVoices = availableVoices.filter { it.languageCode == "ar-XA" }
-    val urduVoices = availableVoices.filter { it.languageCode == "ur-PK" }
+    // Dialog States
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showTimePickerModal by remember { mutableStateOf(false) }
+    var showResetDefaultsDialog by remember { mutableStateOf(false) }
+    var showClearCacheDialog by remember { mutableStateOf(false) }
+    var showDeleteAllDataDialog by remember { mutableStateOf(false) }
+    var deleteConfirmationInput by remember { mutableStateOf("") }
+    var showHelpDialog by remember { mutableStateOf(false) }
+    var showPrivacyDialog by remember { mutableStateOf(false) }
+    var showTermsDialog by remember { mutableStateOf(false) }
+    var showLicensesDialog by remember { mutableStateOf(false) }
 
-    // Helper to filter sections based on search query
-    val query = searchQuery.trim().lowercase()
-    fun matchesQuery(vararg keywords: String): Boolean {
-        if (query.isEmpty()) return true
-        return keywords.any { it.lowercase().contains(query) }
+    // Mic Permission launcher
+    var hasMicPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasMicPermission = isGranted
+        if (isGranted) {
+            Toast.makeText(context, "Microphone permission granted!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Microphone permission required for voice input.", Toast.LENGTH_SHORT).show()
+        }
     }
 
-    if (showResetDialog) {
+    // Notification Permission launcher (Android 13+)
+    var hasNotificationPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            } else true
+        )
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasNotificationPermission = isGranted
+        if (isGranted) {
+            Toast.makeText(context, "Notification permission granted!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun matchesQuery(vararg keywords: String): Boolean {
+        val q = searchQuery.trim().lowercase()
+        if (q.isEmpty()) return true
+        return keywords.any { it.lowercase().contains(q) }
+    }
+
+    // --- DIALOGS ---
+
+    // 1. Edit Profile Dialog
+    if (showEditProfileDialog) {
+        var tempName by remember { mutableStateOf(userSettings.displayName) }
+        var tempLevel by remember { mutableStateOf(userSettings.learningLevel) }
+        var tempNativeLang by remember { mutableStateOf(userSettings.nativeLanguage) }
+        var tempGoal by remember { mutableStateOf(userSettings.learningGoal) }
+        var tempMinutes by remember { mutableStateOf(userSettings.dailyGoalMinutes) }
+
         AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset All Settings?") },
-            text = { Text("This will restore all app preferences, voice settings, and behavior controls to their default values.") },
+            onDismissRequest = { showEditProfileDialog = false },
+            title = { Text("Edit Learner Profile", fontWeight = FontWeight.Bold, color = EditorialPrimary) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = tempName,
+                        onValueChange = { tempName = it },
+                        label = { Text("Display Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text("English Proficiency Level", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("Beginner", "Elementary", "Intermediate", "Advanced").forEach { lvl ->
+                            SettingsPillChip(
+                                selected = tempLevel == lvl,
+                                onClick = { tempLevel = lvl },
+                                label = lvl
+                            )
+                        }
+                    }
+
+                    Text("Native Language", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("Urdu", "Arabic").forEach { lang ->
+                            SettingsPillChip(
+                                selected = tempNativeLang == lang,
+                                onClick = { tempNativeLang = lang },
+                                label = lang
+                            )
+                        }
+                    }
+
+                    Text("Primary Learning Goal", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(
+                            "Improve grammar",
+                            "Improve speaking",
+                            "Improve pronunciation",
+                            "Prepare for exams",
+                            "Workplace English",
+                            "Everyday conversation"
+                        ).forEach { goalOption ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { tempGoal = goalOption }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = tempGoal == goalOption, onClick = { tempGoal = goalOption })
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(goalOption, fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    Text("Daily Learning Goal (Minutes)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(5, 10, 15, 20, 30).forEach { mins ->
+                            SettingsPillChip(
+                                selected = tempMinutes == mins,
+                                onClick = { tempMinutes = mins },
+                                label = "${mins}m"
+                            )
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.resetAppSettings()
-                        showResetDialog = false
-                        statusMessage = "All settings restored to defaults."
-                        Toast.makeText(context, "Settings restored successfully", Toast.LENGTH_SHORT).show()
+                        val finalName = tempName.ifBlank { "Learner" }
+                        viewModel.updateUserSettings { current ->
+                            current.copy(
+                                displayName = finalName,
+                                learningLevel = tempLevel,
+                                nativeLanguage = tempNativeLang,
+                                learningGoal = tempGoal,
+                                dailyGoalMinutes = tempMinutes
+                            )
+                        }
+                        showEditProfileDialog = false
+                        Toast.makeText(context, "Learner profile updated!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)
+                ) {
+                    Text("Save Changes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditProfileDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // 2. Time Picker Dialog
+    if (showTimePickerModal) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = userSettings.reminderHour,
+            initialMinute = userSettings.reminderMinute
+        )
+
+        AlertDialog(
+            onDismissRequest = { showTimePickerModal = false },
+            title = { Text("Set Daily Reminder Time", fontWeight = FontWeight.Bold) },
+            text = {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    TimePicker(state = timePickerState)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.updateUserSettings { current ->
+                            current.copy(
+                                reminderHour = timePickerState.hour,
+                                reminderMinute = timePickerState.minute
+                            )
+                        }
+                        showTimePickerModal = false
+                        val formattedTime = String.format("%02d:%02d", timePickerState.hour, timePickerState.minute)
+                        Toast.makeText(context, "Reminder set for $formattedTime daily", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)
+                ) {
+                    Text("Save Time")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePickerModal = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // 3. Reset Defaults Dialog
+    if (showResetDefaultsDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDefaultsDialog = false },
+            title = { Text("Reset All Preferences?", fontWeight = FontWeight.Bold) },
+            text = { Text("This will restore all app preferences, theme modes, voice controls, and learning goals to their default values.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.resetUserSettings()
+                        showResetDefaultsDialog = false
+                        Toast.makeText(context, "Settings restored to defaults", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                 ) {
@@ -89,72 +299,198 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
+                TextButton(onClick = { showResetDefaultsDialog = false }) {
                     Text("Cancel")
                 }
             }
         )
     }
 
-    if (showClearHistoryDialog) {
+    // 4. Clear Cache Dialog
+    if (showClearCacheDialog) {
         AlertDialog(
-            onDismissRequest = { showClearHistoryDialog = false },
-            title = { Text("Clear Learning History?") },
-            text = { Text("This will safely reset your learning profile, estimated level, and mistake memory. Saved bookmarks and notes will remain intact.") },
+            onDismissRequest = { showClearCacheDialog = false },
+            title = { Text("Clear Cached Lessons?", fontWeight = FontWeight.Bold) },
+            text = { Text("This will remove locally cached lesson files to free up space. Your saved notes and bookmarked idioms will NOT be affected.") },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.clearLearningHistory()
-                        showClearHistoryDialog = false
-                        statusMessage = "Learning history cleared safely."
-                        Toast.makeText(context, "Learning history cleared", Toast.LENGTH_SHORT).show()
+                        viewModel.clearLessonCache {
+                            showClearCacheDialog = false
+                            Toast.makeText(context, "Lesson cache cleared successfully", Toast.LENGTH_SHORT).show()
+                        }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)
                 ) {
-                    Text("Clear History")
+                    Text("Clear Cache")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearHistoryDialog = false }) {
+                TextButton(onClick = { showClearCacheDialog = false }) {
                     Text("Cancel")
                 }
             }
         )
     }
 
-    if (showAuthDialog) {
-        AuthDialog(viewModel = viewModel, onDismiss = { showAuthDialog = false })
-    }
-
-    if (showProfileDialog) {
-        val currentUser = when (val state = authState) {
-            is AuthState.LoggedIn -> state.user
-            is AuthState.Guest -> state.user
-            is AuthState.LoggedOut -> null
-        }
-        if (currentUser != null) {
-            ProfileDialog(
-                viewModel = viewModel,
-                user = currentUser,
-                onDismiss = { showProfileDialog = false },
-                onOpenAuth = { showAuthDialog = true }
-            )
-        }
-    }
-
-    if (showInfoDialogTitle != null) {
+    // 5. Delete All Data Dialog (Destructive)
+    if (showDeleteAllDataDialog) {
         AlertDialog(
-            onDismissRequest = { showInfoDialogTitle = null },
-            title = { Text(showInfoDialogTitle!!) },
-            text = { Text(showInfoDialogBody ?: "") },
+            onDismissRequest = {
+                showDeleteAllDataDialog = false
+                deleteConfirmationInput = ""
+            },
+            title = { Text("⚠️ Delete All Learning Data?", fontWeight = FontWeight.Bold, color = Color(0xFFC62828)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "This will permanently erase all chat history, saved notes, bookmarked idioms, pronunciation scores, and daily challenge progress. This action cannot be undone.",
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Type 'DELETE' below to confirm:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = deleteConfirmationInput,
+                        onValueChange = { deleteConfirmationInput = it },
+                        singleLine = true,
+                        placeholder = { Text("DELETE") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
             confirmButton = {
-                Button(onClick = { showInfoDialogTitle = null }) {
+                Button(
+                    enabled = deleteConfirmationInput.trim() == "DELETE",
+                    onClick = {
+                        viewModel.deleteAllDataAndReset {
+                            showDeleteAllDataDialog = false
+                            deleteConfirmationInput = ""
+                            Toast.makeText(context, "All learning data has been cleared.", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFC62828),
+                        disabledContainerColor = Color.Gray.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Text("Permanently Delete All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDeleteAllDataDialog = false
+                    deleteConfirmationInput = ""
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // 6. Help Dialog
+    if (showHelpDialog) {
+        AlertDialog(
+            onDismissRequest = { showHelpDialog = false },
+            title = { Text("Lisan Grammar • Help & How-to", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("• Comparative Lessons:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Learn English grammar topics by comparing them directly with similar rules in Modern Standard Arabic.", fontSize = 12.sp)
+
+                    Text("• Sentence Analyzer:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Type or speak any English sentence to get deep tense decomposition, word-by-word grammar breakdowns, and Arabic comparison.", fontSize = 12.sp)
+
+                    Text("• AI Tutor Chat:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Ask questions in English or Urdu. The AI tutor replies in clear English with supportive Urdu explanations and speech audio.", fontSize = 12.sp)
+
+                    Text("• Pronunciation Practice:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Speak phrases into your microphone to receive instant phonetic evaluation, word-level scoring, and audio feedback.", fontSize = 12.sp)
+
+                    Text("• Offline Support:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("When internet is disconnected, Lisan uses local grammar tables and offline cached lessons seamlessly.", fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showHelpDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)) {
+                    Text("Got it")
+                }
+            }
+        )
+    }
+
+    // 7. Privacy Policy Dialog
+    if (showPrivacyDialog) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyDialog = false },
+            title = { Text("Privacy Policy", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Lisan Grammar respects your privacy. All your learning progress, notes, and chat interactions are stored locally on your device or in your secure account database. We do not sell or share personal learning data with third parties. Speech recognition inputs are processed strictly for real-time pronunciation evaluation.",
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showPrivacyDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)) {
                     Text("Close")
                 }
             }
         )
     }
 
+    // 8. Terms Dialog
+    if (showTermsDialog) {
+        AlertDialog(
+            onDismissRequest = { showTermsDialog = false },
+            title = { Text("Terms of Use", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "By using Lisan Grammar, you agree to use the educational tools and AI services for personal language learning. All translation comparisons and AI responses are crafted to guide learners respectfully. All intellectual content is protected.",
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(onClick = { showTermsDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // 9. Open Source Licenses Dialog
+    if (showLicensesDialog) {
+        AlertDialog(
+            onDismissRequest = { showLicensesDialog = false },
+            title = { Text("Open Source Licenses", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("• Jetpack Compose & Material 3 (Apache 2.0)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("• AndroidX Room & DataStore Preferences (Apache 2.0)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("• Kotlin Coroutines & Serialization (Apache 2.0)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("• Retrofit & OkHttp (Apache 2.0)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("• Coil Image Loader (Apache 2.0)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showLicensesDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // --- MAIN SCREEN BODY ---
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -162,7 +498,7 @@ fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Top Header
+        // Top Title Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -177,20 +513,25 @@ fun SettingsScreen(
                     letterSpacing = 1.5.sp
                 )
                 Text(
-                    text = "App Control Center",
+                    text = "Settings",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = EditorialPrimary
                 )
+                Text(
+                    text = "Personalize your learning experience.",
+                    fontSize = 13.sp,
+                    color = EditorialTheme.colors.textSecondary
+                )
             }
             IconButton(
-                onClick = { showResetDialog = true },
+                onClick = { showResetDefaultsDialog = true },
                 modifier = Modifier
                     .size(40.dp)
                     .background(EditorialTheme.colors.container, CircleShape)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Refresh,
+                    imageVector = Icons.Default.Restore,
                     contentDescription = "Reset Settings",
                     tint = EditorialAccentPurple,
                     modifier = Modifier.size(20.dp)
@@ -198,15 +539,87 @@ fun SettingsScreen(
             }
         }
 
-        // Search Bar
+        // Top Summary Card: Learner Profile Overview
+        EditorialCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showEditProfileDialog = true }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Avatar Badge
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .background(EditorialAccentPurple.copy(alpha = 0.15f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = userSettings.displayName.take(1).uppercase(),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialAccentPurple
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = userSettings.displayName,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary
+                        )
+                        Surface(
+                            color = EditorialAccentPurple.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = userSettings.learningLevel,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Native Language: ${userSettings.nativeLanguage} • Goal: ${userSettings.learningGoal}",
+                        fontSize = 12.sp,
+                        color = EditorialTheme.colors.textSecondary
+                    )
+                    Text(
+                        text = "Keep going! Practice ${userSettings.dailyGoalMinutes} minutes today.",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = EditorialAccentPurple
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit Profile",
+                    tint = EditorialAccentPurple,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Real-Time Settings Search Bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search settings (voice, theme, notifications, privacy)...") },
+            placeholder = { Text("Search settings (voice, theme, notifications, offline)...", fontSize = 13.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = EditorialTheme.colors.textSecondary) },
             trailingIcon = if (searchQuery.isNotEmpty()) {
-                { IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = null) } }
+                { IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") } }
             } else null,
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
@@ -216,399 +629,85 @@ fun SettingsScreen(
             )
         )
 
-        if (statusMessage != null) {
-            Surface(
-                color = EditorialAccentPurple.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.3f))
+        // SECTION A: Learner Profile & Goals
+        if (matchesQuery("profile", "learner", "name", "level", "language", "goal", "minutes", "urdu", "arabic")) {
+            SettingsCategoryCard(
+                title = "1. Learner Profile & Goals",
+                subtitle = "Manage your display name, English proficiency level, and study goals.",
+                icon = Icons.Default.Person
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .clickable { showEditProfileDialog = true }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = statusMessage!!,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary
-                    )
-                    IconButton(onClick = { statusMessage = null }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Column {
+                        Text("Display Name", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
+                        Text(userSettings.displayName, fontSize = 12.sp, color = EditorialTheme.colors.textSecondary)
+                    }
+                    OutlinedButton(onClick = { showEditProfileDialog = true }, shape = RoundedCornerShape(8.dp)) {
+                        Text("Edit", fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("English Proficiency Level", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Beginner", "Elementary", "Intermediate", "Upper Intermediate", "Advanced").forEach { lvl ->
+                        SettingsPillChip(
+                            selected = userSettings.learningLevel == lvl,
+                            onClick = { viewModel.updateUserSettings { it.copy(learningLevel = lvl) } },
+                            label = lvl
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Native Language", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Urdu", "Arabic").forEach { lang ->
+                        SettingsPillChip(
+                            selected = userSettings.nativeLanguage == lang,
+                            onClick = { viewModel.updateUserSettings { it.copy(nativeLanguage = lang) } },
+                            label = lang
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Daily Practice Goal", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf(5, 10, 15, 20, 30).forEach { mins ->
+                        SettingsPillChip(
+                            selected = userSettings.dailyGoalMinutes == mins,
+                            onClick = { viewModel.updateUserSettings { it.copy(dailyGoalMinutes = mins) } },
+                            label = "${mins} mins"
+                        )
                     }
                 }
             }
         }
 
-        // 1. Voice Control Category (Premium Voice Assistant Settings)
-        if (matchesQuery("voice", "speech", "tts", "audio", "mic", "listen", "wake", "speaker", "assistant")) {
-            var previewSpeaker by remember { mutableStateOf<String?>(null) }
-            val ttsCurrentlySpeaking by viewModel.ttsManager.currentlySpeaking.collectAsState()
-            val isSpeakingPreview = ttsCurrentlySpeaking != null && previewSpeaker != null
-
+        // SECTION B: Appearance & Theme
+        if (matchesQuery("appearance", "theme", "dark", "light", "system", "dynamic", "color", "font", "size", "motion")) {
             SettingsCategoryCard(
-                title = "🎙 VOICE ASSISTANT SETTINGS",
-                subtitle = "Select your AI teacher's personality, language, and configure controls.",
-                icon = Icons.Default.Mic
-            ) {
-                // Current Voice Banner
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(EditorialAccentPurple.copy(alpha = 0.08f))
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                "CURRENT ACTIVE VOICE",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EditorialAccentPurple,
-                                letterSpacing = 1.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                "${settings.selectedSpeaker} • ${settings.selectedVoiceLanguage}",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EditorialPrimary
-                            )
-                        }
-                        
-                        // Active voice wave indicator
-                        if (ttsCurrentlySpeaking != null) {
-                            AiVoiceWaves(isAnimating = true)
-                        } else {
-                            Icon(
-                                Icons.Default.VolumeUp,
-                                contentDescription = null,
-                                tint = EditorialAccentPurple,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Personality & Persona", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                
-                // Speaker Cards Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Card 1: Young Voice
-                    val isYoungSelected = settings.selectedSpeaker.contains("Young", ignoreCase = true)
-                    Card(
-                        modifier = Modifier
-                             .weight(1f)
-                             .clickable {
-                                 viewModel.updateAppSettings { it.copy(selectedSpeaker = "Young Voice") }
-                             },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isYoungSelected) EditorialAccentPurple.copy(alpha = 0.12f) else EditorialTheme.colors.container
-                        ),
-                        border = BorderStroke(
-                            width = if (isYoungSelected) 2.dp else 1.dp,
-                            color = if (isYoungSelected) EditorialAccentPurple else EditorialTheme.colors.border
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("🎙 Young Voice", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = EditorialPrimary)
-                                if (isYoungSelected) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EditorialAccentPurple, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            Text(
-                                "Friendly AI Teacher",
-                                fontSize = 12.sp,
-                                color = EditorialTheme.colors.textSecondary,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                "Energetic, clear, and highly encouraging style.",
-                                fontSize = 11.sp,
-                                color = EditorialTheme.colors.textSecondary,
-                                maxLines = 2
-                            )
-                            
-                            Spacer(modifier = Modifier.height(4.dp))
-                            
-                            // Preview button inside card
-                            val isThisPreviewing = isSpeakingPreview && previewSpeaker?.contains("Young", ignoreCase = true) == true
-                            Button(
-                                onClick = {
-                                    previewSpeaker = "Young Voice"
-                                    val text = when (settings.selectedVoiceLanguage) {
-                                        "Urdu" -> "ہیلو! میں آپ کا دوست اور استاد ہوں۔ آئیں اردو کے ذریعے انگریزی گرامر کو بہت آسان طریقے سے سیکھیں۔"
-                                        "Arabic" -> "أهلاً بك! أنا معلمك الذكي والصديق. دعنا نتعلم قواعد اللغة الإنجليزية معاً بطريقة ممتعة وسهلة."
-                                        else -> "Hey there! I am your friendly AI teacher. Let's learn English grammar together in an energetic and fun way!"
-                                    }
-                                    if (isThisPreviewing) {
-                                        viewModel.stopSpeech()
-                                        previewSpeaker = null
-                                    } else {
-                                        // Temporarily apply Young Voice to TTS, then speak
-                                        viewModel.ttsManager.applySpeakerPreset("Young Voice")
-                                        viewModel.speak(text)
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isThisPreviewing) Color(0xFFC62828) else EditorialAccentPurple
-                                ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.fillMaxWidth().height(32.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                if (isThisPreviewing) {
-                                    AiVoiceWaves(isAnimating = true, color = Color.White)
-                                } else {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Preview", fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
-
-                    // Card 2: Mature Voice
-                    val isMatureSelected = settings.selectedSpeaker.contains("Mature", ignoreCase = true)
-                    Card(
-                        modifier = Modifier
-                             .weight(1f)
-                             .clickable {
-                                 viewModel.updateAppSettings { it.copy(selectedSpeaker = "Mature Voice") }
-                             },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isMatureSelected) EditorialAccentPurple.copy(alpha = 0.12f) else EditorialTheme.colors.container
-                        ),
-                        border = BorderStroke(
-                            width = if (isMatureSelected) 2.dp else 1.dp,
-                            color = if (isMatureSelected) EditorialAccentPurple else EditorialTheme.colors.border
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("🎙 Mature Voice", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = EditorialPrimary)
-                                if (isMatureSelected) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EditorialAccentPurple, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            Text(
-                                "Professional AI Teacher",
-                                fontSize = 12.sp,
-                                color = EditorialTheme.colors.textSecondary,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                "Calm, deep, confident, and professional style.",
-                                fontSize = 11.sp,
-                                color = EditorialTheme.colors.textSecondary,
-                                maxLines = 2
-                            )
-                            
-                            Spacer(modifier = Modifier.height(4.dp))
-                            
-                            // Preview button inside card
-                            val isThisPreviewing = isSpeakingPreview && previewSpeaker?.contains("Mature", ignoreCase = true) == true
-                            Button(
-                                onClick = {
-                                    previewSpeaker = "Mature Voice"
-                                    val text = when (settings.selectedVoiceLanguage) {
-                                        "Urdu" -> "السلام علیکم۔ میں آپ کا گرامر کا استاد ہوں۔ ہم پرسکون اور سنجیدہ انداز میں انگریزی گرامر کی تمام باریکیوں کو سمجھیں گے۔"
-                                        "Arabic" -> "السلام عليكم. أنا معلمك المحترف لتعلم القواعد. سنمضي في رحلتنا خطوة بخطوة وبكل هدوء لنتقن اللغة الإنجليزية."
-                                        else -> "Hello. I am your professional AI instructor. We will take a calm, structured, and deep approach to mastering English grammar."
-                                    }
-                                    if (isThisPreviewing) {
-                                        viewModel.stopSpeech()
-                                        previewSpeaker = null
-                                    } else {
-                                        // Temporarily apply Mature Voice to TTS, then speak
-                                        viewModel.ttsManager.applySpeakerPreset("Mature Voice")
-                                        viewModel.speak(text)
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isThisPreviewing) Color(0xFFC62828) else EditorialAccentPurple
-                                ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.fillMaxWidth().height(32.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                if (isThisPreviewing) {
-                                    AiVoiceWaves(isAnimating = true, color = Color.White)
-                                } else {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Preview", fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Select Language", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                
-                // Language Selection Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        "English" to "🇬🇧 English",
-                        "Urdu" to "🇵🇰 Urdu",
-                        "Arabic" to "🌙 Arabic"
-                    ).forEach { (langKey, display) ->
-                        val isLangSelected = settings.selectedVoiceLanguage == langKey
-                        FilterChip(
-                            selected = isLangSelected,
-                            onClick = {
-                                viewModel.updateAppSettings { it.copy(selectedVoiceLanguage = langKey) }
-                            },
-                            label = { Text(display, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
-                            modifier = Modifier.weight(1f),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EditorialAccentPurple.copy(alpha = 0.15f),
-                                selectedLabelColor = EditorialAccentPurple
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                enabled = true,
-                                selected = isLangSelected,
-                                selectedBorderColor = EditorialAccentPurple,
-                                borderColor = EditorialTheme.colors.border
-                            )
-                        )
-                    }
-                }
-
-                HorizontalDivider(color = EditorialTheme.colors.border, modifier = Modifier.padding(vertical = 4.dp))
-
-                // Speech Controls
-                Text("Voice Assistant Tuning", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-
-                SettingsSwitchRow(
-                    title = "Voice Response Feedback",
-                    subtitle = "Speak lessons and corrected phrases automatically.",
-                    checked = settings.voiceFeedbackEnabled,
-                    onCheckedChange = { valOn ->
-                        viewModel.updateAppSettings { it.copy(voiceFeedbackEnabled = valOn) }
-                    }
-                )
-
-                SettingsSwitchRow(
-                    title = "Automatically Speak Answers",
-                    subtitle = "Synthesize correct sentences immediately after submit.",
-                    checked = settings.speakAnswersAutomatically,
-                    onCheckedChange = { valOn ->
-                        viewModel.updateAppSettings { it.copy(speakAnswersAutomatically = valOn) }
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-                
-                // Speed Slider
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Voice Speed", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
-                        Text("${String.format("%.2f", settings.voiceSpeed)}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
-                    }
-                    Slider(
-                        value = settings.voiceSpeed,
-                        onValueChange = { speed -> viewModel.updateAppSettings { it.copy(voiceSpeed = speed) } },
-                        valueRange = 0.5f..2.0f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = EditorialAccentPurple,
-                            activeTrackColor = EditorialAccentPurple
-                        )
-                    )
-                }
-
-                // Volume Slider
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Voice Volume", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
-                        Text("${(settings.voiceVolume * 100).toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
-                    }
-                    Slider(
-                        value = settings.voiceVolume,
-                        onValueChange = { vol -> viewModel.updateAppSettings { it.copy(voiceVolume = vol) } },
-                        valueRange = 0.0f..1.0f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = EditorialAccentPurple,
-                            activeTrackColor = EditorialAccentPurple
-                        )
-                    )
-                }
-
-                // Pitch Slider
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Voice Pitch (Modulation)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
-                        Text("${String.format("%.2f", settings.voicePitch)}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
-                    }
-                    Slider(
-                        value = settings.voicePitch,
-                        onValueChange = { p -> viewModel.updateAppSettings { it.copy(voicePitch = p) } },
-                        valueRange = 0.5f..1.5f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = EditorialAccentPurple,
-                            activeTrackColor = EditorialAccentPurple
-                        )
-                    )
-                }
-
-                HorizontalDivider(color = EditorialTheme.colors.border, modifier = Modifier.padding(vertical = 4.dp))
-
-                // Advanced / Native voice matching info
-                Text(
-                    "Note: Lisan automatically selects high-fidelity cloud voices when online, and gracefully falls back to the closest matching native voice offline.",
-                    fontSize = 11.sp,
-                    color = EditorialTheme.colors.textSecondary,
-                    lineHeight = 15.sp
-                )
-            }
-        }
-
-        // 2. Appearance Category
-        if (matchesQuery("appearance", "theme", "dark", "light", "color", "font", "ui")) {
-            SettingsCategoryCard(
-                title = "2. Appearance & Theming",
-                subtitle = "Customize colors, theme mode, and visual typography.",
+                title = "2. Appearance & Theme",
+                subtitle = "Customize colors, theme mode, typography scale, and visual effects.",
                 icon = Icons.Default.Palette
             ) {
                 Text("Theme Mode", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
@@ -617,439 +716,593 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf("System", "Light", "Dark").forEach { mode ->
-                        FilterChip(
-                            selected = settings.themeMode == mode,
-                            onClick = {
-                                viewModel.updateAppSettings { it.copy(themeMode = mode) }
-                            },
-                            label = { Text(mode, fontSize = 12.sp) },
+                        SettingsPillChip(
+                            selected = userSettings.themeMode == mode,
+                            onClick = { viewModel.updateUserSettings { it.copy(themeMode = mode) } },
+                            label = mode,
                             modifier = Modifier.weight(1f)
                         )
                     }
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    SettingsSwitchRow(
+                        title = "Dynamic Colors (Material You)",
+                        subtitle = "Harmonize app colors with your device wallpaper.",
+                        checked = userSettings.dynamicColor,
+                        onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(dynamicColor = valOn) } }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Text("Font Size", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    listOf("Small", "Medium", "Large").forEach { size ->
-                        FilterChip(
-                            selected = settings.fontSize == size,
-                            onClick = { viewModel.updateAppSettings { it.copy(fontSize = size) } },
-                            label = { Text(size, fontSize = 12.sp) },
-                            modifier = Modifier.weight(1f)
+                    listOf("Small", "Default", "Large", "Extra Large").forEach { sizeOpt ->
+                        SettingsPillChip(
+                            selected = userSettings.fontSize == sizeOpt,
+                            onClick = { viewModel.updateUserSettings { it.copy(fontSize = sizeOpt) } },
+                            label = sizeOpt
                         )
                     }
                 }
 
                 SettingsSwitchRow(
-                    title = "Compact Mode",
-                    subtitle = "Reduce padding and list item heights for higher density.",
-                    checked = settings.compactMode,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(compactMode = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Rounded UI Corners",
-                    subtitle = "Use smooth pill and card corner radii.",
-                    checked = settings.roundedUi,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(roundedUi = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Animation & Transition Effects",
-                    subtitle = "Enable smooth fading and scale animations across screens.",
-                    checked = settings.animationEffects,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(animationEffects = it) } }
+                    title = "Reduce Motion",
+                    subtitle = "Disable heavy screen transitions and animations.",
+                    checked = userSettings.reduceMotion,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(reduceMotion = valOn) } }
                 )
             }
         }
 
-        // 3. Language & Learning Preferences
-        if (matchesQuery("language", "learning", "level", "urdu", "arabic", "goal", "grammar", "preference")) {
+        // SECTION C: Language & Learning Preferences
+        if (matchesQuery("language", "explanation", "arabic", "comparison", "roman", "tab", "difficulty", "adapt")) {
             SettingsCategoryCard(
                 title = "3. Language & Learning Preferences",
-                subtitle = "Adjust translation support, English proficiency level, and daily goals.",
+                subtitle = "Configure explanation languages, Arabic grammar rules, and tab defaults.",
                 icon = Icons.Default.Language
             ) {
-                Text("English Level", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                Row(
+                Text("Lesson Explanation Language", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    listOf("Beginner", "Intermediate", "Advanced").forEach { lvl ->
-                        FilterChip(
-                            selected = settings.englishLevel == lvl,
-                            onClick = { viewModel.updateAppSettings { it.copy(englishLevel = lvl) } },
-                            label = { Text(lvl, fontSize = 12.sp) },
-                            modifier = Modifier.weight(1f)
+                    listOf("English", "Urdu", "English + Urdu").forEach { langOpt ->
+                        SettingsPillChip(
+                            selected = userSettings.explanationLanguage == langOpt,
+                            onClick = { viewModel.updateUserSettings { it.copy(explanationLanguage = langOpt) } },
+                            label = langOpt
                         )
                     }
                 }
 
                 SettingsSwitchRow(
-                    title = "Show Arabic Support (عربي)",
-                    subtitle = "Compare English grammar rules with Arabic equivalents.",
-                    checked = settings.arabicSupport,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(arabicSupport = it) } }
+                    title = "Show Arabic Grammar Comparison",
+                    subtitle = "Compare English grammar rules directly with Arabic counterparts.",
+                    checked = userSettings.showArabicGrammarComparison,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(showArabicGrammarComparison = valOn) } }
                 )
+
                 SettingsSwitchRow(
-                    title = "Show Urdu Help (اردو)",
-                    subtitle = "Provide Urdu translations and explanations for all lessons.",
-                    checked = settings.urduHelp,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(urduHelp = it) } }
+                    title = "Roman Urdu Assistance",
+                    subtitle = "Include Romanized Urdu text alongside nastaliq script.",
+                    checked = userSettings.romanUrduAssistance,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(romanUrduAssistance = valOn) } }
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("Daily Lesson Goal: ${settings.dailyLessonGoal} lessons", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                Slider(
-                    value = settings.dailyLessonGoal.toFloat(),
-                    onValueChange = { goal -> viewModel.updateAppSettings { it.copy(dailyLessonGoal = goal.toInt()) } },
-                    valueRange = 1f..10f,
-                    steps = 8
-                )
+                Text("Default Startup Screen", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Learn", "Analyze", "Tutor", "Idioms", "Library").forEach { tab ->
+                        SettingsPillChip(
+                            selected = userSettings.defaultLearningTab == tab,
+                            onClick = { viewModel.updateUserSettings { it.copy(defaultLearningTab = tab) } },
+                            label = tab
+                        )
+                    }
+                }
 
-                Text("Grammar Explanation Style", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                SettingsSwitchRow(
+                    title = "Adapt Content to My Level",
+                    subtitle = "Automatically adjust AI practice complexity based on your score.",
+                    checked = userSettings.adaptDifficulty,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(adaptDifficulty = valOn) } }
+                )
+            }
+        }
+
+        // SECTION D: Speech, Listening & Pronunciation
+        if (matchesQuery("speech", "listening", "pronunciation", "tts", "voice", "sample", "pitch", "rate", "mic", "feedback")) {
+            SettingsCategoryCard(
+                title = "4. Speech, Listening & Pronunciation",
+                subtitle = "Tune TTS teacher voice, speech rate, microphone permissions, and practice feedback.",
+                icon = Icons.Default.Mic
+            ) {
+                Text("Teacher Voice Preset", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("Short", "Normal", "Detailed").forEach { style ->
-                        FilterChip(
-                            selected = settings.grammarExplanationStyle == style,
-                            onClick = { viewModel.updateAppSettings { it.copy(grammarExplanationStyle = style) } },
-                            label = { Text(style, fontSize = 12.sp) },
+                    listOf("Young Voice", "Mature Voice").forEach { speaker ->
+                        SettingsPillChip(
+                            selected = userSettings.selectedSpeaker == speaker,
+                            onClick = {
+                                viewModel.updateUserSettings { it.copy(selectedSpeaker = speaker) }
+                                viewModel.ttsManager.applySpeakerPreset(speaker)
+                            },
+                            label = speaker,
                             modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Voice Sample Playback Button
+                OutlinedButton(
+                    onClick = {
+                        val sampleText = "Welcome to Lisan Grammar. Welcome to your English learning journey."
+                        viewModel.ttsManager.speak(sampleText)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = if (ttsCurrentlySpeaking != null) Icons.Default.VolumeUp else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (ttsCurrentlySpeaking != null) "Playing Voice Sample..." else "Play Voice Sample", fontSize = 13.sp)
+                }
+
+                // Speech Rate Slider
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Speech Rate (Speed)", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
+                        Text("${String.format("%.2f", userSettings.speechRate)}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
+                    }
+                    Slider(
+                        value = userSettings.speechRate,
+                        onValueChange = { rate ->
+                            viewModel.updateUserSettings { it.copy(speechRate = rate) }
+                            viewModel.ttsManager.setSpeechRate(rate)
+                        },
+                        valueRange = 0.5f..2.0f,
+                        colors = SliderDefaults.colors(thumbColor = EditorialAccentPurple, activeTrackColor = EditorialAccentPurple)
+                    )
+                }
+
+                // Pitch Slider
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Voice Pitch", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
+                        Text("${String.format("%.2f", userSettings.pitch)}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
+                    }
+                    Slider(
+                        value = userSettings.pitch,
+                        onValueChange = { p ->
+                            viewModel.updateUserSettings { it.copy(pitch = p) }
+                            viewModel.ttsManager.setPitch(p)
+                        },
+                        valueRange = 0.5f..1.5f,
+                        colors = SliderDefaults.colors(thumbColor = EditorialAccentPurple, activeTrackColor = EditorialAccentPurple)
+                    )
+                }
+
+                SettingsSwitchRow(
+                    title = "Auto-Play Pronunciation",
+                    subtitle = "Automatically speak target phrases when entering practice screens.",
+                    checked = userSettings.autoPlayPronunciation,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(autoPlayPronunciation = valOn) } }
+                )
+
+                // Microphone Permission Card
+                Surface(
+                    color = if (hasMicPermission) EditorialAccentPurple.copy(alpha = 0.08f) else EditorialAccentPurple.copy(alpha = 0.05f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (hasMicPermission) EditorialAccentPurple.copy(alpha = 0.3f) else EditorialAccentPurple.copy(alpha = 0.25f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Microphone Permission", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                            Text(
+                                if (hasMicPermission) "Status: Allowed for voice input" else "Status: Not granted",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+                        if (!hasMicPermission) {
+                            Button(
+                                onClick = {
+                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Grant Permission", fontSize = 11.sp)
+                            }
+                        } else {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EditorialAccentPurple)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Pronunciation Feedback Style", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Supportive", "Detailed", "Concise").forEach { style ->
+                        SettingsPillChip(
+                            selected = userSettings.pronunciationFeedbackStyle == style,
+                            onClick = { viewModel.updateUserSettings { it.copy(pronunciationFeedbackStyle = style) } },
+                            label = style
                         )
                     }
                 }
             }
         }
 
-        // 4. Notifications
-        if (matchesQuery("notification", "reminder", "streak", "alert", "sound", "time")) {
+        // SECTION E: Notifications & Daily Reminders
+        if (matchesQuery("notification", "reminder", "daily", "time", "picker", "challenge", "message", "workmanager")) {
             SettingsCategoryCard(
-                title = "4. Notifications & Reminders",
-                subtitle = "Stay on track with daily practice reminders and streak alerts.",
+                title = "5. Notifications & Daily Learning",
+                subtitle = "Schedule daily practice alerts, challenge notifications, and quiet hours.",
                 icon = Icons.Default.Notifications
             ) {
                 SettingsSwitchRow(
                     title = "Daily Practice Reminder",
-                    subtitle = "Remind me to practice English grammar every day.",
-                    checked = settings.dailyReminder,
-                    onCheckedChange = {
-                        viewModel.updateAppSettings { s -> s.copy(dailyReminder = it) }
-                        viewModel.toggleDailyNotification(it, context)
+                    subtitle = "Receive periodic reminders to complete your daily lesson.",
+                    checked = userSettings.dailyReminderEnabled,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(dailyReminderEnabled = valOn) } }
+                )
+
+                if (userSettings.dailyReminderEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showTimePickerModal = true }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Reminder Time", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
+                            Text(
+                                String.format("%02d:%02d daily", userSettings.reminderHour, userSettings.reminderMinute),
+                                fontSize = 12.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+                        OutlinedButton(onClick = { showTimePickerModal = true }, shape = RoundedCornerShape(8.dp)) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Set Time", fontSize = 12.sp)
+                        }
                     }
-                )
+                }
+
                 SettingsSwitchRow(
-                    title = "Lesson Completion Reminders",
-                    subtitle = "Celebrate finishing daily lessons and quizzes.",
-                    checked = settings.lessonCompletionReminder,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(lessonCompletionReminder = it) } }
+                    title = "Daily Challenge Reminder",
+                    subtitle = "Get notified when today's Lisan Daily grammar question is ready.",
+                    checked = userSettings.dailyChallengeReminderEnabled,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(dailyChallengeReminderEnabled = valOn) } }
                 )
-                SettingsSwitchRow(
-                    title = "Streak Saver Alert",
-                    subtitle = "Alert me before my daily learning streak expires.",
-                    checked = settings.streakReminder,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(streakReminder = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "New Content & Idiom Alerts",
-                    subtitle = "Notify when new daily verbs, idioms, or quizzes are available.",
-                    checked = settings.newContentAlerts,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(newContentAlerts = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Quiet Hours (10 PM - 7 AM)",
-                    subtitle = "Pause notification sounds during sleep hours.",
-                    checked = settings.quietHours,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(quietHours = it) } }
-                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
+                    Surface(
+                        color = EditorialAccentPurple.copy(alpha = 0.05f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.25f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Post Notifications Permission",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    "Required to send daily practice and challenge reminders.",
+                                    fontSize = 11.sp,
+                                    color = EditorialTheme.colors.textSecondary
+                                )
+                            }
+                            Button(
+                                onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                                colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Allow", fontSize = 11.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Reminder Message Style", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Gentle", "Motivational", "Minimal").forEach { style ->
+                        SettingsPillChip(
+                            selected = userSettings.reminderMessageStyle == style,
+                            onClick = { viewModel.updateUserSettings { it.copy(reminderMessageStyle = style) } },
+                            label = style
+                        )
+                    }
+                }
             }
         }
 
-        // 5. Privacy & Data
-        if (matchesQuery("privacy", "data", "backup", "history", "cache", "export", "policy")) {
+        // SECTION F: Data, Storage & Offline Mode
+        if (matchesQuery("data", "storage", "offline", "cache", "export", "delete", "clear", "fallback", "network")) {
             SettingsCategoryCard(
-                title = "5. Privacy & Data Management",
-                subtitle = "Manage your learning data, local storage, and history backups.",
-                icon = Icons.Default.Security
+                title = "6. Data, Storage & Offline Mode",
+                subtitle = "Manage local storage, offline grammar engine, export backups, or clear data.",
+                icon = Icons.Default.Storage
             ) {
+                // Connection State Card
+                Surface(
+                    color = if (isOnline) Color(0xFFE8F5E9) else Color(0xFFFFF3E0),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (isOnline) Color(0xFF81C784) else Color(0xFFFFB74D))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
+                            contentDescription = null,
+                            tint = if (isOnline) Color(0xFF2E7D32) else Color(0xFFE65100)
+                        )
+                        Column {
+                            Text(
+                                if (isOnline) "Status: Online (Connected to AI Cloud)" else "Status: Offline (Local Engine Active)",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isOnline) Color(0xFF1B5E20) else Color(0xFFBF360C)
+                            )
+                            Text(
+                                "When offline, Lisan seamlessly uses cached lessons and local grammar rules.",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+                    }
+                }
+
                 SettingsSwitchRow(
-                    title = "Save Progress Locally",
-                    subtitle = "Store lesson progress, chat logs, and notes securely on device.",
-                    checked = settings.saveProgressLocally,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(saveProgressLocally = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Secure Cloud Backup",
-                    subtitle = "Back up user profile and stats across sessions.",
-                    checked = settings.cloudBackup,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(cloudBackup = it) } }
+                    title = "Auto-Use Offline Fallback",
+                    subtitle = "Automatically route to local grammar engine if network is slow or offline.",
+                    checked = userSettings.autoOfflineFallback,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(autoOfflineFallback = valOn) } }
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
+                HorizontalDivider(color = EditorialTheme.colors.border, modifier = Modifier.padding(vertical = 4.dp))
+
+                // Cache & Data Buttons
+                OutlinedButton(
+                    onClick = { showClearCacheDialog = true },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = { showClearHistoryDialog = true },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC62828)),
-                        border = BorderStroke(1.dp, Color(0xFFC62828))
-                    ) {
-                        Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Clear History", fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            statusMessage = "Cache cleared successfully (3.4 MB freed)."
-                            Toast.makeText(context, "App cache cleared", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Clear Cache", fontSize = 11.sp)
-                    }
+                    Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Clear Cached Lessons")
                 }
 
                 OutlinedButton(
                     onClick = {
-                        statusMessage = "Learning profile and progress exported successfully as JSON."
-                        Toast.makeText(context, "Data exported to downloads", Toast.LENGTH_SHORT).show()
+                        viewModel.exportLearningData { exportedFile ->
+                            if (exportedFile != null && exportedFile.exists()) {
+                                try {
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        exportedFile
+                                    )
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/json"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Export Lisan Learning Data"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Export saved to: ${exportedFile.name}", Toast.LENGTH_LONG).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "Failed to export data.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Export Learning Data & Notes")
+                    Text("Export Learning Data (JSON)")
                 }
+
+                Button(
+                    onClick = { showDeleteAllDataDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Delete All Learning Data")
+                }
+            }
+        }
+
+        // SECTION G: Privacy & AI
+        if (matchesQuery("privacy", "ai", "conversation", "history", "analytics", "policy", "terms")) {
+            SettingsCategoryCard(
+                title = "7. Privacy & AI Controls",
+                subtitle = "Manage conversation history storage, analytics consent, and terms.",
+                icon = Icons.Default.Security
+            ) {
+                SettingsSwitchRow(
+                    title = "Save Conversation History",
+                    subtitle = "Store AI tutor chat logs in local Room database.",
+                    checked = userSettings.saveConversationHistory,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(saveConversationHistory = valOn) } }
+                )
+
+                SettingsSwitchRow(
+                    title = "Improve Lisan AI (Analytics Consent)",
+                    subtitle = "Allow anonymous diagnostic learning stats to improve grammar models.",
+                    checked = userSettings.analyticsConsent,
+                    onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(analyticsConsent = valOn) } }
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    TextButton(onClick = {
-                        showInfoDialogTitle = "Privacy Policy"
-                        showInfoDialogBody = "Lisan Grammar respects your privacy. All learning data, chat sessions, and notes are processed securely and stored locally or on your encrypted account database. We do not sell or share personal data with third parties."
-                    }) {
+                    TextButton(onClick = { showPrivacyDialog = true }) {
                         Text("Privacy Policy", fontSize = 12.sp, color = EditorialAccentPurple)
                     }
-                    TextButton(onClick = {
-                        showInfoDialogTitle = "Terms of Use"
-                        showInfoDialogBody = "By using Lisan Grammar, you agree to use the educational content for personal English and Arabic learning purposes. All AI translations and grammar explanations are provided as-is to assist learners."
-                    }) {
+                    TextButton(onClick = { showTermsDialog = true }) {
                         Text("Terms of Use", fontSize = 12.sp, color = EditorialAccentPurple)
                     }
                 }
             }
         }
 
-        // 6. Accessibility
-        if (matchesQuery("accessibility", "contrast", "text", "motion", "reader", "guidance")) {
+        // SECTION H: Support, About & Licenses
+        if (matchesQuery("support", "about", "feedback", "help", "rate", "version", "licenses", "open source")) {
             SettingsCategoryCard(
-                title = "6. Accessibility",
-                subtitle = "Make Lisan Grammar easy and comfortable for every learner.",
-                icon = Icons.Default.Accessibility
+                title = "8. Support & About Lisan",
+                subtitle = "App guide, feedback, rating, app version details, and open-source licenses.",
+                icon = Icons.Default.HelpOutline
             ) {
-                SettingsSwitchRow(
-                    title = "Large Text Mode",
-                    subtitle = "Increase font scaling across lessons and chat UI.",
-                    checked = settings.largeText,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(largeText = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "High Contrast Mode",
-                    subtitle = "Boost color contrast for better readability.",
-                    checked = settings.highContrast,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(highContrast = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Reduce Motion",
-                    subtitle = "Minimize UI animations and screen transitions.",
-                    checked = settings.reduceMotion,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(reduceMotion = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Voice Guidance & Talkback Support",
-                    subtitle = "Optimize content descriptions and screen reader semantics.",
-                    checked = settings.voiceGuidance,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(voiceGuidance = it) } }
-                )
-            }
-        }
-
-        // 7. Account / Profile
-        if (matchesQuery("account", "profile", "login", "email", "password", "sign", "user")) {
-            SettingsCategoryCard(
-                title = "7. Account & Cloud Sync",
-                subtitle = "Manage your Lisan user account, cloud sync status, and login.",
-                icon = Icons.Default.AccountCircle
-            ) {
-                val user = when (val state = authState) {
-                    is AuthState.LoggedIn -> state.user
-                    is AuthState.Guest -> state.user
-                    is AuthState.LoggedOut -> null
-                }
-
-                if (user != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(user.displayName, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = EditorialPrimary)
-                            Text(if (user.isGuest) "Guest Account (مہمان)" else user.email, fontSize = 12.sp, color = EditorialTheme.colors.textSecondary)
-                        }
-                        Button(
-                            onClick = { showProfileDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Manage", fontSize = 12.sp)
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = { showAuthDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Log In or Create Account")
-                    }
-                }
-            }
-        }
-
-        // 8. Lesson & App Behavior
-        if (matchesQuery("behavior", "lesson", "advance", "hint", "quiz", "practice", "autoplay")) {
-            SettingsCategoryCard(
-                title = "8. Lesson & App Behavior",
-                subtitle = "Fine-tune how quizzes, lessons, and auto-advancing behave.",
-                icon = Icons.Default.Tune
-            ) {
-                SettingsSwitchRow(
-                    title = "Auto-Advance After Answer",
-                    subtitle = "Move to the next question automatically after answering correctly.",
-                    checked = settings.autoAdvance,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(autoAdvance = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Show Hints Before Answer",
-                    subtitle = "Provide helpful Arabic/Urdu clues during quiz questions.",
-                    checked = settings.showHints,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(showHints = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Show Correct Answer Immediately",
-                    subtitle = "Display explanation immediately upon quiz submission.",
-                    checked = settings.showCorrectAnswerImmediately,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(showCorrectAnswerImmediately = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Interactive Practice Mode",
-                    subtitle = "Enable sentence builder and grammar correction in chat.",
-                    checked = settings.practiceMode,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(practiceMode = it) } }
-                )
-                SettingsSwitchRow(
-                    title = "Continue From Last Lesson on Open",
-                    subtitle = "Automatically load your last active lesson when app starts.",
-                    checked = settings.continueFromLastLesson,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(continueFromLastLesson = it) } }
-                )
-            }
-        }
-
-        // 9. About
-        if (matchesQuery("about", "version", "support", "rate", "share", "developer")) {
-            SettingsCategoryCard(
-                title = "9. About Lisan Grammar",
-                subtitle = "App version, support, rating, and developer information.",
-                icon = Icons.Default.Info
-            ) {
-                Row(
+                OutlinedButton(
+                    onClick = { showHelpDialog = true },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("App Version", fontSize = 13.sp, color = EditorialTheme.colors.textSecondary)
-                    Text("v1.5.0 (Production)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Build Number", fontSize = 13.sp, color = EditorialTheme.colors.textSecondary)
-                    Text("2026.08.06", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            statusMessage = "Opening Google Play Store..."
-                            Toast.makeText(context, "Thank you for rating Lisan Grammar 5 stars!", Toast.LENGTH_LONG).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Rate App", fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            statusMessage = "Share link copied to clipboard!"
-                            Toast.makeText(context, "Share link copied", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share App", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-
-        // 10. Advanced
-        if (matchesQuery("advanced", "reset", "diagnostics", "logs", "developer")) {
-            SettingsCategoryCard(
-                title = "10. Advanced Controls",
-                subtitle = "Diagnostics, logs, and master reset options.",
-                icon = Icons.Default.DeveloperMode
-            ) {
-                SettingsSwitchRow(
-                    title = "Developer Options & Diagnostics",
-                    subtitle = "Show advanced AI telemetry and network status in debug views.",
-                    checked = settings.developerOptions,
-                    onCheckedChange = { viewModel.updateAppSettings { s -> s.copy(developerOptions = it) } }
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Button(
-                    onClick = { showResetDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.RestartAlt, contentDescription = null)
+                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Reset All App Settings & Defaults", fontWeight = FontWeight.Bold)
+                    Text("How to Use Lisan Grammar")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:aneesattari67@gmail.com")
+                            putExtra(Intent.EXTRA_SUBJECT, "Lisan Grammar App Feedback (v2.4)")
+                            putExtra(Intent.EXTRA_TEXT, "Hi Lisan Team,\n\nDevice: ${Build.MODEL} (Android ${Build.VERSION.RELEASE})\n\nFeedback:\n")
+                        }
+                        try {
+                            context.startActivity(Intent.createChooser(emailIntent, "Send Feedback Email"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No email app found.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Mail, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Send Feedback Email")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val whatsappIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = Uri.parse("https://wa.me/923096794698?text=Hi%20Lisan%20Team,%0A%0AFeedback:%0A")
+                        }
+                        try {
+                            context.startActivity(whatsappIntent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "WhatsApp not found.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Contact on WhatsApp")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}"))
+                        try {
+                            context.startActivity(marketIntent)
+                        } catch (e: Exception) {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}")))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Rate Lisan on Play Store")
+                }
+
+                TextButton(
+                    onClick = { showLicensesDialog = true },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text("Open Source Licenses", fontSize = 12.sp, color = EditorialAccentPurple)
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Lisan Grammar • Version 2.4.0 (Build 102)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialTheme.colors.textSecondary)
+                    Text("Designed with ❤️ for English & Arabic Grammar Learners", fontSize = 11.sp, color = EditorialTheme.colors.textMuted)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(32.dp))
     }
 }
 
@@ -1057,14 +1310,12 @@ fun SettingsScreen(
 fun SettingsCategoryCard(
     title: String,
     subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    EditorialCard {
+    EditorialCard(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -1074,34 +1325,17 @@ fun SettingsCategoryCard(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .background(EditorialAccentPurple.copy(alpha = 0.15f), CircleShape),
+                        .background(EditorialAccentPurple.copy(alpha = 0.12f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = EditorialAccentPurple,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(imageVector = icon, contentDescription = null, tint = EditorialAccentPurple, modifier = Modifier.size(20.dp))
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title.uppercase(),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialAccentPurple,
-                        letterSpacing = 1.2.sp
-                    )
-                    Text(
-                        text = subtitle,
-                        fontSize = 12.sp,
-                        color = EditorialTheme.colors.textSecondary
-                    )
+                Column {
+                    Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                    Text(text = subtitle, fontSize = 11.sp, color = EditorialTheme.colors.textSecondary)
                 }
             }
-
-            HorizontalDivider(color = EditorialTheme.colors.border, modifier = Modifier.padding(vertical = 4.dp))
-
+            HorizontalDivider(color = EditorialTheme.colors.border)
             content()
         }
     }
@@ -1112,126 +1346,59 @@ fun SettingsSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true
+    onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .clickable { onCheckedChange(!checked) }
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (enabled) EditorialPrimary else EditorialTheme.colors.textSecondary
-            )
-            Text(
-                text = subtitle,
-                fontSize = 12.sp,
-                color = EditorialTheme.colors.textSecondary
-            )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
+            Text(text = subtitle, fontSize = 11.sp, color = EditorialTheme.colors.textSecondary, lineHeight = 14.sp)
         }
+        Spacer(modifier = Modifier.width(8.dp))
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = EditorialAccentPurple
+                checkedTrackColor = EditorialAccentPurple,
+                uncheckedThumbColor = EditorialTheme.colors.textMuted,
+                uncheckedTrackColor = EditorialTheme.colors.container
             )
         )
     }
 }
 
 @Composable
-fun VoiceDropdownSelector(
+fun SettingsPillChip(
+    selected: Boolean,
+    onClick: () -> Unit,
     label: String,
-    selectedId: String?,
-    voices: List<ServerVoice>,
-    onSelect: (String) -> Unit
+    modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val currentName = voices.find { it.id == selectedId }?.name ?: selectedId ?: "Default Voice"
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialTheme.colors.textSecondary)
-        Spacer(modifier = Modifier.height(4.dp))
-        Box(modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, EditorialTheme.colors.border)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(currentName, fontSize = 13.sp, color = EditorialPrimary, maxLines = 1)
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                }
-            }
-
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                voices.forEach { voice ->
-                    DropdownMenuItem(
-                        text = { Text(voice.name, fontSize = 13.sp) },
-                        onClick = {
-                            onSelect(voice.id)
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun AiVoiceWaves(
-    isAnimating: Boolean,
-    modifier: Modifier = Modifier,
-    color: Color = EditorialAccentPurple
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "VoiceWaves")
-    
-    Row(
-        modifier = modifier.height(24.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() },
+        color = if (selected) EditorialAccentPurple else Color(0xFFF1F5F9),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) EditorialAccentPurple else Color(0xFFCBD5E1)
+        ),
+        shape = RoundedCornerShape(12.dp)
     ) {
-        val count = 5
-        for (i in 0 until count) {
-            val duration = 400 + i * 150
-            val scale by if (isAnimating) {
-                infiniteTransition.animateFloat(
-                    initialValue = 0.2f,
-                    targetValue = 1.0f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(duration, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    ),
-                    label = "wave_$i"
-                )
-            } else {
-                remember { mutableStateOf(0.2f) }
-            }
-            
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .fillMaxHeight(scale)
-                    .background(color, RoundedCornerShape(50))
-            )
-        }
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Color.White else EditorialPrimary,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            maxLines = 1
+        )
     }
 }

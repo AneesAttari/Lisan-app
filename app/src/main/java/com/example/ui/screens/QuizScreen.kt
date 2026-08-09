@@ -58,6 +58,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.QuizQuestion
+import com.example.data.model.DailyQuizAssignmentEntity
+import com.example.data.model.DailyQuizChallengeProgressEntity
+import com.example.ui.components.DailyQuizChallengeCard
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialDivider
 import com.example.ui.components.EditorialMixedText
@@ -87,6 +90,8 @@ fun QuizScreen(
     val score by viewModel.quizScore.collectAsState()
     val streak by viewModel.quizStreak.collectAsState()
     val totalAnswered by viewModel.quizTotalAnswered.collectAsState()
+    val dailyProgress by viewModel.dailyChallengeProgress.collectAsState()
+    val todayAssignment by viewModel.todayAssignment.collectAsState()
 
     val questions = viewModel.getFilteredQuestions()
     val currentQuestion = questions.getOrNull(currentIndex)
@@ -102,7 +107,13 @@ fun QuizScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Tense Category Filter Pills
+        // Daily Quiz Challenge Card
+        DailyQuizChallengeCard(
+            progress = dailyProgress,
+            assignment = todayAssignment,
+            onStart = { /* TODO: Handle start */ }
+        )
+
         TenseFilterBar(
             selectedCategory = categoryFilter,
             onSelectCategory = { viewModel.setQuizCategoryFilter(it) }

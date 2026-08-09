@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CurriculumData
 import com.example.data.model.GrammarTopic
+import com.example.data.model.LearnerProfile
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialDivider
 import com.example.ui.components.EditorialMixedText
@@ -91,16 +92,18 @@ fun ProgressDashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val completedTopicIds by viewModel.completedTopicIds.collectAsState()
-    val score by viewModel.quizScore.collectAsState()
-    val streak by viewModel.quizStreak.collectAsState()
-    val totalAnswered by viewModel.quizTotalAnswered.collectAsState()
+    val userStats by viewModel.userStats.collectAsState()
+    val learnerProfile by viewModel.learnerProfile.collectAsState()
+    val last7DaysActivity by viewModel.last7DaysActivity.collectAsState()
+    val overallAccuracyPct by viewModel.overallAccuracyPct.collectAsState()
     val proficiencyLevel by viewModel.proficiencyLevel.collectAsState()
 
     val allTopics = CurriculumData.topics
     val totalTopicsCount = allTopics.size
     val completedCount = completedTopicIds.size
     val overallMasteryPct = if (totalTopicsCount > 0) (completedCount * 100) / totalTopicsCount else 0
-    val quizAccuracyPct = if (totalAnswered > 0) (score * 100) / totalAnswered else 85
+    val quizAccuracyPct = overallAccuracyPct
+    val streak = userStats?.currentLearningStreak ?: viewModel.quizStreak.collectAsState().value
 
     var selectedFilterCategory by remember { mutableStateOf("ALL") }
     var reportSaveMessage by remember { mutableStateOf<String?>(null) }
@@ -114,6 +117,33 @@ fun ProgressDashboardScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Honest Empty/Zero State Banner if no activity yet
+        if (completedCount == 0 && quizAccuracyPct == 0 && last7DaysActivity.sumOf { it.second } == 0) {
+            Surface(
+                color = EditorialPillBg,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, EditorialBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "📊 پیش رفت کا جائزہ (Progress Dashboard)",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialPrimary
+                    )
+                    Text(
+                        text = "ابھی تک کوئی سیکھنے کی سرگرمی ریکارڈ نہیں ہوئی۔ اسباق مکمل کریں، کوئز حل کریں یا ٹیوٹر سے بات کریں تاکہ یہاں آپ کی حقیقی پیش رفت اور ہفتہ وار چارٹس ظاہر ہوں۔",
+                        fontSize = 12.sp,
+                        color = EditorialTextSecondary
+                    )
+                }
+            }
+        }
+
         // 1. Overall Mastery & KPI Header Cards
         OverallMasteryKpiCard(
             masteryPct = overallMasteryPct,
@@ -126,6 +156,7 @@ fun ProgressDashboardScreen(
 
         // 2. Weekly Progress Chart & Streak Tracker Card
         WeeklyProgressTrackerCard(
+            last7DaysActivity = last7DaysActivity,
             completedCount = completedCount,
             streak = streak,
             quizAccuracyPct = quizAccuracyPct
@@ -135,6 +166,7 @@ fun ProgressDashboardScreen(
         CategoryComparisonBarChartCard(
             completedTopicIds = completedTopicIds,
             allTopics = allTopics,
+            learnerProfile = learnerProfile,
             quizAccuracyPct = quizAccuracyPct
         )
 
@@ -161,6 +193,7 @@ fun ProgressDashboardScreen(
                 TopicMasteryCard(
                     topic = topic,
                     isCompleted = isDone,
+                    learnerProfile = learnerProfile,
                     onToggle = { viewModel.toggleTopicCompleted(topic.id) },
                     onPractice = {
                         viewModel.selectTopic(topic.id)
@@ -326,6 +359,10 @@ private fun RadialDonutGauge(
         )
     }
 
+    val trackColor = EditorialBorderSoft
+    val accentColor = EditorialAccentPurple
+    val primaryColor = EditorialPrimary
+
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
@@ -340,7 +377,7 @@ private fun RadialDonutGauge(
 
             // Background Track Arc
             drawArc(
-                color = EditorialBorderSoft,
+                color = trackColor,
                 startAngle = 135f,
                 sweepAngle = 270f,
                 useCenter = false,
@@ -353,7 +390,7 @@ private fun RadialDonutGauge(
             val sweepAngle = 270f * animatedProgress.value
             drawArc(
                 brush = Brush.sweepGradient(
-                    colors = listOf(EditorialAccentPurple, EditorialPrimary, EditorialAccentPurple),
+                    colors = listOf(accentColor, primaryColor, accentColor),
                     center = center
                 ),
                 startAngle = 135f,
@@ -428,6 +465,7 @@ private fun KpiMetricRow(
 private fun CategoryComparisonBarChartCard(
     completedTopicIds: Set<String>,
     allTopics: List<GrammarTopic>,
+    learnerProfile: LearnerProfile,
     quizAccuracyPct: Int,
     modifier: Modifier = Modifier
 ) {
@@ -444,7 +482,29 @@ private fun CategoryComparisonBarChartCard(
     val pastPct = if (pastTopics.isNotEmpty()) (pastCompleted * 100) / pastTopics.size else 0
     val futurePct = if (futureTopics.isNotEmpty()) (futureCompleted * 100) / futureTopics.size else 0
 
+    // Real category mastery or overall accuracy if no category specific score
+    val presentAcc = if (presentTopics.any { learnerProfile.topicMastery.containsKey(it.id) }) {
+        val sum = presentTopics.sumOf { ((learnerProfile.topicMastery[it.id] ?: 0f) * 100).toInt() }
+        sum / maxOf(1, presentTopics.size)
+    } else quizAccuracyPct
+
+    val pastAcc = if (pastTopics.any { learnerProfile.topicMastery.containsKey(it.id) }) {
+        val sum = pastTopics.sumOf { ((learnerProfile.topicMastery[it.id] ?: 0f) * 100).toInt() }
+        sum / maxOf(1, pastTopics.size)
+    } else quizAccuracyPct
+
+    val futureAcc = if (futureTopics.any { learnerProfile.topicMastery.containsKey(it.id) }) {
+        val sum = futureTopics.sumOf { ((learnerProfile.topicMastery[it.id] ?: 0f) * 100).toInt() }
+        sum / maxOf(1, futureTopics.size)
+    } else quizAccuracyPct
+
     val textMeasurer = rememberTextMeasurer()
+    val primaryColor = EditorialPrimary
+    val accentColor = EditorialAccentPurple
+    val borderColor = EditorialBorder
+    val textMutedColor = EditorialTextMuted
+    val textPrimaryColor = EditorialTextPrimary
+    val textSecondaryColor = EditorialTextSecondary
 
     EditorialCard(modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -459,20 +519,20 @@ private fun CategoryComparisonBarChartCard(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.5.sp,
-                        color = EditorialTextMuted
+                        color = textMutedColor
                     )
                     Text(
                         text = "اسباق اور کوئز کی درستگی",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary
+                        color = primaryColor
                     )
                 }
 
                 Icon(
                     imageVector = Icons.Default.BarChart,
                     contentDescription = "Chart",
-                    tint = EditorialAccentPurple,
+                    tint = accentColor,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -496,10 +556,10 @@ private fun CategoryComparisonBarChartCard(
                             .then(Modifier)
                     ) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawCircle(EditorialPrimary)
+                            drawCircle(primaryColor)
                         }
                     }
-                    Text(text = "مکمل شدہ اسباق کا تناسب", fontSize = 11.sp, color = EditorialTextSecondary)
+                    Text(text = "مکمل شدہ اسباق کا تناسب", fontSize = 11.sp, color = textSecondaryColor)
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 Row(
@@ -507,9 +567,9 @@ private fun CategoryComparisonBarChartCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Canvas(modifier = Modifier.size(10.dp)) {
-                        drawCircle(EditorialAccentPurple)
+                        drawCircle(accentColor)
                     }
-                    Text(text = "کوئز میں درستگی", fontSize = 11.sp, color = EditorialTextSecondary)
+                    Text(text = "کوئز میں درستگی", fontSize = 11.sp, color = textSecondaryColor)
                 }
             }
 
@@ -536,7 +596,7 @@ private fun CategoryComparisonBarChartCard(
                     gridSteps.forEach { stepPct ->
                         val y = canvasHeight - paddingBottom - (chartHeight * (stepPct / 100f))
                         drawLine(
-                            color = EditorialBorder.copy(alpha = 0.5f),
+                            color = borderColor.copy(alpha = 0.5f),
                             start = Offset(paddingLeft, y),
                             end = Offset(canvasWidth - paddingRight, y),
                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f),
@@ -546,7 +606,7 @@ private fun CategoryComparisonBarChartCard(
                         // Y-axis label text
                         val labelResult = textMeasurer.measure(
                             text = "$stepPct%",
-                            style = TextStyle(fontSize = 9.sp, color = EditorialTextMuted)
+                            style = TextStyle(fontSize = 9.sp, color = textMutedColor)
                         )
                         drawText(
                             textLayoutResult = labelResult,
@@ -556,9 +616,9 @@ private fun CategoryComparisonBarChartCard(
 
                     // 3 Categories: Present, Past, Future
                     val categoriesData = listOf(
-                        Triple("فعل حال (Present)", presentPct, quizAccuracyPct),
-                        Triple("فعل ماضی (Past)", pastPct, (quizAccuracyPct * 0.95).toInt()),
-                        Triple("فعل مستقبل (Future)", futurePct, (quizAccuracyPct * 0.9).toInt())
+                        Triple("فعل حال (Present)", presentPct, presentAcc),
+                        Triple("فعل ماضی (Past)", pastPct, pastAcc),
+                        Triple("فعل مستقبل (Future)", futurePct, futureAcc)
                     )
 
                     val groupWidth = chartWidth / categoriesData.size
@@ -573,7 +633,7 @@ private fun CategoryComparisonBarChartCard(
                         val bar1TopLeftY = canvasHeight - paddingBottom - bar1Height
 
                         drawRoundRect(
-                            color = EditorialPrimary,
+                            color = primaryColor,
                             topLeft = Offset(bar1TopLeftX, bar1TopLeftY),
                             size = Size(barWidth, bar1Height),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
@@ -585,7 +645,7 @@ private fun CategoryComparisonBarChartCard(
                         val bar2TopLeftY = canvasHeight - paddingBottom - bar2Height
 
                         drawRoundRect(
-                            color = EditorialAccentPurple,
+                            color = accentColor,
                             topLeft = Offset(bar2TopLeftX, bar2TopLeftY),
                             size = Size(barWidth, bar2Height),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
@@ -594,7 +654,7 @@ private fun CategoryComparisonBarChartCard(
                         // Percentage Label above bar
                         val pctResult = textMeasurer.measure(
                             text = "$completionPct%",
-                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = primaryColor)
                         )
                         drawText(
                             textLayoutResult = pctResult,
@@ -604,7 +664,7 @@ private fun CategoryComparisonBarChartCard(
                         // X-axis Category Label
                         val categoryResult = textMeasurer.measure(
                             text = label,
-                            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialTextPrimary)
+                            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = textPrimaryColor)
                         )
                         drawText(
                             textLayoutResult = categoryResult,
@@ -661,10 +721,13 @@ private fun CategoryFilterBar(
 private fun TopicMasteryCard(
     topic: GrammarTopic,
     isCompleted: Boolean,
+    learnerProfile: LearnerProfile,
     onToggle: () -> Unit,
     onPractice: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val masteryScore = learnerProfile.topicMastery[topic.id] ?: learnerProfile.topicMastery[topic.titleEn] ?: if (isCompleted) 1.0f else 0.0f
+    val statusText = if (isCompleted) "مکمل ہو گیا 🌟" else if (masteryScore > 0f) "سیکھا جا رہا ہے 📈" else "شروع نہیں ہوا ⏳"
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -720,7 +783,7 @@ private fun TopicMasteryCard(
                     shape = CircleShape
                 ) {
                     Text(
-                        text = if (isCompleted) "مکمل ہو گیا 🌟" else "سیکھا جا رہا ہے 📈",
+                        text = statusText,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isCompleted) Color(0xFF1B5E20) else EditorialPrimary,
@@ -730,7 +793,7 @@ private fun TopicMasteryCard(
             }
 
             // Topic Mastery Progress Bar
-            val targetProgress = if (isCompleted) 1.0f else 0.45f
+            val targetProgress = if (isCompleted) 1.0f else masteryScore.coerceIn(0.0f, 1.0f)
             LinearProgressIndicator(
                 progress = { targetProgress },
                 modifier = Modifier
@@ -779,12 +842,14 @@ private fun TopicMasteryCard(
 
 @Composable
 private fun WeeklyProgressTrackerCard(
+    last7DaysActivity: List<Pair<String, Int>>,
     completedCount: Int,
     streak: Int,
     quizAccuracyPct: Int,
     modifier: Modifier = Modifier
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val totalWeekLessons = last7DaysActivity.sumOf { it.second }
 
     EditorialCard(modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -852,7 +917,7 @@ private fun WeeklyProgressTrackerCard(
                     ) {
                         Text(text = "اس ہفتے پڑھے اسباق", fontSize = 10.sp, color = EditorialTextMuted)
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = "${maxOf(3, completedCount)} اسباق", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                        Text(text = "$totalWeekLessons اسباق", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
                     }
                 }
 
@@ -884,12 +949,17 @@ private fun WeeklyProgressTrackerCard(
                     ) {
                         Text(text = "مطالعہ کا تسلسل", fontSize = 10.sp, color = EditorialTextMuted)
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = "7/7 دن 🔥", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                        Text(text = "$streak دن 🔥", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
                     }
                 }
             }
 
             // Visual Weekly Chart (Canvas)
+            val chartBorderColor = EditorialBorder
+            val chartTextMuted = EditorialTextMuted
+            val chartAccentPurple = EditorialAccentPurple
+            val chartTextPrimary = EditorialTextPrimary
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -911,7 +981,7 @@ private fun WeeklyProgressTrackerCard(
                     listOf(0, 50, 100).forEach { pct ->
                         val y = canvasHeight - paddingBottom - (chartHeight * (pct / 100f))
                         drawLine(
-                            color = EditorialBorder.copy(alpha = 0.4f),
+                            color = chartBorderColor.copy(alpha = 0.4f),
                             start = Offset(paddingLeft, y),
                             end = Offset(canvasWidth - paddingRight, y),
                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f),
@@ -919,7 +989,7 @@ private fun WeeklyProgressTrackerCard(
                         )
                         val lbl = textMeasurer.measure(
                             text = "$pct%",
-                            style = TextStyle(fontSize = 9.sp, color = EditorialTextMuted)
+                            style = TextStyle(fontSize = 9.sp, color = chartTextMuted)
                         )
                         drawText(
                             textLayoutResult = lbl,
@@ -927,16 +997,22 @@ private fun WeeklyProgressTrackerCard(
                         )
                     }
 
-                    // 7 Days data: Mon, Tue, Wed, Thu, Fri, Sat, Sun
-                    val daysData = listOf(
-                        Triple("پیر", 80, 2),
-                        Triple("منگل", 90, 3),
-                        Triple("بدھ", 85, 2),
-                        Triple("جمعرات", 95, 4),
-                        Triple("جمعہ", 100, 3),
-                        Triple("ہفتہ", 90, 3),
-                        Triple("اتوار", quizAccuracyPct, maxOf(1, completedCount % 4))
-                    )
+                    // 7 Days actual data from last7DaysActivity
+                    val daysData = if (last7DaysActivity.isNotEmpty()) {
+                        last7DaysActivity.map { (dayName, count) ->
+                            Triple(dayName, if (count > 0) minOf(100, count * 25 + 50) else 0, count)
+                        }
+                    } else {
+                        listOf(
+                            Triple("پیر", 0, 0),
+                            Triple("منگل", 0, 0),
+                            Triple("بدھ", 0, 0),
+                            Triple("جمعرات", 0, 0),
+                            Triple("جمعہ", 0, 0),
+                            Triple("ہفتہ", 0, 0),
+                            Triple("اتوار", 0, 0)
+                        )
+                    }
 
                     val colWidth = chartWidth / daysData.size
                     val barWidth = 12.dp.toPx()
@@ -950,7 +1026,7 @@ private fun WeeklyProgressTrackerCard(
                         val barY = canvasHeight - paddingBottom - scoreHeight
 
                         drawRoundRect(
-                            color = EditorialAccentPurple.copy(alpha = 0.85f),
+                            color = chartAccentPurple.copy(alpha = 0.85f),
                             topLeft = Offset(barX, barY),
                             size = Size(barWidth, scoreHeight),
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx())
@@ -959,7 +1035,7 @@ private fun WeeklyProgressTrackerCard(
                         // Day label (Arabic)
                         val dayResult = textMeasurer.measure(
                             text = dayName,
-                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextPrimary)
+                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = chartTextPrimary)
                         )
                         drawText(
                             textLayoutResult = dayResult,
