@@ -14,6 +14,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -496,49 +497,8 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Title Bar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "SETTINGS & PREFERENCES",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialAccentPurple,
-                    letterSpacing = 1.5.sp
-                )
-                Text(
-                    text = "Settings",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialPrimary
-                )
-                Text(
-                    text = "Personalize your learning experience.",
-                    fontSize = 13.sp,
-                    color = EditorialTheme.colors.textSecondary
-                )
-            }
-            IconButton(
-                onClick = { showResetDefaultsDialog = true },
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(EditorialTheme.colors.container, CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Restore,
-                    contentDescription = "Reset Settings",
-                    tint = EditorialAccentPurple,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
         // Top Summary Card: Learner Profile Overview
         EditorialCard(
             modifier = Modifier
@@ -1072,7 +1032,7 @@ fun SettingsScreen(
         // SECTION F: Data, Storage & Offline Mode
         if (matchesQuery("data", "storage", "offline", "cache", "export", "delete", "clear", "fallback", "network")) {
             SettingsCategoryCard(
-                title = "6. Data, Storage & Offline Mode",
+                title = "6. Data & Offline Storage",
                 subtitle = "Manage local storage, offline grammar engine, export backups, or clear data.",
                 icon = Icons.Default.Storage
             ) {
@@ -1210,97 +1170,7 @@ fun SettingsScreen(
             }
         }
 
-        // SECTION H: Support, About & Licenses
-        if (matchesQuery("support", "about", "feedback", "help", "rate", "version", "licenses", "open source")) {
-            SettingsCategoryCard(
-                title = "8. Support & About Lisan",
-                subtitle = "App guide, feedback, rating, app version details, and open-source licenses.",
-                icon = Icons.Default.HelpOutline
-            ) {
-                OutlinedButton(
-                    onClick = { showHelpDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("How to Use Lisan Grammar")
-                }
 
-                OutlinedButton(
-                    onClick = {
-                        val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
-                            data = Uri.parse("mailto:aneesattari67@gmail.com")
-                            putExtra(Intent.EXTRA_SUBJECT, "Lisan Grammar App Feedback (v2.4)")
-                            putExtra(Intent.EXTRA_TEXT, "Hi Lisan Team,\n\nDevice: ${Build.MODEL} (Android ${Build.VERSION.RELEASE})\n\nFeedback:\n")
-                        }
-                        try {
-                            context.startActivity(Intent.createChooser(emailIntent, "Send Feedback Email"))
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "No email app found.", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Mail, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Send Feedback Email")
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        val whatsappIntent = Intent(Intent.ACTION_VIEW).apply {
-                            data = Uri.parse("https://wa.me/923096794698?text=Hi%20Lisan%20Team,%0A%0AFeedback:%0A")
-                        }
-                        try {
-                            context.startActivity(whatsappIntent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "WhatsApp not found.", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Contact on WhatsApp")
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}"))
-                        try {
-                            context.startActivity(marketIntent)
-                        } catch (e: Exception) {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}")))
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Rate Lisan on Play Store")
-                }
-
-                TextButton(
-                    onClick = { showLicensesDialog = true },
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                ) {
-                    Text("Open Source Licenses", fontSize = 12.sp, color = EditorialAccentPurple)
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("Lisan Grammar • Version 2.4.0 (Build 102)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialTheme.colors.textSecondary)
-                    Text("Designed with ❤️ for English & Arabic Grammar Learners", fontSize = 11.sp, color = EditorialTheme.colors.textMuted)
-                }
-            }
-        }
 
         Spacer(modifier = Modifier.height(32.dp))
     }
@@ -1381,23 +1251,24 @@ fun SettingsPillChip(
     label: String,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() },
-        color = if (selected) EditorialAccentPurple else Color(0xFFF1F5F9),
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (selected) EditorialAccentPurple else Color(0xFFCBD5E1)
-        ),
-        shape = RoundedCornerShape(12.dp)
+            .background(if (selected) EditorialAccentPurple else Color(0xFFF1F5F9))
+            .border(
+                width = 1.dp,
+                color = if (selected) EditorialAccentPurple else Color(0xFFCBD5E1),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = if (selected) Color.White else EditorialPrimary,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             maxLines = 1
         )
     }

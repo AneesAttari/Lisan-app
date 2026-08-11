@@ -14,6 +14,8 @@ import android.widget.Toast
 import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import coil.compose.rememberAsyncImagePainter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,6 +29,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -75,6 +78,12 @@ import com.example.ui.viewmodel.VoiceSessionState
 import com.example.ui.viewmodel.VoiceInputLanguage
 import com.example.ui.viewmodel.AudioPlaybackState
 import java.util.Locale
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import java.text.SimpleDateFormat
+import java.util.Date
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -101,13 +110,114 @@ fun TutorChatScreen(
     val completedTopics by viewModel.completedTopicIds.collectAsState()
     val settings by viewModel.appSettings.collectAsState(initial = com.example.data.model.AppSettings())
 
+    val showApiKeyGuideModal by viewModel.showApiKeyGuideModal.collectAsState()
+    if (showApiKeyGuideModal) {
+        com.example.ui.components.ApiKeyGuideDialog(
+            onDismiss = { viewModel.setShowApiKeyGuideModal(false) },
+            onSaveKey = { key -> viewModel.setUserApiKey(key) },
+            isCustomKeyExceeded = viewModel.hasCustomUserApiKey()
+        )
+    }
+
     var showChatDetails by remember { mutableStateOf(false) }
     var showNameChangeDialog by remember { mutableStateOf(false) }
     var showLevelDialog by remember { mutableStateOf(false) }
     var showDailyGrammarInline by remember { mutableStateOf(false) }
     var showPlusMenu by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
+    var showExamModeDialog by remember { mutableStateOf(false) }
+    var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    if (showExamModeDialog) {
+        val examViewModel: com.example.ui.viewmodel.ExamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+        com.example.ui.components.ExamModeDialog(
+            viewModel = examViewModel,
+            onDismiss = { showExamModeDialog = false }
+        )
+    }
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            selectedImageUri = uri
+        }
+    }
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            selectedImageUri = uri
+        }
+    }
+    var showThinkAndExplainDialog by remember { mutableStateOf(false) }
+
+    val cameraPhotoUri = remember {
+        try {
+            val file = java.io.File(context.cacheDir, "temp_camera_photo.jpg")
+            androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+        } catch (e: Exception) {
+            android.net.Uri.EMPTY
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && cameraPhotoUri != android.net.Uri.EMPTY) {
+            selectedImageUri = cameraPhotoUri
+        }
+    }
     var showTutorPreferences by remember { mutableStateOf(false) }
+
+    var imageMetadata by remember(selectedImageUri) {
+        mutableStateOf<com.example.utils.ImageOptimizer.ImageMetadata?>(null)
+    }
+    var optimizedSizeKBs by remember(selectedImageUri, settings.imageCompressionPreset) {
+        mutableStateOf<Long?>(null)
+    }
+    var optimizedWidth by remember(selectedImageUri, settings.imageCompressionPreset) {
+        mutableStateOf<Int?>(null)
+    }
+    var optimizedHeight by remember(selectedImageUri, settings.imageCompressionPreset) {
+        mutableStateOf<Int?>(null)
+    }
+
+    LaunchedEffect(selectedImageUri) {
+        imageMetadata = selectedImageUri?.let { uri ->
+            com.example.utils.ImageOptimizer.getImageMetadata(context, uri)
+        }
+    }
+
+    LaunchedEffect(selectedImageUri, settings.imageCompressionPreset) {
+        if (selectedImageUri != null) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val presetEnum = try {
+                        com.example.utils.ImageOptimizer.CompressionPreset.valueOf(settings.imageCompressionPreset.uppercase())
+                    } catch (e: Exception) {
+                        com.example.utils.ImageOptimizer.CompressionPreset.BALANCED
+                    }
+                    val result = com.example.utils.ImageOptimizer.optimizeImage(context, selectedImageUri!!, presetEnum)
+                    if (result != null) {
+                        optimizedSizeKBs = result.compressedSizeBytes.toLong()
+                        optimizedWidth = result.compressedWidth
+                        optimizedHeight = result.compressedHeight
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("TutorChatScreen", "Error estimating optimized image", e)
+                }
+            }
+        } else {
+            optimizedSizeKBs = null
+            optimizedWidth = null
+            optimizedHeight = null
+        }
+    }
+
     
     var inputText by remember { mutableStateOf("") }
     val chatInputState by viewModel.chatInputState.collectAsState()
@@ -123,6 +233,21 @@ fun TutorChatScreen(
     var isSttProcessing by remember { mutableStateOf(false) }
     var sttErrorMessage by remember { mutableStateOf<String?>(null) }
     var activeSpeechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    val selectedVoiceLanguage by viewModel.activeVoiceLanguage.collectAsState()
+    val sttLanguage = when (selectedVoiceLanguage) {
+        VoiceInputLanguage.URDU -> "ur-PK"
+        VoiceInputLanguage.ENGLISH -> "en-US"
+        VoiceInputLanguage.ARABIC -> "ar-SA"
+        else -> "en-US"
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try { activeSpeechRecognizer?.cancel() } catch (e: Exception) {}
+            try { activeSpeechRecognizer?.destroy() } catch (e: Exception) {}
+            activeSpeechRecognizer = null
+        }
+    }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -130,6 +255,7 @@ fun TutorChatScreen(
         if (isGranted) {
             startSttListening(
                 context = context,
+                language = sttLanguage,
                 onPartial = { inputText = it },
                 onFinal = { text ->
                     inputText = text
@@ -183,7 +309,52 @@ fun TutorChatScreen(
         )
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    val localDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val localScope = rememberCoroutineScope()
+
+    val topKeyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val topFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    LaunchedEffect(localDrawerState.isOpen) {
+        if (localDrawerState.isOpen) {
+            topKeyboardController?.hide()
+            topFocusManager.clearFocus()
+        }
+    }
+
+    BackHandler(enabled = localDrawerState.isOpen) {
+        localScope.launch { localDrawerState.close() }
+    }
+
+    val colors = EditorialTheme.colors
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        ModalNavigationDrawer(
+            drawerState = localDrawerState,
+            drawerContent = {
+                ModalDrawerSheet(
+                    modifier = Modifier.width(340.dp),
+                    drawerContainerColor = colors.background,
+                    drawerTonalElevation = 6.dp
+                ) {
+                    TutorChatSidebar(
+                        viewModel = viewModel,
+                        onClose = { localScope.launch { localDrawerState.close() } },
+                        onStartNewChat = {
+                            viewModel.clearChat()
+                            showChatDetails = true
+                            localScope.launch { localDrawerState.close() }
+                        },
+                        onConversationSelected = { sessionId ->
+                            viewModel.continueConversationSession(sessionId)
+                            showChatDetails = true
+                            localScope.launch { localDrawerState.close() }
+                        }
+                    )
+                }
+            },
+            content = {
+                Box(modifier = modifier.fillMaxSize()) {
         if (!showChatDetails) {
             // LEARNING HUB PAGE
             Column(
@@ -492,47 +663,69 @@ fun TutorChatScreen(
                         )
 
                         // Saved Notes shortcut
+                        val savedNotesShape = RoundedCornerShape(16.dp)
                         Surface(
                             color = EditorialContainer,
-                            shape = RoundedCornerShape(12.dp),
+                            shape = savedNotesShape,
                             border = BorderStroke(1.dp, EditorialBorder),
+                            shadowElevation = 2.dp,
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clip(savedNotesShape)
                                 .clickable { viewModel.setSelectedTab(4) } // Switch to Library
                         ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 Row(
+                                    modifier = Modifier.padding(14.dp).padding(bottom = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.BookmarkBorder,
-                                        contentDescription = null,
-                                        tint = EditorialPrimary
-                                    )
-                                    Column {
-                                        Text(
-                                            "View Your Saved Grammar Notes",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = EditorialPrimary
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.BookmarkBorder,
+                                            contentDescription = null,
+                                            tint = EditorialPrimary
                                         )
-                                        Text(
-                                            "محفوظ کیے گئے اہم اصول اور اسباق دیکھیں",
-                                            fontSize = 11.sp,
-                                            color = EditorialTextSecondary
-                                        )
+                                        Column {
+                                            Text(
+                                                "View Your Saved Grammar Notes",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = EditorialPrimary
+                                            )
+                                            Text(
+                                                "محفوظ کیے گئے اہم اصول اور اسباق دیکھیں",
+                                                fontSize = 11.sp,
+                                                color = EditorialTextSecondary
+                                            )
+                                        }
                                     }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = Color(0xFF2563EB),
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    tint = EditorialAccentPurple,
-                                    modifier = Modifier.size(16.dp)
+
+                                // Bottom Accent Strip
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .background(
+                                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                                colors = listOf(
+                                                    Color(0xFF3B82F6).copy(alpha = 0.3f),
+                                                    Color(0xFF2563EB),
+                                                    Color(0xFF1D4ED8).copy(alpha = 0.3f)
+                                                )
+                                            )
+                                        )
                                 )
                             }
                         }
@@ -542,10 +735,19 @@ fun TutorChatScreen(
         } else {
             // ACTIVE CHAT STREAM VIEW
             val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
-            var showTutorPreferences by remember { mutableStateOf(false) }
+    var showTutorPreferences by remember { mutableStateOf(false) }
+
             val hasUserSentMessage = chatHistory.any { it.role == "user" }
             val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
             val isImeVisible = WindowInsets.isImeVisible
+
+            LaunchedEffect(showVoiceTutor) {
+                if (showVoiceTutor) {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                }
+            }
 
             val totalChatItems = chatHistory.size + (if (isChatLoading) 1 else 0) + (if (chatError != null) 1 else 0)
             val lastMsgText = chatHistory.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
@@ -586,26 +788,49 @@ fun TutorChatScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Back Button (circular)
-                    Surface(
-                        color = EditorialSurface,
-                        shape = CircleShape,
-                        shadowElevation = 2.dp,
-                        border = BorderStroke(1.dp, EditorialBorder),
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable {
-                                viewModel.saveCurrentSessionToHistory()
-                                showChatDetails = false
+// Back Button & Menu (circular)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = EditorialSurface,
+                            shape = CircleShape,
+                            shadowElevation = 2.dp,
+                            border = BorderStroke(1.dp, EditorialBorder),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable {
+                                    viewModel.saveCurrentSessionToHistory()
+                                    showChatDetails = false
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to Hub",
+                                    tint = EditorialPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back to Hub",
-                                tint = EditorialPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        }
+                        
+                        Surface(
+                            color = EditorialSurface,
+                            shape = CircleShape,
+                            shadowElevation = 2.dp,
+                            border = BorderStroke(1.dp, EditorialBorder),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable {
+                                    localScope.launch { localDrawerState.open() }
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Menu,
+                                    contentDescription = "Open Chat History",
+                                    tint = EditorialPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
 
@@ -783,7 +1008,14 @@ fun TutorChatScreen(
                                                 if (!isUser) {
                                                     val messageId = System.identityHashCode(message).toString()
                                                     val isLiked by viewModel.isLiked("Tutor Response", messageId).collectAsState(initial = false)
-                                                    IconButton(
+                                                    val displayableTextForAudio = cleanRecommendationTags(textContent).replace("[KEY_GUIDE_ACTION]", "").trim()
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        TutorAudioControls(
+                                                            text = displayableTextForAudio,
+                                                            messageId = messageId,
+                                                            viewModel = viewModel
+                                                        )
+                                                        IconButton(
                                                         onClick = {
                                                             viewModel.toggleLike(
                                                                 com.example.data.model.LikedItem(
@@ -804,11 +1036,29 @@ fun TutorChatScreen(
                                                         )
                                                     }
                                                 }
+                                                }
                                             }
 
                                             Spacer(modifier = Modifier.height(4.dp))
                                             val recommendationRoute = if (!isUser) parseRecommendationRoute(textContent) else null
-                                            val displayableText = if (!isUser) cleanRecommendationTags(textContent) else textContent
+                                            val containsKeyGuideAction = textContent.contains("[KEY_GUIDE_ACTION]")
+                                            val displayableText = if (!isUser) {
+                                                cleanRecommendationTags(textContent).replace("[KEY_GUIDE_ACTION]", "").trim()
+                                            } else textContent
+
+                                            if (isUser && message.imageUri != null) {
+                                                Image(
+                                                    painter = rememberAsyncImagePainter(model = message.imageUri),
+                                                    contentDescription = "User Attached Image",
+                                                    modifier = Modifier
+                                                        .padding(vertical = 4.dp)
+                                                        .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                            }
 
                                             FormattedMessageContent(
                                                 text = displayableText,
@@ -816,6 +1066,14 @@ fun TutorChatScreen(
                                             )
                                             
                                             if (!isUser) {
+                                                if (containsKeyGuideAction) {
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                    com.example.ui.components.ApiKeyGuideCardInline(
+                                                        onOpenGuide = { viewModel.setShowApiKeyGuideModal(true) },
+                                                        onSaveKey = { key -> viewModel.setUserApiKey(key) }
+                                                    )
+                                                }
+
                                                 recommendationRoute?.let { route ->
                                                     Spacer(modifier = Modifier.height(8.dp))
                                                     RecommendationActionChip(
@@ -990,77 +1248,115 @@ fun TutorChatScreen(
                         }
 
                         if (isSttListening) {
-                            Row(
+                            Surface(
+                                color = Color(0xFF0F172A),
+                                shape = RoundedCornerShape(20.dp),
+                                border = BorderStroke(1.dp, Color(0xFFF97316)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                             ) {
-                                TextButton(
-                                    onClick = {
-                                        try { activeSpeechRecognizer?.cancel() } catch(e: Exception){}
-                                        try { activeSpeechRecognizer?.destroy() } catch(e: Exception){}
-                                        activeSpeechRecognizer = null
-                                        isSttListening = false
-                                        isSttProcessing = false
-                                    }
-                                ) {
-                                    Text(
-                                        text = "Cancel / منسوخ کریں",
-                                        color = EditorialTextSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .background(Color.Red, CircleShape)
-                                    )
-                                    Text(
-                                        text = "Listening… / بولیں، میں سن رہا ہوں",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EditorialPrimary
-                                    )
-                                }
-
-                                Button(
-                                    onClick = {
-                                        isSttListening = false
-                                        isSttProcessing = true
-                                        try {
-                                            activeSpeechRecognizer?.stopListening()
-                                        } catch(e: Exception) {
-                                            isSttProcessing = false
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Row(
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Stop,
-                                            contentDescription = "Stop",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Text(
-                                            text = "Stop / ریکارڈنگ روکیں",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Surface(
+                                                color = Color(0xFFEF4444).copy(alpha = 0.2f),
+                                                shape = CircleShape,
+                                                border = BorderStroke(1.dp, Color(0xFFEF4444))
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Mic,
+                                                        contentDescription = "Recording",
+                                                        tint = Color(0xFFF87171),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Column {
+                                                Text(
+                                                    text = "Listening… / بولیں، میں سن رہا ہوں",
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White
+                                                )
+                                                Text(
+                                                    text = "Speak clearly in English or Arabic",
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF94A3B8)
+                                                )
+                                            }
+                                        }
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    try { activeSpeechRecognizer?.cancel() } catch(e: Exception){}
+                                                    try { activeSpeechRecognizer?.destroy() } catch(e: Exception){}
+                                                    activeSpeechRecognizer = null
+                                                    isSttListening = false
+                                                    isSttProcessing = false
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, Color(0xFF475569)),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("Cancel", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                                            }
+
+                                            Button(
+                                                onClick = {
+                                                    isSttListening = false
+                                                    isSttProcessing = true
+                                                    try {
+                                                        activeSpeechRecognizer?.stopListening()
+                                                    } catch(e: Exception) {
+                                                        isSttProcessing = false
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Stop, contentDescription = "Done", tint = Color.White, modifier = Modifier.size(14.dp))
+                                                    Text("Done", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (inputText.isNotBlank()) {
+                                        Surface(
+                                            color = Color(0xFF1E293B),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = inputText,
+                                                fontSize = 13.sp,
+                                                color = Color(0xFF818CF8),
+                                                modifier = Modifier.padding(10.dp),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1086,192 +1382,520 @@ fun TutorChatScreen(
                                 )
                             }
                         } else {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    .background(EditorialBackground)
                             ) {
-                                // Plus Button [ + ]
-                                Surface(
-                                    color = EditorialContainer,
-                                    shape = CircleShape,
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clickable { showPlusMenu = true }
-                                        .testTag("plus_menu_button")
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Tutor Options",
-                                            tint = EditorialPrimary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-
-                                // Input Field [ Type a message… ]
-                                Surface(
-                                    color = EditorialContainer,
-                                    shape = RoundedCornerShape(20.dp),
-                                    border = BorderStroke(1.dp, EditorialBorder),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 40.dp)
-                                ) {
+                                // Image Preview and Optimization Details
+                                selectedImageUri?.let { uri ->
                                     Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                                            .background(EditorialContainer, RoundedCornerShape(16.dp))
+                                            .border(1.dp, EditorialBorder, RoundedCornerShape(16.dp))
+                                            .padding(12.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        val placeholderText = when (effectiveResponseLanguage) {
-                                            "Urdu" -> "پیغام لکھیں…"
-                                            "Arabic" -> "اكتب رسالة…"
-                                            else -> "Type a message…"
-                                        }
-
-                                        TextField(
-                                            value = inputText,
-                                            onValueChange = {
-                                                inputText = it
-                                                if (sttErrorMessage != null) sttErrorMessage = null
-                                            },
-                                            textStyle = TextStyle(
-                                                color = EditorialTextPrimary,
-                                                fontSize = 14.sp,
-                                                textDirection = TextDirection.ContentOrRtl
-                                            ),
-                                            placeholder = {
-                                                Text(
-                                                    text = bidiIsolate(placeholderText),
-                                                    color = EditorialTextMuted,
-                                                    fontSize = 13.sp,
-                                                    style = TextStyle(textDirection = TextDirection.ContentOrRtl)
-                                                )
-                                            },
+                                        // 1. Image Thumbnail
+                                        Box(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("chat_input_field"),
-                                            colors = TextFieldDefaults.colors(
-                                                focusedContainerColor = Color.Transparent,
-                                                unfocusedContainerColor = Color.Transparent,
-                                                focusedTextColor = EditorialTextPrimary,
-                                                unfocusedTextColor = EditorialTextPrimary,
-                                                focusedIndicatorColor = Color.Transparent,
-                                                unfocusedIndicatorColor = Color.Transparent
-                                            ),
-                                            maxLines = 3,
-                                            keyboardOptions = KeyboardOptions.Default.copy(
-                                                imeAction = ImeAction.Send,
-                                                autoCorrectEnabled = true
-                                            ),
-                                            keyboardActions = KeyboardActions(
-                                                onSend = {
-                                                    if (inputText.isNotBlank() && !isChatLoading && isNetworkAvailable) {
-                                                        viewModel.sendChatMessage(inputText)
-                                                        inputText = ""
-                                                    }
-                                                }
+                                                .size(72.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .border(1.dp, EditorialBorderAccent, RoundedCornerShape(12.dp))
+                                                .background(EditorialSurface)
+                                        ) {
+                                            Image(
+                                                painter = rememberAsyncImagePainter(model = uri),
+                                                contentDescription = "Selected Image",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                             )
-                                        )
-                                    }
-                                }
-
-                                // Microphone Button [ 🎤 ]
-                                Surface(
-                                    color = EditorialContainer,
-                                    shape = CircleShape,
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clickable {
-                                            keyboardController?.hide()
-                                            sttErrorMessage = null
-                                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                                startSttListening(
-                                                    context = context,
-                                                    onPartial = { inputText = it },
-                                                    onFinal = { text ->
-                                                        inputText = text
-                                                        isSttListening = false
-                                                        isSttProcessing = false
-                                                    },
-                                                    onError = { errMsg ->
-                                                        isSttListening = false
-                                                        isSttProcessing = false
-                                                        sttErrorMessage = "Try again or type your message. / دوبارہ کوشش کریں یا اپنا پیغام لکھیں۔"
-                                                    },
-                                                    onStarted = {
-                                                        isSttListening = true
-                                                        isSttProcessing = false
-                                                    },
-                                                    onRecognizerCreated = { activeSpeechRecognizer = it }
+                                            
+                                            // Remove/Close button at top-right
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(4.dp)
+                                                    .size(20.dp)
+                                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                                    .clickable { selectedImageUri = null }
+                                                    .testTag("remove_image_button"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Remove Image",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(12.dp)
                                                 )
-                                            } else {
-                                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                             }
                                         }
-                                        .testTag("mic_stt_button")
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Mic,
-                                            contentDescription = "Speech to text",
-                                            tint = EditorialPrimary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+
+                                        // 2. Info & Controls Pane
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = "Optimized",
+                                                    tint = EditorialAccentPurple,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = "Image Optimized • تم تحسين الصورة",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = EditorialPrimary
+                                                )
+                                            }
+
+                                            // Sizes display
+                                            if (imageMetadata != null) {
+                                                val originalFormatted = com.example.utils.ImageOptimizer.formatBytes(imageMetadata!!.originalSizeBytes)
+                                                val optimizedFormatted = optimizedSizeKBs?.let { com.example.utils.ImageOptimizer.formatBytes(it) } ?: "Estimating..."
+                                                
+                                                val reduction = if (optimizedSizeKBs != null && imageMetadata!!.originalSizeBytes > 0) {
+                                                    val saved = imageMetadata!!.originalSizeBytes - optimizedSizeKBs!!
+                                                    val pct = (saved.toFloat() / imageMetadata!!.originalSizeBytes.toFloat() * 100).toInt()
+                                                    if (pct > 0) " (saved $pct%)" else ""
+                                                } else ""
+
+                                                Text(
+                                                    text = "$originalFormatted → $optimizedFormatted$reduction",
+                                                    fontSize = 10.sp,
+                                                    color = EditorialTextSecondary,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+
+                                            // Interactive Preset Selector
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                val presets = com.example.utils.ImageOptimizer.CompressionPreset.values()
+                                                presets.forEach { preset ->
+                                                    val isSelected = settings.imageCompressionPreset.equals(preset.name, ignoreCase = true)
+                                                    Surface(
+                                                        color = if (isSelected) EditorialAccentPurple else EditorialSurface,
+                                                        contentColor = if (isSelected) Color.White else EditorialPrimary,
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clickable {
+                                                                viewModel.updateAppSettings { it.copy(imageCompressionPreset = preset.name) }
+                                                            }
+                                                    ) {
+                                                        Column(
+                                                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp),
+                                                            horizontalAlignment = Alignment.CenterHorizontally
+                                                        ) {
+                                                            Text(
+                                                                text = preset.displayNameEn,
+                                                                fontSize = 9.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                maxLines = 1
+                                                            )
+                                                            Text(
+                                                                text = preset.displayNameAr,
+                                                                fontSize = 8.sp,
+                                                                color = if (isSelected) Color.White.copy(alpha = 0.8f) else EditorialTextMuted,
+                                                                maxLines = 1
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
-                                if (inputText.isBlank()) {
-                                    // Blue Conversational Voice Tutor Button [ 🎙️ ]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    // Plus Button [ + ]
+                                    Box {
+                                        Surface(
+                                            color = EditorialContainer,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clickable { showPlusMenu = true }
+                                                .testTag("plus_menu_button")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Tutor Options",
+                                                    tint = EditorialPrimary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = showPlusMenu, properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                                            onDismissRequest = { showPlusMenu = false },
+                                            modifier = Modifier.background(EditorialSurface)
+                                        ) {
+                                            // 0. Exam Mode Option
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Text("📝", fontSize = 16.sp)
+                                                        Text(
+                                                            text = "Exam Mode",
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = EditorialPrimary
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    showPlusMenu = false
+                                                    showExamModeDialog = true
+                                                },
+                                                modifier = Modifier.testTag("menu_option_exam_mode")
+                                            )
+                                            
+                                            HorizontalDivider(color = EditorialBorder)
+                                            
+                                            // 1. Study Mode Option
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                     ) {
+                                                         Icon(
+                                                             imageVector = if (isStudyModeOn) Icons.Default.CheckCircle else Icons.Default.Circle,
+                                                             contentDescription = null,
+                                                             tint = if (isStudyModeOn) EditorialAccentPurple else EditorialPrimary,
+                                                             modifier = Modifier.size(20.dp)
+                                                         )
+                                                         Text(
+                                                             text = "Study Mode",
+                                                             fontWeight = FontWeight.Bold,
+                                                             color = EditorialPrimary
+                                                         )
+                                                     }
+                                                 },
+                                                 onClick = {
+                                                     viewModel.setStudyMode(!isStudyModeOn)
+                                                     showPlusMenu = false
+                                                 },
+                                                 modifier = Modifier.testTag("menu_option_study_mode")
+                                             )
+                                             
+                                             HorizontalDivider(color = EditorialBorder)
+                                             
+                                             // 2. Attach Image Option
+                                             DropdownMenuItem(
+                                                 text = {
+                                                     Row(
+                                                         verticalAlignment = Alignment.CenterVertically,
+                                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                     ) {
+                                                         Icon(
+                                                             imageVector = Icons.Default.Image,
+                                                             contentDescription = null,
+                                                             tint = EditorialAccentPurple,
+                                                             modifier = Modifier.size(20.dp)
+                                                         )
+                                                         Text(
+                                                             text = "Photos/Gallery",
+                                                             fontWeight = FontWeight.Bold,
+                                                             color = EditorialPrimary
+                                                         )
+                                                     }
+                                                 },
+                                                 onClick = {
+                                                     showPlusMenu = false
+                                                     imagePickerLauncher.launch(
+                                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                     )
+                                                 },
+                                                 modifier = Modifier.testTag("menu_option_attach_image")
+                                             )
+
+                                             HorizontalDivider(color = EditorialBorder)
+
+                                             // 3. Camera Option
+                                             DropdownMenuItem(
+                                                 text = {
+                                                     Row(
+                                                         verticalAlignment = Alignment.CenterVertically,
+                                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                     ) {
+                                                         Icon(
+                                                             imageVector = Icons.Default.PhotoCamera,
+                                                             contentDescription = null,
+                                                             tint = EditorialAccentPurple,
+                                                             modifier = Modifier.size(20.dp)
+                                                         )
+                                                         Text(
+                                                             text = "Camera",
+                                                             fontWeight = FontWeight.Bold,
+                                                             color = EditorialPrimary
+                                                         )
+                                                     }
+                                                 },
+                                                 onClick = {
+                                                     showPlusMenu = false
+                                                     if (cameraPhotoUri != android.net.Uri.EMPTY) {
+                                                         cameraLauncher.launch(cameraPhotoUri)
+                                                     }
+                                                 },
+                                                 modifier = Modifier.testTag("menu_option_camera")
+                                              )
+
+                                              HorizontalDivider(color = EditorialBorder)
+
+                                              // 4. Files Option
+                                              DropdownMenuItem(
+                                                  text = {
+                                                      Row(
+                                                          verticalAlignment = Alignment.CenterVertically,
+                                                          horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                      ) {
+                                                          Icon(
+                                                              imageVector = Icons.Default.FolderOpen,
+                                                              contentDescription = null,
+                                                              tint = EditorialAccentPurple,
+                                                              modifier = Modifier.size(20.dp)
+                                                          )
+                                                          Text(
+                                                              text = "Files",
+                                                              fontWeight = FontWeight.Bold,
+                                                              color = EditorialPrimary
+                                                          )
+                                                      }
+                                                  },
+                                                  onClick = {
+                                                      showPlusMenu = false
+                                                      filePickerLauncher.launch("image/*")
+                                                  },
+                                                  modifier = Modifier.testTag("menu_option_files")
+                                              )
+
+                                              HorizontalDivider(color = EditorialBorder)
+
+                                              // 5. Think & Explain Option
+                                              DropdownMenuItem(
+                                                  text = {
+                                                      Row(
+                                                          verticalAlignment = Alignment.CenterVertically,
+                                                          horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                      ) {
+                                                          Icon(
+                                                              imageVector = Icons.Default.AutoAwesome,
+                                                              contentDescription = null,
+                                                              tint = EditorialAccentPurple,
+                                                              modifier = Modifier.size(20.dp)
+                                                          )
+                                                          Text(
+                                                              text = "Think & Explain Mode",
+                                                              fontWeight = FontWeight.Bold,
+                                                              color = EditorialPrimary
+                                                          )
+                                                      }
+                                                  },
+                                                  onClick = {
+                                                      showPlusMenu = false
+                                                      showThinkAndExplainDialog = true
+                                                  },
+                                                  modifier = Modifier.testTag("menu_option_think_explain")
+                                             )
+                                        }
+                                    }
+
+                                    // Input Field [ Type a message… ]
                                     Surface(
-                                        color = EditorialAccentPurple,
+                                        color = EditorialContainer,
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, EditorialBorder),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .heightIn(min = 40.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+                                        ) {
+                                            val placeholderText = when (effectiveResponseLanguage) {
+                                                "Urdu" -> "پیغام لکھیں…"
+                                                "Arabic" -> "اكتب رسالة…"
+                                                else -> "Type a message…"
+                                            }
+
+                                            TextField(
+                                                value = inputText,
+                                                onValueChange = {
+                                                    inputText = it
+                                                    if (sttErrorMessage != null) sttErrorMessage = null
+                                                },
+                                                textStyle = TextStyle(
+                                                    color = EditorialTextPrimary,
+                                                    fontSize = 14.sp,
+                                                    textDirection = TextDirection.ContentOrRtl
+                                                ),
+                                                placeholder = {
+                                                    Text(
+                                                        text = bidiIsolate(placeholderText),
+                                                        color = EditorialTextMuted,
+                                                        fontSize = 13.sp,
+                                                        style = TextStyle(textDirection = TextDirection.ContentOrRtl)
+                                                    )
+                                                },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("chat_input_field"),
+                                                colors = TextFieldDefaults.colors(
+                                                    focusedContainerColor = Color.Transparent,
+                                                    unfocusedContainerColor = Color.Transparent,
+                                                    focusedTextColor = EditorialTextPrimary,
+                                                    unfocusedTextColor = EditorialTextPrimary,
+                                                    focusedIndicatorColor = Color.Transparent,
+                                                    unfocusedIndicatorColor = Color.Transparent
+                                                ),
+                                                maxLines = 3,
+                                                keyboardOptions = KeyboardOptions.Default.copy(
+                                                    imeAction = ImeAction.Send,
+                                                    autoCorrectEnabled = true
+                                                ),
+                                                keyboardActions = KeyboardActions(
+                                                    onSend = {
+                                                        if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading && isNetworkAvailable) {
+                                                            viewModel.sendChatMessage(inputText, selectedImageUri?.toString())
+                                                            inputText = ""
+                                                            selectedImageUri = null
+                                                        }
+                                                    }
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    // Microphone Button [ 🎤 ]
+                                    Surface(
+                                        color = EditorialContainer,
                                         shape = CircleShape,
                                         modifier = Modifier
                                             .size(40.dp)
-                                            .clickable { showVoiceTutor = true }
-                                            .testTag("blue_voice_button")
+                                            .clickable {
+                                                keyboardController?.hide()
+                                                sttErrorMessage = null
+                                                if (isSttListening) {
+                                                    try { activeSpeechRecognizer?.cancel() } catch (e: Exception) {}
+                                                    try { activeSpeechRecognizer?.destroy() } catch (e: Exception) {}
+                                                    activeSpeechRecognizer = null
+                                                    isSttListening = false
+                                                    isSttProcessing = false
+                                                } else {
+                                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                                        startSttListening(
+                                                            context = context,
+                                                            language = sttLanguage,
+                                                            onPartial = { inputText = it },
+                                                            onFinal = { text ->
+                                                                inputText = text
+                                                                isSttListening = false
+                                                                isSttProcessing = false
+                                                            },
+                                                            onError = { errMsg ->
+                                                                isSttListening = false
+                                                                isSttProcessing = false
+                                                                sttErrorMessage = "Try again or type your message. / دوبارہ کوشش کریں یا اپنا پیغام لکھیں۔"
+                                                            },
+                                                            onStarted = {
+                                                                isSttListening = true
+                                                                isSttProcessing = false
+                                                            },
+                                                            onRecognizerCreated = { activeSpeechRecognizer = it }
+                                                        )
+                                                    } else {
+                                                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                    }
+                                                }
+                                            }
+                                            .testTag("mic_stt_button")
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
-                                                imageVector = Icons.Default.GraphicEq,
-                                                contentDescription = "Live Voice Tutor",
-                                                tint = Color.White,
+                                                imageVector = Icons.Default.Mic,
+                                                contentDescription = "Speech to text",
+                                                tint = EditorialPrimary,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
                                     }
-                                } else {
-                                    // Send Button [ Send ]
-                                    val isSendEnabled = !isChatLoading && isNetworkAvailable
-                                    Surface(
-                                        color = if (isSendEnabled) EditorialAccentPurple else EditorialBorder,
-                                        shape = CircleShape,
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clickable(enabled = isSendEnabled) {
-                                                if (inputText.isNotBlank() && !isChatLoading && isNetworkAvailable) {
-                                                    viewModel.sendChatMessage(inputText)
-                                                    inputText = ""
-                                                }
-                                            }
-                                            .testTag("send_button")
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            if (isChatLoading) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(16.dp),
-                                                    color = Color.White,
-                                                    strokeWidth = 2.dp
-                                                )
-                                            } else {
+
+                                    if (inputText.isBlank() && selectedImageUri == null) {
+                                        // Blue Conversational Voice Tutor Button [ 🎙️ ]
+                                        Surface(
+                                            color = EditorialAccentPurple,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clickable { showVoiceTutor = true }
+                                                .testTag("blue_voice_button")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
                                                 Icon(
-                                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                                    contentDescription = "Send",
-                                                    tint = if (isSendEnabled) Color.White else EditorialTextMuted,
-                                                    modifier = Modifier.size(18.dp)
+                                                    imageVector = Icons.Default.GraphicEq,
+                                                    contentDescription = "Live Voice Tutor",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(20.dp)
                                                 )
+                                            }
+                                        }
+                                    } else {
+                                        // Send Button [ Send ]
+                                        val isSendEnabled = !isChatLoading && isNetworkAvailable
+                                        Surface(
+                                            color = if (isSendEnabled) EditorialAccentPurple else EditorialBorder,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clickable(enabled = isSendEnabled) {
+                                                    if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading && isNetworkAvailable) {
+                                                        viewModel.sendChatMessage(inputText, selectedImageUri?.toString())
+                                                        inputText = ""
+                                                        selectedImageUri = null
+                                                    }
+                                                }
+                                                .testTag("send_button")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                if (isChatLoading) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(16.dp),
+                                                        color = Color.White,
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.Send,
+                                                        contentDescription = "Send",
+                                                        tint = if (isSendEnabled) Color.White else EditorialTextMuted,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -1389,6 +2013,50 @@ fun TutorChatScreen(
                                                 Text(
                                                     text = displayPresets[preset] ?: preset,
                                                     fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = EditorialBorder)
+
+                            // Image Quality Settings Block
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "Image Quality Preset • جودة الصورة",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialTextMuted
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val presets = com.example.utils.ImageOptimizer.CompressionPreset.values()
+                                    presets.forEach { preset ->
+                                        val isSelected = settings.imageCompressionPreset.equals(preset.name, ignoreCase = true)
+
+                                        Surface(
+                                            color = if (isSelected) EditorialAccentPurple else EditorialContainer,
+                                            contentColor = if (isSelected) Color.White else EditorialPrimary,
+                                            shape = CircleShape,
+                                            border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { 
+                                                    viewModel.updateAppSettings { it.copy(imageCompressionPreset = preset.name) }
+                                                }
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${preset.displayNameEn} • ${preset.displayNameAr}",
+                                                    fontSize = 9.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                             }
@@ -1583,10 +2251,170 @@ fun TutorChatScreen(
                     containerColor = EditorialSurface
                 )
             }
+
+            if (showThinkAndExplainDialog) {
+                val inputSentence by viewModel.analyzerInput.collectAsState()
+                val analysisResult by viewModel.analyzerOutput.collectAsState()
+                val isAnalyzing by viewModel.isAnalyzing.collectAsState()
+                val lastUserMessage = chatHistory.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
+                val defaultSentence = lastUserMessage.ifBlank { "She has finished her homework." }
+
+                LaunchedEffect(showThinkAndExplainDialog) {
+                    if (showThinkAndExplainDialog && inputSentence.isBlank()) {
+                        viewModel.setAnalyzerInput(defaultSentence)
+                    }
+                }
+
+                AlertDialog(
+                    onDismissRequest = { showThinkAndExplainDialog = false },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = EditorialAccentPurple,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                "Think & Explain • فہم اور وضاحت",
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialPrimary,
+                                fontSize = 16.sp
+                            )
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                "Analyze any sentence or grammar rule below to see how the AI parses it and explains the structure.",
+                                fontSize = 12.sp,
+                                color = EditorialTextSecondary,
+                                lineHeight = 16.sp
+                            )
+
+                            TextField(
+                                value = inputSentence,
+                                onValueChange = { viewModel.setAnalyzerInput(it) },
+                                modifier = Modifier.fillMaxWidth().testTag("think_explain_input_field"),
+                                shape = RoundedCornerShape(12.dp),
+                                textStyle = TextStyle(fontSize = 13.sp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = EditorialContainer,
+                                    unfocusedContainerColor = EditorialContainer,
+                                    focusedTextColor = EditorialTextPrimary,
+                                    unfocusedTextColor = EditorialTextPrimary,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                placeholder = {
+                                    Text(
+                                        "Enter a sentence to analyze...",
+                                        color = EditorialTextMuted,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.speak(inputSentence, "think_explain_speak", 1.0f) },
+                                    enabled = inputSentence.isNotBlank(),
+                                    modifier = Modifier.weight(1.5f).height(40.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = EditorialContainer,
+                                        contentColor = EditorialTextSecondary
+                                    ),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Listen", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = { viewModel.runDeepAnalyzer() },
+                                    enabled = !isAnalyzing && inputSentence.isNotBlank(),
+                                    modifier = Modifier.weight(2f).height(40.dp).testTag("think_explain_analyze_button"),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = EditorialPrimary,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    if (isAnalyzing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Thinking...", fontSize = 11.sp)
+                                    } else {
+                                        Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Analyze", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            if (isAnalyzing) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(100.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        CircularProgressIndicator(color = EditorialAccentPurple)
+                                        Text("AI is parsing the sentence structure...", fontSize = 11.sp, color = EditorialTextMuted)
+                                    }
+                                }
+                            } else if (!analysisResult.isNullOrBlank()) {
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = EditorialContainer),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .border(1.dp, EditorialBorder, RoundedCornerShape(12.dp))
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            "STRUCTURE ANALYSIS & PARSING",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = EditorialTextMuted,
+                                            letterSpacing = 1.0.sp,
+                                            modifier = Modifier.padding(bottom = 8.dp)
+                                        )
+
+                                        EditorialDivider()
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        EditorialMixedText(text = analysisResult!!, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showThinkAndExplainDialog = false }) {
+                            Text("Close", color = EditorialAccentPurple, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    containerColor = EditorialSurface
+                )
+            }
         }
 
-        // Plus Icon Popup Menu
-        if (showPlusMenu) {
+        // Plus Icon Popup Menu (disabled in favor of lightweight dropdown)
+        if (false) {
             AlertDialog(
                 onDismissRequest = { showPlusMenu = false },
                 confirmButton = {
@@ -1848,6 +2676,766 @@ fun TutorChatScreen(
                 onDismissRequest = { showVoiceTutor = false }
             )
         }
+                    }
+            }
+        )
+    }
+}
+
+@Composable
+fun TutorChatSidebar(
+    viewModel: LisanViewModel,
+    onClose: () -> Unit,
+    onStartNewChat: () -> Unit,
+    onConversationSelected: (String) -> Unit
+) {
+    val colors = EditorialTheme.colors
+    val sessions by viewModel.conversationSessions.collectAsState()
+    
+    var searchQuery by remember { mutableStateOf("") }
+    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
+
+    var sessionToDelete by remember { mutableStateOf<com.example.data.model.ConversationSessionEntity?>(null) }
+    var sessionToRename by remember { mutableStateOf<com.example.data.model.ConversationSessionEntity?>(null) }
+    var newTitleInput by remember { mutableStateOf("") }
+    
+    var showSettingsInSidebar by remember { mutableStateOf(false) }
+    var showMemoryManagerDialog by remember { mutableStateOf(false) }
+
+    val filteredSessions = remember(sessions, searchQuery) {
+        sessions.filter { session ->
+            session.title.lowercase(Locale.getDefault()).contains(searchQuery.lowercase(Locale.getDefault())) ||
+            session.preview.lowercase(Locale.getDefault()).contains(searchQuery.lowercase(Locale.getDefault()))
+        }
+    }
+
+    // Delete Confirmation Dialog
+    if (sessionToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { sessionToDelete = null },
+            title = { Text("Delete Conversation?", fontWeight = FontWeight.Bold, color = colors.primary) },
+            text = { Text("This will permanently delete this conversation and detach its content from your Tutor memory.", color = colors.textSecondary) },
+            dismissButton = {
+                TextButton(onClick = { sessionToDelete = null }) {
+                    Text("Cancel", color = colors.accentPurple)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        sessionToDelete?.let { viewModel.deleteConversationSession(it.id) }
+                        sessionToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("Delete", color = Color.White)
+                }
+            }
+        )
+    }
+
+    // Rename Dialog
+    if (sessionToRename != null) {
+        AlertDialog(
+            onDismissRequest = { sessionToRename = null },
+            title = { Text("Rename Conversation", fontWeight = FontWeight.Bold, color = colors.primary) },
+            text = {
+                OutlinedTextField(
+                    value = newTitleInput,
+                    onValueChange = { newTitleInput = it },
+                    label = { Text("Conversation Title") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = colors.accentPurple,
+                        unfocusedBorderColor = colors.border
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { sessionToRename = null }) {
+                    Text("Cancel", color = colors.accentPurple)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        sessionToRename?.let { viewModel.renameConversationSession(it.id, newTitleInput) }
+                        sessionToRename = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentPurple)
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            }
+        )
+    }
+
+    if (showMemoryManagerDialog) {
+        val learnerProfile by viewModel.learnerProfile.collectAsState()
+        var newMemoryText by remember { mutableStateOf("") }
+        var editingMemoryText by remember { mutableStateOf<String?>(null) }
+        var editingMemoryInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showMemoryManagerDialog = false },
+            title = {
+                Column {
+                    Text(
+                        text = "Tutor Memory Manager",
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary,
+                        fontSize = 18.sp
+                    )
+                    Text(
+                        text = "ٹیوٹر کی یادداشت کا منتظم",
+                        fontWeight = FontWeight.Bold,
+                        color = colors.accentPurple,
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "The tutor automatically saves facts and choices you make (like \"speak Urdu\"), and uses them across conversations. You can view, add, or edit them below.",
+                        fontSize = 12.sp,
+                        color = colors.textSecondary
+                    )
+
+                    // Add custom memory field
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newMemoryText,
+                            onValueChange = { newMemoryText = it },
+                            placeholder = { Text("Add custom rule (e.g. Speak Urdu only)", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = colors.accentPurple,
+                                unfocusedBorderColor = colors.borderSoft
+                            )
+                        )
+                        Button(
+                            onClick = {
+                                if (newMemoryText.isNotBlank()) {
+                                    viewModel.learnerProfileManager.addManualMemory(newMemoryText.trim())
+                                    newMemoryText = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.accentPurple),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("Add", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+
+                    HorizontalDivider(color = colors.borderSoft)
+
+                    // Memories List
+                    if (learnerProfile.usefulMemories.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No saved memories yet.",
+                                fontSize = 13.sp,
+                                color = colors.textMuted
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(learnerProfile.usefulMemories.size) { index ->
+                                val memory = learnerProfile.usefulMemories[index]
+                                val isRtl = isUrduOrArabicText(memory)
+                                Surface(
+                                    color = colors.pillBg,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, colors.borderSoft),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        if (editingMemoryText == memory) {
+                                            OutlinedTextField(
+                                                value = editingMemoryInput,
+                                                onValueChange = { editingMemoryInput = it },
+                                                singleLine = true,
+                                                modifier = Modifier.weight(1f),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedBorderColor = colors.accentPurple,
+                                                    unfocusedBorderColor = colors.borderSoft
+                                                )
+                                            )
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                IconButton(
+                                                    onClick = {
+                                                        if (editingMemoryInput.isNotBlank()) {
+                                                            viewModel.learnerProfileManager.updateMemory(memory, editingMemoryInput.trim())
+                                                        }
+                                                        editingMemoryText = null
+                                                    }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Save",
+                                                        tint = colors.accentPurple,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                                IconButton(onClick = { editingMemoryText = null }) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Cancel",
+                                                        tint = colors.textSecondary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Text(
+                                                text = memory,
+                                                fontSize = if (isRtl) 16.sp else 13.sp,
+                                                fontWeight = if (isRtl) FontWeight.Bold else FontWeight.Normal,
+                                                color = colors.textPrimary,
+                                                textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+                                                style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(end = 6.dp)
+                                            )
+                                            Row {
+                                                IconButton(
+                                                    onClick = {
+                                                        editingMemoryText = memory
+                                                        editingMemoryInput = memory
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Edit,
+                                                        contentDescription = "Edit",
+                                                        tint = colors.textSecondary,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = {
+                                                        viewModel.learnerProfileManager.removeMemory(memory)
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "Delete",
+                                                        tint = Color.Red,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showMemoryManagerDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentPurple)
+                ) {
+                    Text("Close", color = Color.White)
+                }
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        // TOP HALF: Search & Conversation List
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Lisan AI Chat",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = colors.primary
+                )
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = colors.textSecondary)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // New Chat Button
+            Button(
+                onClick = onStartNewChat,
+                modifier = Modifier.fillMaxWidth().height(44.dp).testTag("new_chat_sidebar_button"),
+                colors = ButtonDefaults.buttonColors(containerColor = colors.accentPurple),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("New Conversation", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search conversations...", fontSize = 13.sp, color = colors.textMuted) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(18.dp)) },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = colors.accentPurple,
+                    unfocusedBorderColor = colors.borderSoft,
+                    focusedContainerColor = colors.surface,
+                    unfocusedContainerColor = colors.surface
+                ),
+                modifier = Modifier.fillMaxWidth().height(50.dp).testTag("sidebar_search_input")
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Conversation list title
+            Text(
+                text = "History",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = colors.textMuted
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Lazy List of Sessions
+            if (filteredSessions.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (searchQuery.isNotEmpty()) "No matches found" else "No saved chats yet",
+                        color = colors.textMuted,
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().testTag("sidebar_past_conversations_list"),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filteredSessions) { session ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(colors.surface)
+                                .clickable { onConversationSelected(session.id) }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // Left Chat Icon
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.pillBg),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ChatBubbleOutline,
+                                        contentDescription = null,
+                                        tint = colors.accentPurple,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                // Text block
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = session.title,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.textPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = session.preview,
+                                        fontSize = 11.sp,
+                                        color = colors.textSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            // Options dots
+                            var showMenu by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(
+                                    onClick = { showMenu = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Options",
+                                        tint = colors.textSecondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { showMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Rename", fontSize = 12.sp) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            sessionToRename = session
+                                            newTitleInput = session.title
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Delete", fontSize = 12.sp, color = Color.Red) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(14.dp)) },
+                                        onClick = {
+                                            showMenu = false
+                                            sessionToDelete = session
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // BOTTOM HALF: Collapsible Settings Section
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = colors.container,
+            border = BorderStroke(1.dp, colors.border)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Collapsible Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showSettingsInSidebar = !showSettingsInSidebar }
+                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = null,
+                            tint = colors.accentPurple,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Tutor Settings",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = colors.textPrimary
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showSettingsInSidebar) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Collapsible Preferences Block
+                AnimatedVisibility(
+                    visible = showSettingsInSidebar,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        val activeLanguage by viewModel.activeLanguage.collectAsState()
+                        val isStudyModeOn by viewModel.isStudyModeOn.collectAsState()
+                        val isPersonalizationEnabled by viewModel.isStudyPersonalizationEnabled.collectAsState()
+                        val appSettings by viewModel.appSettings.collectAsState()
+
+                        // Response Language
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Response Language • جواب کی زبان",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.textMuted
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val languages = listOf("Auto", "English", "Urdu", "Arabic")
+                                val displayLangs = mapOf("Auto" to "Auto", "English" to "English", "Urdu" to "اردو", "Arabic" to "العربية")
+                                
+                                languages.forEach { lang ->
+                                    val isSelected = activeLanguage.equals(lang, ignoreCase = true) || 
+                                        (lang == "Urdu" && activeLanguage == "اردو") ||
+                                        (lang == "Arabic" && activeLanguage == "العربية")
+
+                                    Surface(
+                                        color = if (isSelected) colors.accentPurple else colors.pillBg,
+                                        contentColor = if (isSelected) Color.White else colors.textPrimary,
+                                        shape = CircleShape,
+                                        border = BorderStroke(1.dp, if (isSelected) colors.accentPurple else colors.borderSoft),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { viewModel.setActiveLanguage(lang) }
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = displayLangs[lang] ?: lang,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = colors.borderSoft)
+
+                        // Voice preset
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Tutor Voice Profile • آواز کی قسم",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.textMuted
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val presets = listOf("Young Voice", "Mature Voice")
+                                val displayPresets = mapOf(
+                                    "Young Voice" to "Young • نو عمر",
+                                    "Mature Voice" to "Mature • بزرگ"
+                                )
+                                
+                                presets.forEach { preset ->
+                                    val isSelected = if (preset == "Young Voice") {
+                                        appSettings.selectedSpeaker.contains("Young", ignoreCase = true)
+                                    } else {
+                                        appSettings.selectedSpeaker.contains("Mature", ignoreCase = true)
+                                    }
+
+                                    Surface(
+                                        color = if (isSelected) colors.accentPurple else colors.pillBg,
+                                        contentColor = if (isSelected) Color.White else colors.textPrimary,
+                                        shape = CircleShape,
+                                        border = BorderStroke(1.dp, if (isSelected) colors.accentPurple else colors.borderSoft),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { 
+                                                viewModel.updateAppSettings { it.copy(selectedSpeaker = preset) }
+                                                viewModel.ttsManager.applySpeakerPreset(preset)
+                                            }
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = displayPresets[preset] ?: preset,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = colors.borderSoft)
+
+                        // Study Mode Switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Study Mode • گرامر موڈ",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textPrimary
+                                )
+                                Text(
+                                    text = "Gives focused grammar teaching.",
+                                    fontSize = 10.sp,
+                                    color = colors.textSecondary
+                                )
+                            }
+                            Switch(
+                                checked = isStudyModeOn,
+                                onCheckedChange = { viewModel.setStudyMode(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = colors.accentPurple
+                                )
+                            )
+                        }
+
+                        // Personalization Switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Personalize • کارکردگی",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textPrimary
+                                )
+                                Text(
+                                    text = "Uses your learning stats.",
+                                    fontSize = 10.sp,
+                                    color = colors.textSecondary
+                                )
+                            }
+                            Switch(
+                                checked = isPersonalizationEnabled,
+                                onCheckedChange = { viewModel.setStudyPersonalizationEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = colors.accentPurple
+                                )
+                            )
+                        }
+
+                        HorizontalDivider(color = colors.borderSoft)
+
+                        // Tutor Memory Row
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showMemoryManagerDialog = true }
+                                .padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = null,
+                                        tint = colors.accentPurple,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Tutor Memory • ٹیوٹر کی یادداشت",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colors.textPrimary
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Text(
+                                text = "View and edit what the tutor remembers about you.",
+                                fontSize = 10.sp,
+                                color = colors.textSecondary
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1861,58 +3449,85 @@ fun ActionHubCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val cardShape = RoundedCornerShape(20.dp)
     Surface(
         color = backgroundColor,
-        shape = RoundedCornerShape(16.dp),
+        shape = cardShape,
         border = BorderStroke(1.dp, EditorialBorder),
+        shadowElevation = 3.dp,
         modifier = modifier
-            .height(115.dp)
+            .height(122.dp)
+            .clip(cardShape)
             .clickable { onClick() }
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp)
+                    .padding(bottom = 6.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text(
-                        text = title,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary,
-                        fontFamily = FontFamily.Serif
-                    )
-                    Text(
-                        text = subtitle,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialAccentPurple
-                    )
-                }
-                Surface(
-                    color = EditorialPrimary,
-                    shape = CircleShape,
-                    modifier = Modifier.size(28.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary,
+                            fontFamily = FontFamily.Serif
+                        )
+                        Text(
+                            text = subtitle,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2563EB)
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFF2563EB),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                 }
+                Text(
+                    text = description,
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    color = EditorialTextSecondary,
+                    maxLines = 2
+                )
             }
-            Text(
-                text = description,
-                fontSize = 10.sp,
-                lineHeight = 13.sp,
-                color = EditorialTextSecondary
+
+            // Bottom Accent Strip (signature blue shape at the end of the box)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                            colors = listOf(
+                                Color(0xFF3B82F6).copy(alpha = 0.4f),
+                                Color(0xFF2563EB),
+                                Color(0xFF1D4ED8).copy(alpha = 0.4f)
+                            )
+                        )
+                    )
             )
         }
     }
@@ -2030,6 +3645,7 @@ fun NameChangeDialog(
 
 private fun startSttListening(
     context: android.content.Context,
+    language: String,
     onPartial: (String) -> Unit,
     onFinal: (String) -> Unit,
     onError: (String) -> Unit,
@@ -2041,10 +3657,12 @@ private fun startSttListening(
         return
     }
     try {
-        val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        val recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
         onRecognizerCreated(recognizer)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
@@ -2163,106 +3781,110 @@ fun TutorMessageControls(
     val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
     val isSpeaking = currentlySpeaking == messageId
     val currentSpeed by ttsManager.playbackSpeed.collectAsState()
+    val isSaved by viewModel.isSaved("Tutor Response", messageId).collectAsState(initial = false)
+    val isLiked by viewModel.isLiked("Tutor Response", messageId).collectAsState(initial = false)
+    val isDisliked by viewModel.isDisliked("Tutor Response", messageId).collectAsState(initial = false)
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (isSpeaking) {
-            val ttsLoadingStatus by ttsManager.ttsLoadingStatus.collectAsState()
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (ttsLoadingStatus != null) {
-                    Text(
-                        text = ttsLoadingStatus ?: "",
-                        fontSize = 10.sp,
-                        color = EditorialAccentPurple,
-                        fontStyle = FontStyle.Italic,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                    CircularProgressIndicator(
-                        color = EditorialAccentPurple,
-                        strokeWidth = 1.5.dp,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-
-                // 1x Speed Pill
-                val is1x = currentSpeed == 1.0f
-                Surface(
-                    onClick = {
-                        ttsManager.setPlaybackSpeed(1.0f)
-                    },
-                    color = if (is1x) EditorialPrimary else Color.Transparent,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, if (is1x) EditorialPrimary else Color(0xFFCBD5E1)),
-                    modifier = Modifier.height(26.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
-                        Text(
-                            text = "1×",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (is1x) Color.White else EditorialTextSecondary
-                        )
-                    }
-                }
-
-                // 1.25x Speed Pill
-                val is125x = currentSpeed == 1.25f
-                Surface(
-                    onClick = {
-                        ttsManager.setPlaybackSpeed(1.25f)
-                    },
-                    color = if (is125x) EditorialPrimary else Color.Transparent,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, if (is125x) EditorialPrimary else Color(0xFFCBD5E1)),
-                    modifier = Modifier.height(26.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
-                        Text(
-                            text = "1.25×",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (is125x) Color.White else EditorialTextSecondary
-                        )
-                    }
-                }
-
-                // Red Circular Stop Dot
-                Surface(
-                    onClick = { ttsManager.stop() },
-                    color = Color(0xFFEF4444),
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .testTag("stop_speech_$messageId")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color.White, RoundedCornerShape(2.dp))
-                        )
-                    }
-                }
-            }
-        } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            // Save / Favorite Bookmark
             IconButton(
-                onClick = { viewModel.speak(text, messageId) },
+                onClick = {
+                    viewModel.toggleLibrarySave(
+                        com.example.data.model.LibraryItem(
+                            id = "chat_save_$messageId",
+                            contentType = "Tutor Response",
+                            contentId = messageId,
+                            title = text.take(40).ifBlank { "Tutor Response" },
+                            preview = text
+                        )
+                    )
+                },
                 modifier = Modifier
                     .size(28.dp)
-                    .testTag("speak_button_$messageId")
+                    .testTag("save_button_$messageId")
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                    contentDescription = "Speak response",
+                    imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    contentDescription = "Save to Library",
+                    tint = if (isSaved) EditorialPrimary else EditorialTextSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Like (Thumbs Up)
+            IconButton(
+                onClick = {
+                    viewModel.toggleLike(
+                        com.example.data.model.LikedItem(
+                            id = "like_chat_$messageId",
+                            contentType = "Tutor Response",
+                            contentId = messageId,
+                            title = text.take(40).ifBlank { "Tutor Response" },
+                            preview = text
+                        )
+                    )
+                },
+                modifier = Modifier
+                    .size(28.dp)
+                    .testTag("like_button_$messageId")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ThumbUp,
+                    contentDescription = "Like response",
+                    tint = if (isLiked) Color(0xFF10B981) else EditorialTextSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Dislike (Thumbs Down)
+            IconButton(
+                onClick = {
+                    viewModel.toggleDislike(
+                        com.example.data.model.DislikedItem(
+                            id = "dislike_chat_$messageId",
+                            contentType = "Tutor Response",
+                            contentId = messageId,
+                            title = text.take(40).ifBlank { "Tutor Response" }
+                        )
+                    )
+                },
+                modifier = Modifier
+                    .size(28.dp)
+                    .testTag("dislike_button_$messageId")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ThumbDown,
+                    contentDescription = "Dislike response",
+                    tint = if (isDisliked) Color(0xFFEF4444) else EditorialTextSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Regenerate
+            IconButton(
+                onClick = {
+                    viewModel.retryLastChatMessage()
+                },
+                modifier = Modifier
+                    .size(28.dp)
+                    .testTag("regenerate_button_$messageId")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Regenerate response",
                     tint = EditorialAccentPurple,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -2344,9 +3966,10 @@ fun FormattedMessageContent(text: String, isUser: Boolean) {
         val isRtl = isUrduOrArabicText(text)
         Text(
             text = text,
-            fontSize = 15.sp,
+            fontSize = if (isRtl) 19.sp else 15.sp,
+            fontWeight = if (isRtl) FontWeight.Bold else FontWeight.Normal,
             color = Color.White,
-            lineHeight = 22.sp,
+            lineHeight = if (isRtl) 32.sp else 22.sp,
             textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
             style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr)
         )
@@ -2364,42 +3987,69 @@ fun FormattedMessageContent(text: String, isUser: Boolean) {
         "Lesson Title", "Simple English Explanation"
     )
 
+    class LineItem(
+        val text: String,
+        val isHeader: Boolean,
+        val isSpecialExample: Boolean,
+        val hasBeforeGap: Boolean
+    )
+
+    val lineItems = mutableListOf<LineItem>()
+    var pendingGap = false
+
+    for (rawLine in lines) {
+        val trimmed = rawLine.trim()
+        if (trimmed.isEmpty()) {
+            pendingGap = true
+        } else {
+            val isHeader = knownHeaders.any { header ->
+                trimmed.equals(header, ignoreCase = true) || (trimmed.startsWith(header, ignoreCase = true) && trimmed.length < 35)
+            }
+            val isSpecialExample = trimmed.startsWith("Positive:") || trimmed.startsWith("Negative:") || trimmed.startsWith("Question:")
+            
+            lineItems.add(LineItem(trimmed, isHeader, isSpecialExample, pendingGap))
+            pendingGap = false
+        }
+    }
+
     Column(
-        verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        for (rawLine in lines) {
-            val line = rawLine.trim()
-            if (line.isEmpty()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                continue
+        lineItems.forEachIndexed { index, item ->
+            val isRtl = isUrduOrArabicText(item.text)
+            
+            // Calculate precise padding:
+            // Heading-content and paragraphs have comfortable educational separations.
+            val topPadding = if (index == 0) {
+                0.dp
+            } else if (item.hasBeforeGap) {
+                if (item.isHeader) 8.dp else 4.dp
+            } else {
+                if (item.isHeader) 4.dp else 1.dp
             }
 
-            val isHeader = knownHeaders.any { header ->
-                line.equals(header, ignoreCase = true) || (line.startsWith(header, ignoreCase = true) && line.length < 35)
-            }
-
-            val isRtl = isUrduOrArabicText(line)
-
-            if (isHeader) {
-                Spacer(modifier = Modifier.height(4.dp))
+            if (item.isHeader) {
                 Text(
-                    text = line,
-                    fontSize = if (isRtl) 16.sp else 15.sp,
+                    text = item.text,
+                    fontSize = if (isRtl) 21.sp else 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (isRtl) EditorialAccentPurple else EditorialPrimary,
                     textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
                     style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = topPadding)
                 )
-            } else if (line.startsWith("Positive:") || line.startsWith("Negative:") || line.startsWith("Question:")) {
+            } else if (item.isSpecialExample) {
                 Surface(
                     color = EditorialContainer,
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = topPadding)
                 ) {
                     Text(
-                        text = line,
+                        text = item.text,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = EditorialPrimary,
@@ -2408,14 +4058,16 @@ fun FormattedMessageContent(text: String, isUser: Boolean) {
                 }
             } else {
                 Text(
-                    text = line,
-                    fontSize = if (isRtl) 16.sp else 15.sp,
-                    fontWeight = FontWeight.Normal,
+                    text = item.text,
+                    fontSize = if (isRtl) 19.sp else 15.sp,
+                    fontWeight = if (isRtl) FontWeight.Bold else FontWeight.Normal,
                     color = EditorialTextPrimary,
-                    lineHeight = if (isRtl) 25.sp else 22.sp,
+                    lineHeight = if (isRtl) 32.sp else 22.sp,
                     textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
                     style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = topPadding)
                 )
             }
         }
@@ -2498,3 +4150,125 @@ fun RecommendationActionChip(
     }
 }
 
+
+
+
+
+@Composable
+fun TutorAudioControls(
+    text: String,
+    messageId: String,
+    viewModel: com.example.ui.viewmodel.LisanViewModel
+) {
+    val ttsManager = viewModel.ttsManager
+    val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
+    val isSpeaking = currentlySpeaking == messageId
+    val currentSpeed by ttsManager.playbackSpeed.collectAsState()
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        if (isSpeaking) {
+            Surface(
+                onClick = { ttsManager.stop() },
+                color = Color(0xFFEF4444),
+                shape = CircleShape,
+                modifier = Modifier
+                    .size(24.dp)
+                    .testTag("stop_speech_$messageId")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(Color.White, RoundedCornerShape(2.dp))
+                    )
+                }
+            }
+            
+            val is075x = currentSpeed == 0.75f
+            Surface(
+                onClick = { ttsManager.setPlaybackSpeed(0.75f) },
+                color = if (is075x) EditorialPrimary else Color.Transparent,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (is075x) EditorialPrimary else Color(0xFFCBD5E1)),
+                modifier = Modifier.height(24.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
+                    Text(
+                        text = "0.75×",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (is075x) Color.White else EditorialTextSecondary
+                    )
+                }
+            }
+
+            val is1x = currentSpeed == 1.0f
+            Surface(
+                onClick = { ttsManager.setPlaybackSpeed(1.0f) },
+                color = if (is1x) EditorialPrimary else Color.Transparent,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (is1x) EditorialPrimary else Color(0xFFCBD5E1)),
+                modifier = Modifier.height(24.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
+                    Text(
+                        text = "1×",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (is1x) Color.White else EditorialTextSecondary
+                    )
+                }
+            }
+
+            val is125x = currentSpeed == 1.25f
+            Surface(
+                onClick = { ttsManager.setPlaybackSpeed(1.25f) },
+                color = if (is125x) EditorialPrimary else Color.Transparent,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (is125x) EditorialPrimary else Color(0xFFCBD5E1)),
+                modifier = Modifier.height(24.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
+                    Text(
+                        text = "1.25×",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (is125x) Color.White else EditorialTextSecondary
+                    )
+                }
+            }
+            
+            val ttsLoadingStatus by ttsManager.ttsLoadingStatus.collectAsState()
+            if (ttsLoadingStatus != null) {
+                CircularProgressIndicator(
+                    color = EditorialAccentPurple,
+                    strokeWidth = 1.5.dp,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = ttsLoadingStatus ?: "",
+                    fontSize = 10.sp,
+                    color = EditorialAccentPurple,
+                    fontStyle = FontStyle.Italic
+                )
+            }
+        } else {
+            IconButton(
+                onClick = { viewModel.speak(text, messageId) },
+                modifier = Modifier
+                    .size(24.dp)
+                    .testTag("speak_button_$messageId")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = "Speak response",
+                    tint = EditorialAccentPurple,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}

@@ -245,12 +245,38 @@ fun LessonScreen(
                         }
 
                         IconButton(onClick = {
+                            val fullText = """
+                                |【 TOPIC / موضوع 】
+                                |${lesson.topicTitleEn} (${lesson.topicTitleUr})
+                                |
+                                |【 ENGLISH RULE 】
+                                |${lesson.englishRule}
+                                |
+                                |【 URDU RULE (قانون گرامر) 】
+                                |${lesson.ruleUrdu}
+                                |
+                                |【 ARABIC GRAMMAR COMPARISON (موازنہ مع العربية) 】
+                                |${lesson.arabicGrammarComparison}
+                                |
+                                |【 SIMILARITIES 】
+                                |${lesson.similarities.joinToString("\n") { "• $it" }}
+                                |
+                                |【 DIFFERENCES 】
+                                |${lesson.differences.joinToString("\n") { "• $it" }}
+                                |
+                                |【 EXAMPLES (مثالیں) 】
+                                |${lesson.examples.joinToString("\n\n") { "• English: ${it.english}\n  Urdu: ${it.urdu}\n  Note: ${it.note}" }}
+                                |
+                                |【 COMMON MISTAKE (عام غلطی) 】
+                                |${lesson.commonMistake}
+                            """.trimMargin()
                             viewModel.toggleLike(
                                 com.example.data.model.LikedItem(
                                     id = "like_lesson_${lesson.topicTitleEn}",
                                     contentType = "Lesson",
                                     contentId = lesson.topicTitleEn,
-                                    title = lesson.topicTitleEn
+                                    title = lesson.topicTitleEn,
+                                    preview = fullText
                                 )
                             )
                         }) {
@@ -262,13 +288,38 @@ fun LessonScreen(
                         }
 
                         IconButton(onClick = {
+                            val fullText = """
+                                |【 TOPIC / موضوع 】
+                                |${lesson.topicTitleEn} (${lesson.topicTitleUr})
+                                |
+                                |【 ENGLISH RULE 】
+                                |${lesson.englishRule}
+                                |
+                                |【 URDU RULE (قانون گرامر) 】
+                                |${lesson.ruleUrdu}
+                                |
+                                |【 ARABIC GRAMMAR COMPARISON (موازنہ مع العربية) 】
+                                |${lesson.arabicGrammarComparison}
+                                |
+                                |【 SIMILARITIES 】
+                                |${lesson.similarities.joinToString("\n") { "• $it" }}
+                                |
+                                |【 DIFFERENCES 】
+                                |${lesson.differences.joinToString("\n") { "• $it" }}
+                                |
+                                |【 EXAMPLES (مثالیں) 】
+                                |${lesson.examples.joinToString("\n\n") { "• English: ${it.english}\n  Urdu: ${it.urdu}\n  Note: ${it.note}" }}
+                                |
+                                |【 COMMON MISTAKE (عام غلطی) 】
+                                |${lesson.commonMistake}
+                            """.trimMargin()
                             viewModel.toggleLibrarySave(
                                 com.example.data.model.LibraryItem(
                                     id = "lesson_${lesson.topicTitleEn}",
                                     contentType = "Lesson",
                                     contentId = lesson.topicTitleEn,
                                     title = lesson.topicTitleEn,
-                                    preview = lesson.ruleUrdu.take(100),
+                                    preview = fullText,
                                     payloadJson = null
                                 )
                             )

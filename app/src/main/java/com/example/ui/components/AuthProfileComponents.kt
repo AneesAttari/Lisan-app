@@ -574,25 +574,95 @@ fun ProfileDialog(
                     color = EditorialTheme.colors.accentPurple,
                     letterSpacing = 1.2.sp
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Surface(
+                    color = EditorialTheme.colors.container,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, EditorialTheme.colors.border),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    StatCard(
-                        title = "Streak",
-                        value = "${user.currentStreak} Days",
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "Completed",
-                        value = "${user.lessonsCompleted} Lessons",
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "Level",
-                        value = learnerProfile.learningLevel.overall,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp, horizontal = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Stat 1: Streak
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "${user.currentStreak} Days",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialTheme.colors.primary,
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Streak",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+
+                        // Divider
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(28.dp)
+                                .background(EditorialTheme.colors.border)
+                        )
+
+                        // Stat 2: Completed
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1.3f)
+                        ) {
+                            Text(
+                                text = "${user.lessonsCompleted} Lessons",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialTheme.colors.primary,
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Completed",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+
+                        // Divider
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(28.dp)
+                                .background(EditorialTheme.colors.border)
+                        )
+
+                        // Stat 3: Level
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1.2f)
+                        ) {
+                            Text(
+                                text = learnerProfile.learningLevel.overall,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialTheme.colors.primary,
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Level",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+                    }
                 }
 
                 if (isEditing) {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +42,8 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 @Composable
 fun PastConversationsScreen(
     viewModel: LisanViewModel,
+    onBack: () -> Unit,
+    onConversationSelected: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = EditorialTheme.colors
@@ -169,7 +172,7 @@ fun PastConversationsScreen(
                 .fillMaxSize()
                 .background(colors.background)
         ) {
-            Column(
+Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .widthIn(max = 800.dp)
@@ -177,6 +180,38 @@ fun PastConversationsScreen(
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Header with Back button
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = colors.surface,
+                        shape = CircleShape,
+                        shadowElevation = 2.dp,
+                        border = BorderStroke(1.dp, colors.borderSoft),
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clickable { onBack() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = colors.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Past Conversations",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.primary,
+                        fontFamily = FontFamily.Serif
+                    )
+                }
                 Text(
                     text = "Past Conversations",
                     style = MaterialTheme.typography.headlineSmall,
@@ -365,7 +400,10 @@ fun PastConversationsScreen(
                                 shadowElevation = 2.dp,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { viewModel.continueConversationSession(session.id) }
+                                    .clickable {
+                                        viewModel.continueConversationSession(session.id)
+                                        onConversationSelected()
+                                    }
                             ) {
                                 Column(
                                     modifier = Modifier.padding(18.dp),
@@ -475,7 +513,10 @@ fun PastConversationsScreen(
                                         }
 
                                         Button(
-                                            onClick = { viewModel.continueConversationSession(session.id) },
+                                            onClick = {
+                                        viewModel.continueConversationSession(session.id)
+                                        onConversationSelected()
+                                    },
                                             colors = ButtonDefaults.buttonColors(containerColor = colors.accentPurple),
                                             shape = RoundedCornerShape(12.dp),
                                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

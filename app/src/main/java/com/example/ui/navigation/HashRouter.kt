@@ -78,6 +78,7 @@ object HashRouter {
             "#/past-conversations" -> 12
             "#/pronunciation" -> 13
             "#/picture-vocabulary" -> 14
+            "#/api-key-guide", "#/implement-api-key" -> 15
             else -> 0
         }
     }
@@ -102,6 +103,7 @@ object HashRouter {
             12 -> "#/past-conversations"
             13 -> "#/pronunciation"
             14 -> "#/picture-vocabulary"
+            15 -> "#/api-key-guide"
             else -> "#/lessons"
         }
     }

@@ -10,18 +10,18 @@ class ChatMessageRepository(private val chatMessageDao: ChatMessageDao) {
 
     val chatMessagesFlow: Flow<List<Content>> = chatMessageDao.getAllMessages().map { list ->
         list.map { entity ->
-            Content(role = entity.role, parts = listOf(Part(text = entity.text)))
+            Content(role = entity.role, parts = listOf(Part(text = entity.text)), imageUri = entity.imageUri)
         }
     }
 
     suspend fun loadMessagesList(): List<Content> {
         return chatMessageDao.getAllMessagesList().map { entity ->
-            Content(role = entity.role, parts = listOf(Part(text = entity.text)))
+            Content(role = entity.role, parts = listOf(Part(text = entity.text)), imageUri = entity.imageUri)
         }
     }
 
-    suspend fun saveMessage(role: String, text: String) {
-        chatMessageDao.insertMessage(ChatMessageEntity(role = role, text = text))
+    suspend fun saveMessage(role: String, text: String, imageUri: String? = null) {
+        chatMessageDao.insertMessage(ChatMessageEntity(role = role, text = text, imageUri = imageUri))
     }
 
     suspend fun clearHistory() {

@@ -15,7 +15,8 @@ data class GenerateContentRequest(
 data class Content(
     val role: String? = null,
     val parts: List<Part>,
-    @kotlinx.serialization.Transient var debugMetadata: TutorDebugMetadata? = null
+    @kotlinx.serialization.Transient var debugMetadata: TutorDebugMetadata? = null,
+    @kotlinx.serialization.Transient val imageUri: String? = null
 )
 
 @Serializable
@@ -33,7 +34,14 @@ data class TutorDebugMetadata(
 
 @Serializable
 data class Part(
-    val text: String? = null
+    val text: String? = null,
+    val inlineData: InlineData? = null
+)
+
+@Serializable
+data class InlineData(
+    val mimeType: String,
+    val data: String
 )
 
 @Serializable
@@ -42,7 +50,9 @@ data class GenerationConfig(
     val topP: Float? = null,
     val topK: Int? = null,
     val thinkingConfig: ThinkingConfig? = null,
-    val responseModalities: List<String>? = null
+    val responseModalities: List<String>? = null,
+    val responseMimeType: String? = null,
+    val responseSchema: JsonObject? = null
 )
 
 @Serializable

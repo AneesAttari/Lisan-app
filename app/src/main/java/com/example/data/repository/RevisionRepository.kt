@@ -23,13 +23,25 @@ class RevisionRepository(private val database: AppDatabase) {
      */
     suspend fun seedQuestionBankIfNeeded() = withContext(Dispatchers.IO) {
         val count = questionDao.getAllQuestions().size
-        if (count < 400) {
+        if (count < 600) {
             // Generate all high-quality questions
             val questions = QuestionBankSeeder.generateAllQuestions()
             questionDao.insertQuestions(questions)
 
-            // Seed initial question progress and topic progress for the 4 supported topics
-            val topics = listOf("verb_to_be", "articles_a_an_the", "present_simple", "present_continuous")
+            // Seed initial question progress and topic progress for all supported topics
+            val topics = listOf(
+                "verb_to_be",
+                "articles_a_an_the",
+                "present_simple",
+                "present_continuous",
+                "present_perfect",
+                "past_simple",
+                "future_simple",
+                "direct_indirect_speech",
+                "active_passive_voice",
+                "conditional_tenses",
+                "flexible_phrasal_verbs"
+            )
             
             for (topicId in topics) {
                 val topicQuestions = questions.filter { it.topicId == topicId }

@@ -18,6 +18,7 @@ import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -26,8 +27,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -73,10 +77,14 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.compose.ui.viewinterop.AndroidView
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.core.content.ContextCompat
 import com.example.data.model.Content
 import com.example.data.model.Part
 import com.example.data.remote.RetrofitClient
+import androidx.compose.ui.graphics.drawscope.clipPath
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.LisanViewModel
 import com.example.ui.viewmodel.VoiceInputLanguage
@@ -220,73 +228,279 @@ private fun isNetworkAvailable(context: Context): Boolean {
     return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
+private data class OrbPalette(
+    val color1: Color,
+    val color2: Color,
+    val color3: Color,
+    val color4: Color
+)
+
+private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
 @Composable
 fun FlutterGlowingSphere(
     pulseScale: Float,
     connectionStatus: ConnectionStateStatus,
     rmsVolume: Float,
     voiceSessionState: VoiceSessionState,
+    isIntenseMode: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val gradientColors = if (connectionStatus == ConnectionStateStatus.ERROR) {
-        listOf(
-            0.2f to Color(0xFFFECACA),
-            0.7f to Color(0xFFEF4444),
-            1.0f to Color(0xFF991B1B)
-        )
-    } else {
-        listOf(
-            0.2f to Color(0xFF6B9CFF),
-            0.7f to Color(0xFF1E52F6),
-            1.0f to Color(0xFF0030BF)
-        )
+    val infiniteTransition = rememberInfiniteTransition(label = "living_orb_anim")
+    
+    // Smooth monotonic time for animation shifts
+    val rawTime by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * Math.PI.toFloat() * 100f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 60000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "raw_time"
+    )
+
+    val speedMultiplier = if (isIntenseMode) 0.85f else 0.35f
+    val animatedSpeed by animateFloatAsState(
+        targetValue = speedMultiplier,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "animated_speed"
+    )
+
+    val (skyTopColor, skyBottomColor, cloudShadowColor, cloudHighlightColor) = when {
+        connectionStatus == ConnectionStateStatus.ERROR || voiceSessionState == VoiceSessionState.ERROR -> {
+            Quad(
+                Color(0xFF991B1B), // Dark crimson red sky top
+                Color(0xFFDC2626), // Lighter red horizon
+                Color(0xFF7F1D1D), // Dark red shadow
+                Color(0xFFFCA5A5)  // Soft red cloud caps
+            )
+        }
+        voiceSessionState == VoiceSessionState.PROCESSING -> {
+            Quad(
+                Color(0xFF5B21B6), // Deep violet sky top
+                Color(0xFF7C3AED), // Lavender horizon
+                Color(0xFF4C1D95), // Cosmic violet shadow
+                Color(0xFFDDD6FE)  // Bright lilac cloud caps
+            )
+        }
+        else -> {
+            Quad(
+                Color(0xFF3B82F6), // Rich sky blue top
+                Color(0xFF7CB0FF), // Soft horizon blue
+                Color(0xFFB0CDFC), // Periwinkle cloud underside shadow
+                Color(0xFFFFFFFF)  // Pure cloud white top
+            )
+        }
     }
 
-    val finalScale = if (connectionStatus == ConnectionStateStatus.CONNECTED) {
-        when (voiceSessionState) {
-            VoiceSessionState.LISTENING -> pulseScale + (rmsVolume * 0.15f)
-            VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> pulseScale * 1.05f
-            else -> pulseScale
-        }
+    val animatedSkyTop by animateColorAsState(targetValue = skyTopColor, animationSpec = tween(durationMillis = 800), label = "st")
+    val animatedSkyBottom by animateColorAsState(targetValue = skyBottomColor, animationSpec = tween(durationMillis = 800), label = "sb")
+    val animatedShadow by animateColorAsState(targetValue = cloudShadowColor, animationSpec = tween(durationMillis = 800), label = "sh")
+    val animatedHighlight by animateColorAsState(targetValue = cloudHighlightColor, animationSpec = tween(durationMillis = 800), label = "hl")
+
+    val baseScale = when (voiceSessionState) {
+        VoiceSessionState.LISTENING -> 1.03f + (rmsVolume * 0.15f)
+        VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> 1.04f
+        VoiceSessionState.PROCESSING -> 0.98f
+        else -> 0.97f
+    }
+
+    val speechEnvelope = if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
+        (0.45f * kotlin.math.sin(rawTime * 2.8f) + 
+         0.35f * kotlin.math.sin(rawTime * 5.2f) + 
+         0.20f * kotlin.math.cos(rawTime * 7.6f)).coerceIn(0f, 1f)
     } else {
-        pulseScale
+        0f
     }
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .scale(finalScale)
-            .size(180.dp)
+            .scale(baseScale * pulseScale)
+            .size(240.dp)
+            .testTag("lisan_voice_orb_container")
     ) {
-        Box(
-            modifier = Modifier
-                .size(220.dp)
-                .background(
+        Canvas(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val width = size.width
+            val height = size.height
+            val centerX = width / 2f
+            val centerY = height / 2f
+            val R = kotlin.math.min(width, height) / 2.2f // Orb radius
+
+            // 1. Outer Atmospheric Aura Glow
+            val auraRadius = R * 1.35f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        animatedSkyTop.copy(alpha = if (voiceSessionState == VoiceSessionState.LISTENING) 0.35f + (rmsVolume * 0.25f) else 0.20f),
+                        animatedSkyBottom.copy(alpha = 0.08f),
+                        Color.Transparent
+                    ),
+                    center = Offset(centerX, centerY),
+                    radius = auraRadius
+                ),
+                radius = auraRadius,
+                center = Offset(centerX, centerY)
+            )
+
+            // 2. Circular Sphere Clipping Mask
+            val clipPath = Path().apply {
+                addOval(
+                    androidx.compose.ui.geometry.Rect(
+                        centerX - R,
+                        centerY - R,
+                        centerX + R,
+                        centerY + R
+                    )
+                )
+            }
+
+            clipPath(clipPath) {
+                // 3. Clear Sky Blue Background Gradient
+                drawCircle(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            animatedSkyTop,
+                            animatedSkyBottom
+                        ),
+                        startY = centerY - R,
+                        endY = centerY + R
+                    ),
+                    radius = R,
+                    center = Offset(centerX, centerY)
+                )
+
+                // 4. Calculate Motion Offsets and Steam Flow (Driven by left-to-right streaming)
+                val timeFactor = rawTime * animatedSpeed
+                val flowX = (timeFactor * 35f) % (R * 2.4f) - (R * 1.2f)
+                val secondaryFlowX = ((timeFactor * 22f) + R * 0.7f) % (R * 2.4f) - (R * 1.2f)
+
+                val pulseBoost = 1.0f + (rmsVolume * 0.15f) + (speechEnvelope * 0.12f)
+
+                // 5. Lower Place Steam Path (Strictly bounded to lower half, wavy top edge)
+                val steamTopY = centerY - (R * 0.02f)
+                val steamPath = Path().apply {
+                    moveTo(centerX - R - 10f, centerY + R + 10f)
+                    lineTo(centerX - R - 10f, steamTopY)
+                    
+                    val steps = 30
+                    val stepWidth = (R * 2.2f) / steps
+                    for (i in 0..steps) {
+                        val x = (centerX - R * 1.1f) + i * stepWidth
+                        val wave1 = kotlin.math.sin((i.toFloat() / steps) * 3.5f * Math.PI.toFloat() + timeFactor * 1.8f) * (R * 0.06f)
+                        val wave2 = kotlin.math.cos((i.toFloat() / steps) * 2.0f * Math.PI.toFloat() - timeFactor * 1.2f) * (R * 0.04f)
+                        val y = steamTopY + wave1 + wave2
+                        lineTo(x, y)
+                    }
+                    
+                    lineTo(centerX + R + 10f, steamTopY)
+                    lineTo(centerX + R + 10f, centerY + R + 10f)
+                    close()
+                }
+
+                // Render dense steam filled inside the lower region path
+                clipPath(steamPath) {
+                    // Base dense white steam filling the bottom
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                animatedHighlight.copy(alpha = 0.82f),
+                                animatedHighlight.copy(alpha = 0.96f),
+                                animatedHighlight
+                            ),
+                            startY = steamTopY,
+                            endY = centerY + R
+                        ),
+                        topLeft = Offset(centerX - R, steamTopY - R * 0.1f),
+                        size = androidx.compose.ui.geometry.Size(R * 2f, R * 1.2f)
+                    )
+
+                    // Stream 1: Dense steam origin coming from the left
+                    val originX = centerX - R * 0.5f + flowX * 0.3f
+                    val originY = centerY + R * 0.35f
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                animatedHighlight,
+                                animatedHighlight.copy(alpha = 0.90f),
+                                animatedShadow.copy(alpha = 0.30f),
+                                Color.Transparent
+                            ),
+                            center = Offset(originX, originY),
+                            radius = R * 0.75f * pulseBoost
+                        ),
+                        radius = R * 0.75f * pulseBoost,
+                        center = Offset(originX, originY)
+                    )
+
+                    // Stream 2: Horizontal vapor roll streaming across the lower middle
+                    val midStreamX = centerX + flowX
+                    val midStreamY = centerY + R * 0.25f
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                animatedHighlight,
+                                animatedHighlight.copy(alpha = 0.85f),
+                                animatedShadow.copy(alpha = 0.20f),
+                                Color.Transparent
+                            ),
+                            center = Offset(midStreamX, midStreamY),
+                            radius = R * 0.65f * pulseBoost
+                        ),
+                        radius = R * 0.65f * pulseBoost,
+                        center = Offset(midStreamX, midStreamY)
+                    )
+
+                    // Stream 3: Secondary trailing steam wave from left
+                    val tailStreamX = centerX + secondaryFlowX
+                    val tailStreamY = centerY + R * 0.45f
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                animatedHighlight,
+                                animatedHighlight.copy(alpha = 0.88f),
+                                animatedShadow.copy(alpha = 0.25f),
+                                Color.Transparent
+                            ),
+                            center = Offset(tailStreamX, tailStreamY),
+                            radius = R * 0.58f * pulseBoost
+                        ),
+                        radius = R * 0.58f * pulseBoost,
+                        center = Offset(tailStreamX, tailStreamY)
+                    )
+                }
+
+                // 6. Soft mist feather blend along the steam horizon line
+                drawPath(
+                    path = steamPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            animatedHighlight.copy(alpha = 0.60f),
+                            Color.Transparent
+                        ),
+                        startY = steamTopY - R * 0.05f,
+                        endY = steamTopY + R * 0.15f
+                    )
+                )
+
+                // 7. Glassmorphic Surface Reflection Overlay
+                drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF1E52F6).copy(alpha = 0.45f),
-                            Color(0xFF1E52F6).copy(alpha = 0.15f),
+                            Color.White.copy(alpha = 0.30f),
+                            Color.White.copy(alpha = 0.05f),
                             Color.Transparent
-                        )
+                        ),
+                        center = Offset(centerX - R * 0.35f, centerY - R * 0.35f),
+                        radius = R * 1.2f
                     ),
-                    shape = CircleShape
+                    radius = R,
+                    center = Offset(centerX, centerY)
                 )
-        )
-
-        Box(
-            modifier = Modifier
-                .size(180.dp)
-                .background(
-                    brush = Brush.radialGradient(
-                        colorStops = gradientColors.toTypedArray()
-                    ),
-                    shape = CircleShape
-                )
-                .border(
-                    BorderStroke(1.5.dp, Color.White.copy(alpha = 0.6f)),
-                    shape = CircleShape
-                )
-        )
+            }
+        }
     }
 }
 
@@ -306,11 +520,13 @@ fun VoiceTutorDialog(
     val selectedLanguage = when (selectedVoiceLanguage) {
         VoiceInputLanguage.URDU -> "ur-PK"
         VoiceInputLanguage.ENGLISH -> "en-US"
+        VoiceInputLanguage.ARABIC -> "ar-SA"
         else -> "en-US"
     }
 
     var connectionStatus by remember { mutableStateOf(ConnectionStateStatus.CONNECTING) }
     var connectionErrorMessage by remember { mutableStateOf("") }
+    var isIntenseMode by remember { mutableStateOf(false) }
 
     // ISOLATED VOICE TUTOR HISTORY STATE
     var voiceHistory by remember { mutableStateOf<List<Content>>(emptyList()) }
@@ -323,6 +539,31 @@ fun VoiceTutorDialog(
     var autoListenEnabled by remember { mutableStateOf(true) }
     var currentSpeed by remember { mutableFloatStateOf(1.0f) }
     var listeningTimeoutJob by remember { mutableStateOf<Job?>(null) }
+    var bargeInJob by remember { mutableStateOf<Job?>(null) }
+    var textStreamingJob by remember { mutableStateOf<Job?>(null) }
+    var accumulatedSpeechText by remember { mutableStateOf("") }
+    var turnEndDebounceJob by remember { mutableStateOf<Job?>(null) }
+    var errorRetryCount by remember { mutableIntStateOf(0) }
+    var isRecognizerListening by remember { mutableStateOf(false) }
+    var consecutiveNoSpeechCount by remember { mutableIntStateOf(0) }
+
+    val animateTextProgressively: (String, kotlinx.coroutines.CoroutineScope) -> Unit = { text, scope ->
+        textStreamingJob?.cancel()
+        val words = text.split(" ")
+        tutorSpeechText = ""
+        textStreamingJob = scope.launch(Dispatchers.Main) {
+            for (i in words.indices) {
+                if (voiceSessionState != VoiceSessionState.SPEAKING && voiceSessionState != VoiceSessionState.REPLYING) {
+                    break
+                }
+                tutorSpeechText = words.take(i + 1).joinToString(" ")
+                delay(180) // Standard speaking pace (~150-200 wpm)
+            }
+            if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
+                tutorSpeechText = text
+            }
+        }
+    }
 
     val reconnectVoiceAssistant: () -> Unit = {
         scope.launch {
@@ -390,6 +631,8 @@ fun VoiceTutorDialog(
     }
 
     val stopSpeaking: () -> Unit = {
+        bargeInJob?.cancel()
+        textStreamingJob?.cancel()
         viewModel.ttsManager.stop()
         if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
             viewModel.setVoiceSessionState(VoiceSessionState.READY)
@@ -400,14 +643,29 @@ fun VoiceTutorDialog(
         listeningTimeoutJob?.cancel()
         rmsVolume = 0f
         userSpeechText = ""
-        val fallbackText = "I couldn't hear your voice. Please try speaking again."
-        errorMessage = fallbackText
-        tutorSpeechText = fallbackText
-        if (!isMuted) {
-            viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
-            viewModel.ttsManager.speak(fallbackText, speed = currentSpeed)
+        consecutiveNoSpeechCount++
+        
+        if (consecutiveNoSpeechCount <= 2) {
+            val fallbackText = "I couldn't hear your voice. Please try speaking again."
+            errorMessage = fallbackText
+            tutorSpeechText = ""
+            if (!isMuted) {
+                viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                viewModel.ttsManager.speak(fallbackText, speed = currentSpeed)
+                animateTextProgressively(fallbackText, scope)
+            } else {
+                tutorSpeechText = fallbackText
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+            }
         } else {
+            val stopMessage = "Voice session paused. Tap the microphone when you are ready to speak."
+            errorMessage = stopMessage
+            tutorSpeechText = ""
             viewModel.setVoiceSessionState(VoiceSessionState.READY)
+            if (consecutiveNoSpeechCount == 3 && !isMuted) {
+                viewModel.ttsManager.speak(stopMessage, speed = currentSpeed)
+                animateTextProgressively(stopMessage, scope)
+            }
         }
     }
 
@@ -443,7 +701,7 @@ fun VoiceTutorDialog(
                     Log.d("VoiceTutorDialog", "Received tutor reply: $cleanReply")
                     
                     withContext(Dispatchers.Main) {
-                        tutorSpeechText = cleanReply
+                        tutorSpeechText = "" // Clear for word-by-word streaming
                         val modelContent = Content(role = "model", parts = listOf(Part(text = reply)))
                         voiceHistory = updatedHistory + modelContent
 
@@ -451,8 +709,10 @@ fun VoiceTutorDialog(
                             viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
                             Log.d("VoiceTutorDialog", "Telling TTS Manager to speak")
                             viewModel.ttsManager.speak(reply, speed = currentSpeed)
+                            animateTextProgressively(cleanReply, this)
                         } else {
                             Log.d("VoiceTutorDialog", "Muted, not speaking")
+                            tutorSpeechText = cleanReply
                             viewModel.setVoiceSessionState(VoiceSessionState.READY)
                         }
                     }
@@ -483,6 +743,8 @@ fun VoiceTutorDialog(
         }
     }
 
+    var startListeningInternalRef: (Boolean) -> Unit = {}
+
     val initSpeechRecognizer: () -> SpeechRecognizer? = {
         try {
             speechRecognizer?.stopListening()
@@ -491,6 +753,7 @@ fun VoiceTutorDialog(
         } catch (e: Exception) {
             Log.e("VoiceTutor", "Error releasing speech recognizer", e)
         }
+        isRecognizerListening = false
 
         var recognizer: SpeechRecognizer? = null
         try {
@@ -498,13 +761,27 @@ fun VoiceTutorDialog(
                 recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
                 recognizer.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
-                        viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                        isRecognizerListening = true
+                        if (voiceSessionState != VoiceSessionState.SPEAKING && voiceSessionState != VoiceSessionState.REPLYING) {
+                            viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                        }
                     }
 
                     override fun onBeginningOfSpeech() {
+                        isRecognizerListening = true
                         listeningTimeoutJob?.cancel() // Speech started, cancel timeout
-                        if (userSpeechText.isBlank()) {
+                        turnEndDebounceJob?.cancel() // Speech continues, cancel previous debounce
+                        errorRetryCount = 0 // Reset error retries
+                        if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
+                            Log.d("VoiceTutor", "Barge-in onBeginningOfSpeech detected! Interrupting.")
+                            stopSpeaking()
+                            viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                            accumulatedSpeechText = ""
                             userSpeechText = "Listening..."
+                        } else {
+                            if (userSpeechText.isBlank() || userSpeechText == "Listening...") {
+                                userSpeechText = "Listening..."
+                            }
                         }
                     }
 
@@ -517,55 +794,128 @@ fun VoiceTutorDialog(
                     override fun onBufferReceived(buffer: ByteArray?) {}
 
                     override fun onEndOfSpeech() {
+                        isRecognizerListening = false
                         listeningTimeoutJob?.cancel()
                         rmsVolume = 0f
-                        if (voiceSessionState == VoiceSessionState.LISTENING) {
-                            viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
-                        }
+                        // DO NOT transition to PROCESSING here. This allows natural silence/pauses.
                     }
 
                     override fun onError(error: Int) {
+                        isRecognizerListening = false
                         Log.e("VoiceTutor", "Speech recognizer error: $error")
                         val errorDescription = when (error) {
                             SpeechRecognizer.ERROR_AUDIO -> "Audio recording error. Please check your microphone."
-                            SpeechRecognizer.ERROR_CLIENT -> "Client-side error. Google Speech Services might be updating or busy."
+                            SpeechRecognizer.ERROR_CLIENT -> "Client-side error."
                             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required."
                             SpeechRecognizer.ERROR_NETWORK -> "Network error. Please check your internet connection."
-                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout. Please check your connection."
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Please speak clearly."
-                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition service is busy. Please try again."
-                            SpeechRecognizer.ERROR_SERVER -> "Server error. Please try again later."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected. Please speak closer to your microphone."
-                            else -> "Speech recognition error ($error). Please try again."
+                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout."
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized."
+                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition service is busy."
+                            SpeechRecognizer.ERROR_SERVER -> "Server error."
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected."
+                            else -> "Speech recognition error ($error)."
                         }
                         
+                        listeningTimeoutJob?.cancel()
+                        rmsVolume = 0f
+
                         if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                            handleNoSpeechDetected()
+                            if (accumulatedSpeechText.isNotBlank()) {
+                                Log.d("VoiceTutor", "No match/timeout but we have accumulated text: $accumulatedSpeechText. Restarting recognizer.")
+                                if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                    startListeningInternalRef(true)
+                                }
+                            } else {
+                                handleNoSpeechDetected()
+                            }
                         } else {
-                            Log.w("VoiceTutor", "Technical speech error ($errorDescription), falling back to system speech input")
-                            listeningTimeoutJob?.cancel()
-                            rmsVolume = 0f
-                            launchGoogleSpeechInput()
+                            // Technical error: do NOT call launchGoogleSpeechInput()!
+                            // Recover inside Lisan AI safely up to 3 times
+                            if (errorRetryCount < 3) {
+                                errorRetryCount++
+                                Log.d("VoiceTutor", "Technical error $error, retry count $errorRetryCount. Re-triggering listening.")
+                                scope.launch {
+                                    delay(1000)
+                                    if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                        startListeningInternalRef(true)
+                                    }
+                                }
+                            } else {
+                                Log.e("VoiceTutor", "Exceeded max retries. Setting state to READY.")
+                                errorMessage = "Voice recognition paused. Tap the microphone to try again."
+                                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                            }
                         }
                     }
 
                     override fun onResults(results: Bundle?) {
+                        isRecognizerListening = false
                         listeningTimeoutJob?.cancel()
                         rmsVolume = 0f
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull() ?: if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") userSpeechText else null
-                        if (!text.isNullOrBlank()) {
-                            sendVoiceInput(text)
+                        val newTextSegment = matches?.firstOrNull() ?: ""
+                        
+                        if (newTextSegment.isNotBlank()) {
+                            consecutiveNoSpeechCount = 0
+                            if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
+                                Log.d("VoiceTutor", "Barge-in onResults detected! Interrupting.")
+                                stopSpeaking()
+                                viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                            }
+                            
+                            // Accumulate the speech input segment
+                            accumulatedSpeechText = if (accumulatedSpeechText.isBlank()) {
+                                newTextSegment
+                            } else {
+                                "$accumulatedSpeechText $newTextSegment"
+                            }
+                            userSpeechText = accumulatedSpeechText
+                            
+                            // Trigger/Reset turn-end debounce job
+                            turnEndDebounceJob?.cancel()
+                            turnEndDebounceJob = scope.launch(Dispatchers.Main) {
+                                delay(2000) // 2 seconds of silence means they're actually done speaking!
+                                val finalSpeech = accumulatedSpeechText.trim()
+                                accumulatedSpeechText = ""
+                                if (finalSpeech.isNotBlank()) {
+                                    sendVoiceInput(finalSpeech)
+                                } else {
+                                    handleNoSpeechDetected()
+                                }
+                            }
+                            
+                            // Immediately restart listening so they can keep speaking
+                            if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                startListeningInternalRef(true)
+                            }
                         } else {
-                            handleNoSpeechDetected()
+                            if (accumulatedSpeechText.isNotBlank()) {
+                                if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                    startListeningInternalRef(true)
+                                }
+                            } else {
+                                handleNoSpeechDetected()
+                            }
                         }
                     }
 
                     override fun onPartialResults(partialResults: Bundle?) {
                         val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull()
-                        if (!text.isNullOrBlank()) {
-                            userSpeechText = text
+                        val partialText = matches?.firstOrNull()
+                        if (!partialText.isNullOrBlank()) {
+                            consecutiveNoSpeechCount = 0
+                            if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
+                                Log.d("VoiceTutor", "Barge-in onPartialResults detected! Interrupting.")
+                                stopSpeaking()
+                                viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                            }
+                            
+                            // Show live partial results alongside the accumulated text
+                            userSpeechText = if (accumulatedSpeechText.isBlank()) {
+                                partialText
+                            } else {
+                                "$accumulatedSpeechText $partialText"
+                            }
                         }
                     }
 
@@ -583,6 +933,9 @@ fun VoiceTutorDialog(
 
     val stopListening: () -> Unit = {
         listeningTimeoutJob?.cancel()
+        turnEndDebounceJob?.cancel()
+        accumulatedSpeechText = ""
+        isRecognizerListening = false
         try {
             speechRecognizer?.stopListening()
         } catch (e: Exception) {
@@ -594,42 +947,55 @@ fun VoiceTutorDialog(
         }
     }
 
-    val startListening: () -> Unit = {
-        if (!hasAudioPermission) {
+    LaunchedEffect(isMuted) {
+        if (isMuted) {
+            stopSpeaking()
+            stopListening()
+        }
+    }
+
+    val startListeningInternal: (Boolean) -> Unit = { isBargeIn ->
+        if (isMuted) {
+            // Do not start speech input if muted
+        } else if (!hasAudioPermission) {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             errorMessage = "Microphone permission is required for speech input."
         } else if (!isNetworkAvailable(context)) {
             viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
             errorMessage = "Voice feature requires an internet connection."
+        } else if (isRecognizerListening) {
+            Log.d("VoiceTutor", "SpeechRecognizer is already listening. Ignoring start command.")
         } else {
-            stopSpeaking()
-            userSpeechText = ""
-            errorMessage = ""
-            viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+            if (!isBargeIn) {
+                stopSpeaking()
+                accumulatedSpeechText = ""
+                turnEndDebounceJob?.cancel()
+                userSpeechText = ""
+                errorMessage = ""
+                viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+            }
             rmsVolume = 0f
 
-            // Start an 8-second timeout. If speech doesn't begin/result, trigger no-speech handler.
-            listeningTimeoutJob?.cancel()
-            listeningTimeoutJob = scope.launch(Dispatchers.Main) {
-                delay(8000) // 8 seconds timeout
-                if (voiceSessionState == VoiceSessionState.LISTENING) {
-                    handleNoSpeechDetected()
+            // Start an 8-second timeout if they haven't spoken anything yet
+            if (accumulatedSpeechText.isBlank()) {
+                listeningTimeoutJob?.cancel()
+                listeningTimeoutJob = scope.launch(Dispatchers.Main) {
+                    delay(8000) // 8 seconds timeout
+                    if (voiceSessionState == VoiceSessionState.LISTENING && accumulatedSpeechText.isBlank()) {
+                        handleNoSpeechDetected()
+                    }
                 }
             }
 
             try {
-                val recognizer = speechRecognizer ?: initSpeechRecognizer()
+                val recognizer = initSpeechRecognizer()
                 if (recognizer == null) {
                     listeningTimeoutJob?.cancel()
-                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    if (!isBargeIn) {
+                        viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    }
                     errorMessage = "Speech recognition is not fully supported on this device. Please use keyboard typing instead."
                 } else {
-                    try {
-                        recognizer.cancel()
-                    } catch (e: Exception) {
-                        Log.e("VoiceTutor", "Error cancelling recognizer", e)
-                    }
-
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
@@ -637,52 +1003,45 @@ fun VoiceTutorDialog(
                         putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
                         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                        // Extra silence configuration
+                        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                     }
 
                     try {
                         recognizer.startListening(intent)
                     } catch (e: Exception) {
                         Log.e("VoiceTutor", "Error starting speech recognition", e)
+                        isRecognizerListening = false
                         listeningTimeoutJob?.cancel()
-                        launchGoogleSpeechInput()
+                        errorMessage = "Microphone is busy. Please try again."
+                        if (!isBargeIn) {
+                            viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                        }
                     }
                 }
             } catch (e: Exception) {
                 Log.e("VoiceTutor", "Microphone or Speech Recognition setup failed", e)
+                isRecognizerListening = false
                 listeningTimeoutJob?.cancel()
-                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                if (!isBargeIn) {
+                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                }
                 errorMessage = "Failed to start microphone. Please try again."
             }
         }
     }
 
+    startListeningInternalRef = startListeningInternal
+
+    val startListening: () -> Unit = {
+        consecutiveNoSpeechCount = 0
+        startListeningInternal(false)
+    }
+
     launchGoogleSpeechInput = {
-        stopSpeaking()
-        stopListening()
-
-        if (!hasAudioPermission) {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            errorMessage = "Microphone permission is required."
-        } else if (!isNetworkAvailable(context)) {
-            viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
-            errorMessage = "Voice feature requires an internet connection."
-        } else {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Lisan Tutor")
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            }
-
-            try {
-                errorMessage = ""
-                speechIntentLauncher.launch(intent)
-            } catch (e: Exception) {
-                Log.e("VoiceTutor", "Google speech activity failed", e)
-                viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
-                errorMessage = "Google speech recognition is unavailable on this device."
-            }
-        }
+        Log.d("VoiceTutor", "launchGoogleSpeechInput called but disabled to avoid external UI popup")
+        handleNoSpeechDetected()
     }
 
     var wasSpeaking by remember { mutableStateOf(false) }
@@ -690,12 +1049,16 @@ fun VoiceTutorDialog(
     LaunchedEffect(currentlySpeakingText) {
         if (currentlySpeakingText != null) {
             wasSpeaking = true
+            bargeInJob?.cancel()
+            // Stop listening while speaking to prevent microphone conflicts
+            stopListening()
         } else if (wasSpeaking) {
             wasSpeaking = false
-            if (voiceSessionState == VoiceSessionState.SPEAKING) {
+            bargeInJob?.cancel()
+            if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
                 viewModel.setVoiceSessionState(VoiceSessionState.READY)
                 if (autoListenEnabled && !isMuted && hasAudioPermission) {
-                    startListening()
+                    startListeningInternal(false)
                 }
             }
         }
@@ -806,6 +1169,17 @@ fun VoiceTutorDialog(
         label = "pulse_scale"
     )
 
+    val dotFloat by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 4f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "thinking_dots"
+    )
+    val thinkingDots = ".".repeat(dotFloat.toInt().coerceIn(0, 3))
+
     Dialog(
         onDismissRequest = {
             stopSpeaking()
@@ -826,18 +1200,20 @@ fun VoiceTutorDialog(
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 )
+                window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             }
         }
 
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
-                .imePadding(),
+                .systemBarsPadding(),
             color = Color.White
         ) {
             Column(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // APP BAR (FLUTTER SPEC)
@@ -924,13 +1300,28 @@ fun VoiceTutorDialog(
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Glowing Pulsing Sphere (Flutter Spec Radial Gradient)
+                    // Glowing Pulsing Sphere (ChatGPT-style fBm Fluid Multi-Layered Orb)
                     FlutterGlowingSphere(
                         pulseScale = pulseScale,
                         connectionStatus = connectionStatus,
                         rmsVolume = rmsVolume,
                         voiceSessionState = voiceSessionState,
-                        modifier = Modifier.padding(bottom = 24.dp)
+                        isIntenseMode = isIntenseMode,
+                        modifier = Modifier
+                            .padding(bottom = 24.dp)
+                            .clip(CircleShape)
+                            .clickable {
+                                if (connectionStatus == ConnectionStateStatus.CONNECTED) {
+                                    if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
+                                        stopSpeaking()
+                                        startListeningInternal(false)
+                                    } else if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                        stopListening()
+                                    } else if (voiceSessionState == VoiceSessionState.READY) {
+                                        startListeningInternal(false)
+                                    }
+                                }
+                            }
                     )
 
                     // Status message
@@ -942,7 +1333,7 @@ fun VoiceTutorDialog(
                             when (voiceSessionState) {
                                 VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> "Lisan Tutor is speaking..."
                                 VoiceSessionState.LISTENING -> "Listening to your voice..."
-                                VoiceSessionState.PROCESSING -> "Thinking..."
+                                VoiceSessionState.PROCESSING -> "Thinking" + thinkingDots
                                 VoiceSessionState.ERROR -> errorMessage.ifBlank { "Connection timed out. Please retry." }
                                 else -> "Lisan AI Voice Assistant"
                             }
@@ -958,6 +1349,33 @@ fun VoiceTutorDialog(
                         ),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    FilterChip(
+                        selected = isIntenseMode,
+                        onClick = { isIntenseMode = !isIntenseMode },
+                        label = { 
+                            Text(
+                                text = if (isIntenseMode) "Intense Orb Mode" else "Standard Orb Mode",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF2563EB).copy(alpha = 0.15f),
+                            selectedLabelColor = Color(0xFF2563EB),
+                            selectedLeadingIconColor = Color(0xFF2563EB),
+                            containerColor = Color.Transparent,
+                            labelColor = Color(0xFF757575)
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isIntenseMode,
+                            borderColor = Color(0xFFCBD5E1),
+                            selectedBorderColor = Color(0xFF2563EB)
+                        )
                     )
 
                     // Retry Button if ConnectionStateStatus.ERROR
@@ -1071,6 +1489,20 @@ fun VoiceTutorDialog(
                         )
                     }
 
+                    // Speaker toggle button
+                    IconButton(
+                        onClick = {
+                            isMuted = !isMuted
+                        },
+                        enabled = (connectionStatus == ConnectionStateStatus.CONNECTED)
+                    ) {
+                        Icon(
+                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Mute/Unmute Speaker",
+                            tint = if (isMuted) Color.Red else Color(0xFF3F51B5)
+                        )
+                    }
+
                     // Mic toggle button
                     IconButton(
                         onClick = {
@@ -1082,12 +1514,12 @@ fun VoiceTutorDialog(
                                 }
                             }
                         },
-                        enabled = (connectionStatus == ConnectionStateStatus.CONNECTED)
+                        enabled = (connectionStatus == ConnectionStateStatus.CONNECTED && !isMuted)
                     ) {
                         Icon(
-                            imageVector = if (voiceSessionState == VoiceSessionState.LISTENING) Icons.Default.MicOff else Icons.Default.Mic,
+                            imageVector = if (isMuted) Icons.Default.MicOff else (if (voiceSessionState == VoiceSessionState.LISTENING) Icons.Default.MicOff else Icons.Default.Mic),
                             contentDescription = "Microphone",
-                            tint = if (voiceSessionState == VoiceSessionState.LISTENING) Color.Red else Color(0xFF3F51B5)
+                            tint = if (isMuted) Color.Gray else (if (voiceSessionState == VoiceSessionState.LISTENING) Color.Red else Color(0xFF3F51B5))
                         )
                     }
                 }

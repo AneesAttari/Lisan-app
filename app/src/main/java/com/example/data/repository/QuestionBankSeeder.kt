@@ -10,6 +10,20 @@ object QuestionBankSeeder {
         allQuestions.addAll(generateArticlesQuestions())
         allQuestions.addAll(generatePresentSimpleQuestions())
         allQuestions.addAll(generatePresentContinuousQuestions())
+        allQuestions.addAll(generatePresentPerfectQuestions())
+        allQuestions.addAll(generatePresentPerfectContinuousQuestions())
+        allQuestions.addAll(generatePastSimpleQuestions())
+        allQuestions.addAll(generatePastContinuousQuestions())
+        allQuestions.addAll(generatePastPerfectQuestions())
+        allQuestions.addAll(generatePastPerfectContinuousQuestions())
+        allQuestions.addAll(generateFutureSimpleQuestions())
+        allQuestions.addAll(generateFutureContinuousQuestions())
+        allQuestions.addAll(generateFuturePerfectQuestions())
+        allQuestions.addAll(generateFuturePerfectContinuousQuestions())
+        allQuestions.addAll(generateDirectIndirectQuestions())
+        allQuestions.addAll(generateActivePassiveQuestions())
+        allQuestions.addAll(generateConditionalsQuestions())
+        allQuestions.addAll(generateFlexibleVerbsQuestions())
         return allQuestions
     }
 
@@ -456,6 +470,419 @@ object QuestionBankSeeder {
                     explanationArabic = explanationAr,
                     tagsString = "present_continuous,tenses,ongoing",
                     normalizedFingerprint = fingerprint,
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generatePresentPerfectQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "present_perfect"
+        for (i in 1..50) {
+            val qId = "pp_$i"
+            val stem = "She _____ finished her grammar assignment."
+            val context = "وہ اپنا گرامر ہوم ورک مکمل کر چکی ہے۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "present_perfect_basics",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "has||have||had||is",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'has + V3' for completed actions with third-person singular subjects (She/He/It).",
+                    explanationUrdu = "واحد فاعل (She) کے ساتھ فعل حال مکمل میں 'has + V3' استعمال ہوتا ہے۔",
+                    explanationArabic = "نستخدم 'has' مع الضمائر المفردة الثالثة للحدث المكتمل.",
+                    tagsString = "present_perfect,tenses",
+                    normalizedFingerprint = "pp_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generatePastSimpleQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "past_simple"
+        for (i in 1..50) {
+            val qId = "ps_$i"
+            val stem = "Yesterday, they _____ the historical library."
+            val context = "کل انہوں نے تاریخی لائبریری کا دورہ کیا۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "past_simple_events",
+                    difficulty = "Beginner",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "visited||visit||visiting||were visited",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use Past Simple (V2) for actions completed at a specific time in the past.",
+                    explanationUrdu = "ماضی کے معلوم وقت پر مکمل کام کے لیے فعل کی دوسری فارم (visited) استعمال کی جاتی ہے۔",
+                    explanationArabic = "نستخدم التصريف الثاني للفعل للحدث المنتهي في الماضي.",
+                    tagsString = "past_simple,tenses",
+                    normalizedFingerprint = "ps_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateFutureSimpleQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "future_simple"
+        for (i in 1..50) {
+            val qId = "fs_$i"
+            val stem = "We _____ start our new English grammar project tomorrow."
+            val context = "ہم کل اپنا نیا گرامر پروجیکٹ شروع کریں گے۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "future_simple_plans",
+                    difficulty = "Beginner",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "will||are||would||did",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'will + base verb' for future intentions or predictions.",
+                    explanationUrdu = "مستقبل کی نیت ظاہر کرنے کے لیے 'will + base verb' استعمال ہوتا ہے۔",
+                    explanationArabic = "نستخدم 'will' للتعبير عن المستقبل.",
+                    tagsString = "future_simple,tenses",
+                    normalizedFingerprint = "fs_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateDirectIndirectQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "direct_indirect_speech"
+        for (i in 1..50) {
+            val qId = "di_$i"
+            val stem = "The teacher said that he _____ happy with our test score."
+            val context = "استاد نے فرمایا کہ وہ ہمارے ٹیسٹ نمبروں سے خوش تھے۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "reported_speech_statements",
+                    difficulty = "Advanced",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "was||is||will be||has been",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "In reported speech with past reporting verb ('said'), present tense 'is' shifts to 'was'.",
+                    explanationUrdu = "غیر بلاواسطہ گفتگو میں اگر مرکزی فعل ماضی (said) میں ہو تو 'is' بدل کر 'was' ہو جاتا ہے۔",
+                    explanationArabic = "في الكلام المنقول، يتحول زمن الحاضر إلى الماضي.",
+                    tagsString = "direct_indirect,speech",
+                    normalizedFingerprint = "di_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateActivePassiveQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "active_passive_voice"
+        for (i in 1..50) {
+            val qId = "ap_$i"
+            val stem = "The book _____ by a famous professor in Riyadh."
+            val context = "یہ کتاب ریاض کے ایک معروف پروفیسر کی طرف سے لکھی گئی تھی۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "passive_voice_past",
+                    difficulty = "Advanced",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "was written||wrote||is writing||has wrote",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'was/were + Past Participle (V3)' for Past Simple passive voice.",
+                    explanationUrdu = "فعل مجہول (Passive Voice) میں 'was + V3' کا استعمال ہوتا ہے۔",
+                    explanationArabic = "في المبني للمجهول في الماضي نستخدم 'was + V3'.",
+                    tagsString = "active_passive,voice",
+                    normalizedFingerprint = "ap_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateConditionalsQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "conditional_tenses"
+        for (i in 1..50) {
+            val qId = "cond_$i"
+            val stem = "If you study hard, you _____ pass the examination."
+            val context = "اگر آپ سخت محنت کریں گے، تو آپ امتحان میں کامیاب ہو جائیں گے۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "first_conditional",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "will||would||had||did",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "In the First Conditional: If + Present Simple, Main clause + Will + Base Verb.",
+                    explanationUrdu = "پہلے شرطیہ جملے (First Conditional) میں 'will + base verb' جزا کے طور پر آتا ہے۔",
+                    explanationArabic = "في الجمل الشرطية الأولى نستخدم 'will' في جواب الشرط.",
+                    tagsString = "conditionals,grammar",
+                    normalizedFingerprint = "cond_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateFlexibleVerbsQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "flexible_phrasal_verbs"
+        for (i in 1..50) {
+            val qId = "phr_$i"
+            val stem = "Please _____ your notes before the quiz starts."
+            val context = "براہ کرم کوئز شروع ہونے سے پہلے اپنے نوٹس کا جائزہ لیں۔"
+            questions.add(
+                RevisionQuestionEntity(
+                    id = qId,
+                    topicId = topicId,
+                    subtopicId = "phrasal_verbs_review",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = stem,
+                    context = context,
+                    optionsString = "look over||look after||look up to||look into",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "'Look over' means to review or examine documents briefly.",
+                    explanationUrdu = "فعلِ مرکب 'look over' کا مطلب ہے دستاویزات یا نوٹس کا جائزہ لینا۔",
+                    explanationArabic = "'Look over' تعني مراجعة الأوراق.",
+                    tagsString = "flexible_verbs,phrasal",
+                    normalizedFingerprint = "phr_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generatePresentPerfectContinuousQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "present_perfect_continuous"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "ppc_$i",
+                    topicId = topicId,
+                    subtopicId = "duration",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = "She _____ English for two years.",
+                    context = "وہ دو سال سے انگریزی سیکھ رہی ہے۔",
+                    optionsString = "has been learning||is learning||has learned||learned",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'has been + V-ing' for an action that started in the past and continues until now.",
+                    explanationUrdu = "کسی ایسے کام کے لیے جو ماضی میں شروع ہوا اور اب بھی جاری ہو، Present Perfect Continuous استعمال ہوتا ہے۔",
+                    explanationArabic = "تستخدم 'has been + V-ing' للحدث الذي بدأ في الماضي وما زال مستمراً.",
+                    tagsString = "tense,ppc",
+                    normalizedFingerprint = "ppc_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generatePastContinuousQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "past_continuous"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "pastc_$i",
+                    topicId = topicId,
+                    subtopicId = "interrupted_action",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = "They _____ dinner when the phone rang.",
+                    context = "جب فون کی گھنٹی بجی تو وہ رات کا کھانا کھا رہے تھے۔",
+                    optionsString = "were having||have had||are having||had had",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'was/were + V-ing' for an action in progress in the past.",
+                    explanationUrdu = "ماضی میں جاری کام کے لیے Past Continuous کا استعمال ہوتا ہے۔",
+                    explanationArabic = "استخدم Past Continuous للحدث المستمر في الماضي.",
+                    tagsString = "tense,past_continuous",
+                    normalizedFingerprint = "pastc_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generatePastPerfectQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "past_perfect"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "pastp_$i",
+                    topicId = topicId,
+                    subtopicId = "prior_past",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = "The train _____ before we arrived at the station.",
+                    context = "ہمارے اسٹیشن پہنچنے سے پہلے ٹرین جا چکی تھی۔",
+                    optionsString = "had left||left||has left||was leaving",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'had + past participle' for the earlier of two past events.",
+                    explanationUrdu = "ماضی کے دو کاموں میں سے پہلے مکمل ہونے والے کام کے لیے Past Perfect استعمال ہوتا ہے۔",
+                    explanationArabic = "استخدم Past Perfect للحدث الأسبق في الماضي.",
+                    tagsString = "tense,past_perfect",
+                    normalizedFingerprint = "pastp_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generatePastPerfectContinuousQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "past_perfect_continuous"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "pastpc_$i",
+                    topicId = topicId,
+                    subtopicId = "past_duration",
+                    difficulty = "Advanced",
+                    type = "fill_in_the_blank",
+                    stem = "He _____ for three hours before he took a break.",
+                    context = "وقفہ لینے سے پہلے وہ تین گھنٹے سے مطالعہ کر رہا تھا۔",
+                    optionsString = "had been studying||was studying||has been studying||studied",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'had been + V-ing' for continuous duration prior to a point in the past.",
+                    explanationUrdu = "ماضی کے کسی نقطے سے پہلے جاری رہنے والے طویل کام کے لیے استعمال ہوتا ہے۔",
+                    explanationArabic = "استخدم Past Perfect Continuous للحدث الممتد قبل زمن ماضٍ.",
+                    tagsString = "tense,past_perfect_continuous",
+                    normalizedFingerprint = "pastpc_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateFutureContinuousQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "future_continuous"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "futc_$i",
+                    topicId = topicId,
+                    subtopicId = "future_progress",
+                    difficulty = "Intermediate",
+                    type = "fill_in_the_blank",
+                    stem = "At this time tomorrow, I _____ to Dubai.",
+                    context = "کل اس وقت میں دبئی کا سفر کر رہا ہوں گا۔",
+                    optionsString = "will be traveling||will travel||have traveled||am traveling",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'will be + V-ing' for an action in progress at a specific future time.",
+                    explanationUrdu = "مستقبل کے کسی مخصوص وقت میں جاری رہنے والے کام کے لیے Future Continuous استعمال ہوتا ہے۔",
+                    explanationArabic = "استخدم Future Continuous للحدث المستمر في وقت مستقبلي محدد.",
+                    tagsString = "tense,future_continuous",
+                    normalizedFingerprint = "futc_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateFuturePerfectQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "future_perfect"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "futp_$i",
+                    topicId = topicId,
+                    subtopicId = "future_completion",
+                    difficulty = "Advanced",
+                    type = "fill_in_the_blank",
+                    stem = "By next month, they _____ the construction project.",
+                    context = "اگلے ماہ تک وہ تعمیراتی منصوبہ مکمل کر چکے ہوں گے۔",
+                    optionsString = "will have finished||will finish||finished||are finishing",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'will have + past participle' for an action completed before a future deadline.",
+                    explanationUrdu = "مستقبل میں کسی طے شدہ وقت سے پہلے مکمل ہونے والے کام کے لیے Future Perfect استعمال ہوتا ہے۔",
+                    explanationArabic = "استخدم Future Perfect للحدث المكتمل قبل وقت مستقبلي.",
+                    tagsString = "tense,future_perfect",
+                    normalizedFingerprint = "futp_fp_$i",
+                    contentVersion = 1,
+                    isActive = true
+                )
+            )
+        }
+        return questions
+    }
+
+    private fun generateFuturePerfectContinuousQuestions(): List<RevisionQuestionEntity> {
+        val questions = mutableListOf<RevisionQuestionEntity>()
+        val topicId = "future_perfect_continuous"
+        for (i in 1..30) {
+            questions.add(
+                RevisionQuestionEntity(
+                    id = "futpc_$i",
+                    topicId = topicId,
+                    subtopicId = "future_duration",
+                    difficulty = "Advanced",
+                    type = "fill_in_the_blank",
+                    stem = "By 2028, she _____ at the university for a decade.",
+                    context = "2028ء تک وہ یونیورسٹی میں دس سال سے پڑھا رہی ہوں گی۔",
+                    optionsString = "will have been teaching||will be teaching||has been teaching||is teaching",
+                    correctOptionIndex = 0,
+                    explanationEnglish = "Use 'will have been + V-ing' for continuous duration up to a future milestone.",
+                    explanationUrdu = "مستقبل کے کسی نقطے تک جاری رہنے والے طویل عرصے کے لیے استعمال ہوتا ہے۔",
+                    explanationArabic = "استخدم Future Perfect Continuous للحدث الممتد حتى نقطة مستقبلية.",
+                    tagsString = "tense,future_perfect_continuous",
+                    normalizedFingerprint = "futpc_fp_$i",
                     contentVersion = 1,
                     isActive = true
                 )

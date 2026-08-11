@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -72,6 +74,7 @@ fun UnifiedLibraryScreen(viewModel: LisanViewModel) {
 private fun SavedItemsTab(viewModel: LisanViewModel) {
     val items by viewModel.allLibraryItems.collectAsState()
     var selectedFilter by remember { mutableStateOf("All") }
+    var openedItem by remember { mutableStateOf<LibraryItem?>(null) }
     
     val filters = listOf("All", "Lessons", "Idioms", "Analysis", "Tutor Responses", "Quizzes")
     
@@ -106,32 +109,117 @@ private fun SavedItemsTab(viewModel: LisanViewModel) {
         }
         
         if (filteredItems.isEmpty()) {
-            EmptyLibraryState("No saved items yet.")
+            EmptyLibraryState("No saved items yet. Save items while learning or chatting to view them offline!")
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(filteredItems) { item ->
                     LibraryItemCard(
                         item = item,
-                        onOpen = { /* Handle open */ },
+                        onOpen = { openedItem = item },
                         onRemove = { viewModel.toggleLibrarySave(item) }
                     )
                 }
             }
         }
     }
+
+    openedItem = openedItem?.let { item ->
+        LibraryItemDetailDialog(
+            item = item,
+            onDismiss = { openedItem = null }
+        )
+        item
+    }
+}
+
+@Composable
+private fun LibraryItemDetailDialog(
+    item: LibraryItem,
+    onDismiss: () -> Unit
+) {
+    val sdf = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
+    val dateStr = sdf.format(Date(item.savedTimestamp))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Surface(
+                    color = EditorialPrimary.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = item.contentType.uppercase(),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        color = EditorialPrimary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = item.title,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = EditorialTextPrimary
+                )
+                Text(
+                    text = "Saved on: $dateStr (Offline)",
+                    fontSize = 11.sp,
+                    color = EditorialTextMuted,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+            ) {
+                HorizontalDivider(color = EditorialBorderSoft)
+                Spacer(modifier = Modifier.height(12.dp))
+                val scrollState = rememberScrollState()
+                Box(modifier = Modifier.weight(1f, fill = false)) {
+                    Column(modifier = Modifier.verticalScroll(scrollState)) {
+                        Text(
+                            text = item.preview ?: "No additional details available.",
+                            fontSize = 15.sp,
+                            color = EditorialTextSecondary,
+                            lineHeight = 24.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Close", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = EditorialSurface,
+        shape = RoundedCornerShape(20.dp)
+    )
 }
 
 @Composable
 private fun LikedItemsTab(viewModel: LisanViewModel) {
     val items by viewModel.allLikedItems.collectAsState()
+    var openedLikedItem by remember { mutableStateOf<com.example.data.model.LikedItem?>(null) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         if (items.isEmpty()) {
-            EmptyLibraryState("No liked items yet.")
+            EmptyLibraryState("No liked items yet. Tap the like button on AI tutor responses or lessons to bookmark them here!")
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(items) { item ->
-                    EditorialCard {
+                    EditorialCard(
+                        modifier = Modifier.clickable { openedLikedItem = item }
+                    ) {
                         Row(
                             modifier = Modifier.padding(16.dp).fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -144,12 +232,23 @@ private fun LikedItemsTab(viewModel: LisanViewModel) {
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp
                                 )
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = item.title,
                                     fontSize = 16.sp,
                                     color = EditorialTextPrimary,
                                     fontWeight = FontWeight.SemiBold
                                 )
+                                item.preview?.let {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = it,
+                                        fontSize = 13.sp,
+                                        color = EditorialTextSecondary,
+                                        maxLines = 2,
+                                        lineHeight = 18.sp
+                                    )
+                                }
                             }
                             IconButton(onClick = { viewModel.toggleLike(item) }) {
                                 Icon(
@@ -164,6 +263,76 @@ private fun LikedItemsTab(viewModel: LisanViewModel) {
                 }
             }
         }
+    }
+
+    openedLikedItem?.let { item ->
+        val sdf = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
+        val dateStr = sdf.format(Date(item.likedTimestamp))
+
+        AlertDialog(
+            onDismissRequest = { openedLikedItem = null },
+            title = {
+                Column {
+                    Surface(
+                        color = Color.Red.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = item.contentType.uppercase(),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = Color.Red,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = item.title,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialTextPrimary
+                    )
+                    Text(
+                        text = "Liked on: $dateStr (Offline)",
+                        fontSize = 11.sp,
+                        color = EditorialTextMuted,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                ) {
+                    HorizontalDivider(color = EditorialBorderSoft)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val scrollState = rememberScrollState()
+                    Box(modifier = Modifier.weight(1f, fill = false)) {
+                        Column(modifier = Modifier.verticalScroll(scrollState)) {
+                            Text(
+                                text = item.preview ?: "No additional details available for this liked item.",
+                                fontSize = 15.sp,
+                                color = EditorialTextSecondary,
+                                lineHeight = 24.sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { openedLikedItem = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Close", fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = EditorialSurface,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 

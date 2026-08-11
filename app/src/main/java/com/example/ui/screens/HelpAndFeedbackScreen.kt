@@ -37,6 +37,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import java.text.SimpleDateFormat
+import java.util.*
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -86,6 +89,8 @@ fun HelpAndFeedbackScreen(
     var feedbackDescription by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     var showSuccessModal by remember { mutableStateOf(false) }
+    var showHelpDialog by remember { mutableStateOf(false) }
+    var showLicensesDialog by remember { mutableStateOf(false) }
 
     // Pre-filled FAQs
     val faqItems = listOf(
@@ -118,64 +123,16 @@ fun HelpAndFeedbackScreen(
 
     val scrollState = rememberScrollState()
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = EditorialBackground,
-        topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(EditorialHeaderBg)
-                    .border(BorderStroke(1.dp, EditorialBorderSoft))
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { viewModel.setSelectedTab(0) }, // Go back to Lessons screen (Tab 0)
-                        modifier = Modifier
-                            .size(40.dp)
-                            .testTag("help_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to Lessons",
-                            tint = EditorialPrimary
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "Help & Feedback",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = EditorialPrimary
-                        )
-                        Text(
-                            text = "We are here to help you learn better",
-                            fontSize = 12.sp,
-                            color = EditorialTextSecondary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
             // Section Tabs: FAQ vs Feedback
             Row(
                 modifier = Modifier
@@ -448,8 +405,12 @@ fun HelpAndFeedbackScreen(
                                     }
                                     coroutineScope.launch {
                                         isSubmitting = true
-                                        // Simulate API submission call
-                                        delay(1500)
+                                        viewModel.submitFeedback(
+                                            subject = selectedCategory,
+                                            message = "Rating: $userRating/5\nEmail: $emailInput\n\n$feedbackDescription",
+                                            category = selectedCategory
+                                        )
+                                        delay(1000)
                                         isSubmitting = false
                                         showSuccessModal = true
                                         // Clear fields
@@ -492,81 +453,279 @@ fun HelpAndFeedbackScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- DIRECT SUPPORT CONTACT / QUICK ACTION BUTTONS ---
-            Column(
+            // --- CREATOR ANALYTICS & LEARNER FEEDBACK INBOX ---
+            val totalLikes by viewModel.totalLikesCount.collectAsState()
+            val totalDislikes by viewModel.totalDislikesCount.collectAsState()
+            val feedbackList by viewModel.allFeedback.collectAsState()
+
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                colors = CardDefaults.cardColors(containerColor = EditorialSurface),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, EditorialBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Creator Inbox & Analytics",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary
+                        )
+                        Surface(
+                            color = EditorialAccentPurple.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "Offline Sync Active",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Likes box
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            color = Color(0xFF10B981).copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(text = "$totalLikes", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                                Text(text = "Total Likes 👍", fontSize = 11.sp, color = EditorialTextSecondary)
+                            }
+                        }
+
+                        // Dislikes box
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            color = Color(0xFFEF4444).copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(text = "$totalDislikes", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                                Text(text = "Total Dislikes 👎", fontSize = 11.sp, color = EditorialTextSecondary)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Received Learner Responses & Feedback (${feedbackList.size})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialTextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (feedbackList.isEmpty()) {
+                        Text(
+                            text = "No feedback submissions received yet. Learner ratings and comments will appear here automatically.",
+                            fontSize = 12.sp,
+                            color = EditorialTextMuted,
+                            fontStyle = FontStyle.Italic
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            feedbackList.take(5).forEach { fb ->
+                                Surface(
+                                    color = EditorialSurface,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, EditorialBorderSoft)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp).fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = fb.subject.ifBlank { "General Feedback" },
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EditorialAccentPurple
+                                            )
+                                            val sdf = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
+                                            Text(
+                                                text = sdf.format(Date(fb.timestamp)),
+                                                fontSize = 10.sp,
+                                                color = EditorialTextMuted
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = fb.message,
+                                            fontSize = 12.sp,
+                                            color = EditorialTextSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = EditorialSurface),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, EditorialBorder)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "Still Need Help?",
-                    fontSize = 14.sp,
+                    text = "Support & About Lisan",
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = EditorialPrimary
                 )
 
-                Row(
+                OutlinedButton(
+                    onClick = { showHelpDialog = true },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    // "Email Support" button
-                    OutlinedButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = Uri.parse("mailto:support@lisangrammar.com")
-                                putExtra(Intent.EXTRA_SUBJECT, "Lisan AI Tutor Support Request")
-                                putExtra(Intent.EXTRA_TEXT, "Hello Lisan Team,\n\n[Please enter your issue here]\n\nEmail: $emailInput")
-                            }
-                            try {
-                                context.startActivity(Intent.createChooser(intent, "Send Email"))
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "No email client installed.", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EditorialAccentPurple),
-                        border = BorderStroke(1.dp, EditorialAccentPurple),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("email_support_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Email,
-                            contentDescription = "Email Support",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Email Support", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
+                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("How to Use Lisan Grammar")
+                }
 
-                    // "Community / FAQ Guide" link
-                    OutlinedButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://lisangrammar.com/faq"))
-                            try {
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Cannot open browser link.", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EditorialAccentPurple),
-                        border = BorderStroke(1.dp, EditorialBorder),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("community_guide_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Launch,
-                            contentDescription = "Community",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("FAQ Website", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
+                OutlinedButton(
+                    onClick = {
+                        val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:aneesattari67@gmail.com")
+                            putExtra(Intent.EXTRA_SUBJECT, "Lisan Grammar App Feedback (v2.4)")
+                            putExtra(Intent.EXTRA_TEXT, "Hi Lisan Team,\n\nDevice: ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})\n\nFeedback:\n")
+                        }
+                        try {
+                            context.startActivity(Intent.createChooser(emailIntent, "Send Feedback Email"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No email app found.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Mail, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Send Feedback Email")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val whatsappIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = Uri.parse("https://wa.me/923096794698?text=Hi%20Lisan%20Team,%0A%0AFeedback:%0A")
+                        }
+                        try {
+                            context.startActivity(whatsappIntent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "WhatsApp not found.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Contact on WhatsApp")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${context.packageName}"))
+                        try {
+                            context.startActivity(marketIntent)
+                        } catch (e: Exception) {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${context.packageName}")))
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Rate Lisan on Play Store")
+                }
+
+                TextButton(
+                    onClick = { showLicensesDialog = true },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text("Open Source Licenses", fontSize = 12.sp, color = EditorialAccentPurple)
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Lisan Grammar • Version 2.4.0 (Build 102)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialTextSecondary)
+                    Text("Designed with ❤️ for English & Arabic Grammar Learners", fontSize = 11.sp, color = EditorialTextMuted)
                 }
             }
+        }
+
+        if (showHelpDialog) {
+            AlertDialog(
+                onDismissRequest = { showHelpDialog = false },
+                title = { Text("How to Use Lisan Grammar", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("1. Learn tab: Browse comprehensive grammar lessons comparing English and Arabic structures.")
+                        Text("2. AI Tutor tab: Chat with the AI tutor, ask grammar questions, practice conversations, or request sentence corrections.")
+                        Text("3. Analyze tab: Paste any English sentence for detailed Arabic-English structural breakdown.")
+                        Text("4. Library & Quiz tabs: Review saved bookmarks, liked items, idioms, and take interactive quizzes.")
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { showHelpDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)) {
+                        Text("Got It")
+                    }
+                }
+            )
+        }
+
+        if (showLicensesDialog) {
+            AlertDialog(
+                onDismissRequest = { showLicensesDialog = false },
+                title = { Text("Open Source Licenses", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text("Lisan Grammar uses Jetpack Compose, Room Database, Material 3, and Kotlin Coroutines. Licensed under Apache 2.0 / MIT licenses.")
+                },
+                confirmButton = {
+                    Button(onClick = { showLicensesDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple)) {
+                        Text("Close")
+                    }
+                }
+            )
         }
 
         // Success Confirmation Modal
@@ -609,7 +768,6 @@ fun HelpAndFeedbackScreen(
                 .padding(16.dp)
         )
     }
-}
 }
 
 @Composable

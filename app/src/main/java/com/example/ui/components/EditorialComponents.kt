@@ -42,6 +42,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.getValue
@@ -114,13 +117,13 @@ private fun isLineRtl(text: String): Boolean {
 private fun mapHeaderToIcon(headerText: String): String {
     val lower = headerText.lowercase()
     return when {
-        lower.contains("tip") || lower.contains("نصيحة") || lower.contains("تپ") -> "💡 $headerText"
-        lower.contains("correct") || lower.contains("تصحيح") || lower.contains("درست") -> "✅ $headerText"
-        lower.contains("practice") || lower.contains("تمرين") || lower.contains("مشق") -> "✏️ $headerText"
-        lower.contains("grammar") || lower.contains("قواعد") || lower.contains("گرامر") -> "📘 $headerText"
+        lower.contains("tip") || lower.contains("نصيحة") || lower.contains("تپ") -> "${com.example.utils.TutorVisuals.explanation} $headerText"
+        lower.contains("correct") || lower.contains("تصحيح") || lower.contains("درست") -> "${com.example.utils.TutorVisuals.correct} $headerText"
+        lower.contains("practice") || lower.contains("تمرين") || lower.contains("مشق") -> "${com.example.utils.TutorVisuals.practice} $headerText"
+        lower.contains("grammar") || lower.contains("قواعد") || lower.contains("گرامر") -> "${com.example.utils.TutorVisuals.lesson} $headerText"
         lower.contains("pronunciation") || lower.contains("نطق") || lower.contains("تلفظ") -> "🗣️ $headerText"
-        lower.contains("remember") || lower.contains("تذكر") || lower.contains("یاد رکھیں") -> "📌 $headerText"
-        lower.contains("mistake") || lower.contains("warning") || lower.contains("خطأ") || lower.contains("غلطی") -> "⚠️ $headerText"
+        lower.contains("remember") || lower.contains("تذكر") || lower.contains("یاد رکھیں") -> "${com.example.utils.TutorVisuals.remember} $headerText"
+        lower.contains("mistake") || lower.contains("warning") || lower.contains("خطأ") || lower.contains("غلطی") -> "${com.example.utils.TutorVisuals.warning} $headerText"
         else -> headerText
     }
 }
@@ -326,6 +329,8 @@ fun EditorialMixedText(
                 val bulletText = trimmed.substring(2).trim()
                 val annotated = parseMarkdownToAnnotatedString(bulletText, textColor = color, boldColor = accentColor)
                 val hasRtl = isLineRtl(bulletText)
+                val lineFontSize = if (hasRtl) (fontSize.value + 1.5f).sp else fontSize
+                val lineLineHeight = if (hasRtl) (lineHeight.value + 6f).sp else lineHeight
                 
                 if (hasRtl) {
                     Row(
@@ -334,8 +339,8 @@ fun EditorialMixedText(
                     ) {
                         Text(
                             text = annotated,
-                            fontSize = fontSize,
-                            lineHeight = lineHeight,
+                            fontSize = lineFontSize,
+                            lineHeight = lineLineHeight,
                             color = color,
                             fontFamily = fontFamily ?: FontFamily.Default,
                             fontStyle = fontStyle,
@@ -346,7 +351,7 @@ fun EditorialMixedText(
                         )
                         Text(
                             text = "•",
-                            fontSize = fontSize,
+                            fontSize = lineFontSize,
                             fontWeight = FontWeight.Bold,
                             color = accentColor,
                             modifier = Modifier.padding(top = 2.dp)
@@ -359,15 +364,15 @@ fun EditorialMixedText(
                     ) {
                         Text(
                             text = "•",
-                            fontSize = fontSize,
+                            fontSize = lineFontSize,
                             fontWeight = FontWeight.Bold,
                             color = accentColor,
                             modifier = Modifier.padding(top = 2.dp, end = 6.dp)
                         )
                         Text(
                             text = annotated,
-                            fontSize = fontSize,
-                            lineHeight = lineHeight,
+                            fontSize = lineFontSize,
+                            lineHeight = lineLineHeight,
                             color = color,
                             fontFamily = fontFamily ?: FontFamily.Default,
                             fontStyle = fontStyle,
@@ -384,11 +389,13 @@ fun EditorialMixedText(
                 val annotated = parseMarkdownToAnnotatedString(trimmed, textColor = color, boldColor = accentColor)
                 val hasRtl = isLineRtl(trimmed)
                 val textDir = if (hasRtl) TextDirection.Rtl else TextDirection.Ltr
+                val lineFontSize = if (hasRtl) (fontSize.value + 1.5f).sp else fontSize
+                val lineLineHeight = if (hasRtl) (lineHeight.value + 6f).sp else lineHeight
                 
                 Text(
                     text = annotated,
-                    fontSize = fontSize,
-                    lineHeight = lineHeight,
+                    fontSize = lineFontSize,
+                    lineHeight = lineLineHeight,
                     color = color,
                     fontFamily = fontFamily ?: FontFamily.Default,
                     fontStyle = fontStyle,
@@ -526,23 +533,46 @@ fun EditorialCard(
     modifier: Modifier = Modifier,
     containerColor: Color = EditorialTheme.colors.surface,
     borderColor: Color = EditorialTheme.colors.border,
+    showBottomAccent: Boolean = true,
+    accentColor: Color = Color(0xFF2563EB),
     content: @Composable () -> Unit
 ) {
+    val cardShape = RoundedCornerShape(20.dp)
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(2.dp, RoundedCornerShape(24.dp)),
+            .shadow(3.dp, cardShape),
         color = containerColor,
-        shape = RoundedCornerShape(24.dp),
+        shape = cardShape,
         border = BorderStroke(1.dp, borderColor)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            content()
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+                    .padding(bottom = if (showBottomAccent) 4.dp else 0.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                content()
+            }
+            if (showBottomAccent) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                colors = listOf(
+                                    accentColor.copy(alpha = 0.3f),
+                                    accentColor,
+                                    accentColor.copy(alpha = 0.3f)
+                                )
+                            )
+                        )
+                )
+            }
         }
     }
 }
@@ -824,3 +854,139 @@ fun ScrollToBottomFAB(
         modifier = modifier
     )
 }
+
+@Composable
+fun <T> SleekDropdownSelector(
+    selectedItem: T,
+    items: List<T>,
+    itemLabel: (T) -> String,
+    onItemSelected: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    labelPrefix: String = "",
+    trailingBadge: String? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    Box(modifier = modifier) {
+        Surface(
+            onClick = {
+                keyboardController?.hide()
+                focusManager.clearFocus()
+                expanded = true
+            },
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF1E293B), // Sleek dark slate pill
+            border = BorderStroke(1.dp, Color(0xFF334155)),
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth().testTag("sleek_dropdown_trigger")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    if (labelPrefix.isNotEmpty()) {
+                        Text(
+                            text = labelPrefix.uppercase(),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF94A3B8),
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    Text(
+                        text = itemLabel(selectedItem),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (trailingBadge != null) {
+                        Surface(
+                            color = Color(0xFFF97316).copy(alpha = 0.2f),
+                            shape = CircleShape,
+                            border = BorderStroke(1.dp, Color(0xFFF97316))
+                        ) {
+                            Text(
+                                text = trailingBadge,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFF8A65),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF334155),
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (expanded) "▲" else "▼",
+                                fontSize = 11.sp,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            offset = DpOffset(0.dp, 6.dp),
+            modifier = Modifier
+                .heightIn(max = 280.dp)
+                .width(320.dp)
+                .background(Color(0xFF0F172A)) // Deep dark slate dropdown list
+                .border(1.dp, Color(0xFF334155), RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+        ) {
+            items.forEach { item ->
+                val isSelected = item == selectedItem
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Radio dot indicator
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isSelected) Color(0xFFF97316) else Color.Transparent,
+                                border = BorderStroke(2.dp, if (isSelected) Color(0xFFF97316) else Color(0xFF64748B)),
+                                modifier = Modifier.size(16.dp)
+                            ) {}
+
+                            Text(
+                                text = itemLabel(item),
+                                fontSize = 14.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) Color(0xFFFF8A65) else Color.White
+                            )
+                        }
+                    },
+                    onClick = {
+                        onItemSelected(item)
+                        expanded = false
+                    },
+                    modifier = Modifier
+                        .background(if (isSelected) Color(0xFF1E293B) else Color.Transparent)
+                        .testTag("dropdown_item_${itemLabel(item)}")
+                )
+            }
+        }
+    }
+}
+

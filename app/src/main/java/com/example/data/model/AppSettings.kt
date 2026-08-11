@@ -62,5 +62,13 @@ data class AppSettings(
 
     // 10. Advanced
     val developerOptions: Boolean = false,
-    val diagnostics: Boolean = true
+    val diagnostics: Boolean = true,
+    val imageCompressionPreset: String = "BALANCED", // "HIGH", "BALANCED", "DATA_SAVER",
+    
+    // 11. Usage & API
+    val userApiKey: String? = null,
+    val usageCount: Int = 0,
+    val lastUsageDate: String = "",
+    val activeUsersCount: Int = 100, // Active users sharing the 1,500 daily free requests
+    val dailyLimit: Int = 15 // Auto-calculated as 1500 / activeUsersCount
 )

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,19 +10,15 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.School
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.*
+import com.example.ui.components.EditorialCard
 import com.example.ui.components.PictureCardThumbnail
 import com.example.ui.navigation.HashRouter
 import com.example.ui.theme.EditorialPrimary
@@ -48,30 +45,31 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background)
+            .background(Color(0xFF020617)) // Modern deep dark canvas
             .padding(16.dp)
     ) {
-        // Header
-        Surface(
+        // Header Card with bottom blue gradient accent
+        EditorialCard(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            color = EditorialPrimary,
-            shadowElevation = 4.dp
+            containerColor = Color(0xFF0F172A),
+            borderColor = Color(0xFF334155),
+            showBottomAccent = true,
+            accentColor = Color(0xFF2563EB)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp)
+                modifier = Modifier.padding(4.dp)
             ) {
                 Text(
-                    text = "Learn with Pictures",
-                    fontSize = 24.sp,
+                    text = "Learn with Pictures • تصویری ذخیرہ الفاظ",
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Build English vocabulary through pictures, audio pronunciation, and interactive quizzes.",
-                    fontSize = 14.sp,
-                    color = Color.White.copy(alpha = 0.9f)
+                    text = "Build English vocabulary through rich images, native audio pronunciation, and smart interactive quizzes.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF94A3B8)
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
@@ -79,11 +77,12 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
                         startQuizTriggered = true
                         viewModel.startMixedQuiz()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = EditorialPrimary)
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Start Mixed Practice", color = EditorialPrimary, fontWeight = FontWeight.Bold)
+                    Text(text = "Start Mixed Practice / ملا جلا مشق شروع کریں", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -93,7 +92,7 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
             text = "Vocabulary Categories (${categories.size} Topics)",
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
-            color = colors.textPrimary
+            color = Color.White
         )
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -106,20 +105,18 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(categories) { category ->
-                Card(
-                    modifier = CardDefaults.cardElevation().let {
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                HashRouter.navigate("#/picture-vocabulary/category/${category.id}")
-                            }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = colors.surface)
+                EditorialCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            HashRouter.navigate("#/picture-vocabulary/category/${category.id}")
+                        },
+                    containerColor = Color(0xFF0F172A),
+                    borderColor = Color(0xFF1E293B),
+                    showBottomAccent = true,
+                    accentColor = Color(0xFF3B82F6)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
+                    Column(modifier = Modifier.padding(2.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -127,27 +124,33 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
                         ) {
                             PictureCardThumbnail(
                                 assetKey = category.id,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(44.dp)
                             )
-                            Text(
-                                text = "26 words",
-                                fontSize = 11.sp,
-                                color = colors.textSecondary,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Surface(
+                                color = Color(0xFF1E293B),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = "26 words",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF94A3B8),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = category.displayNameEnglish,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary
+                            color = Color.White
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = category.displayNameArabic,
                             fontSize = 13.sp,
-                            color = colors.textSecondary
+                            color = Color(0xFF94A3B8)
                         )
                     }
                 }

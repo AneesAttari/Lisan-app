@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import com.example.data.local.*
 import com.example.data.model.*
 import com.example.data.model.DashboardSummary
@@ -41,7 +42,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     val userName: StateFlow<String> = _userName.asStateFlow()
     private val database = AppDatabase.getDatabase(application)
     private val savedIdiomRepository = SavedIdiomRepository(database.savedIdiomDao())
-    private val libraryRepository = com.example.data.repository.LibraryRepository(database.libraryDao(), database.likedDao())
+    private val libraryRepository = com.example.data.repository.LibraryRepository(database.libraryDao(), database.likedDao(), database.dislikedDao(), database.feedbackDao())
     private val dailyQuizChallengeRepository = com.example.data.repository.DailyQuizChallengeRepository(database)
     private val dailyGrammarRepository = com.example.data.repository.DailyGrammarRepository(database.dailyChallengeAssignmentDao())
     private val dailyVerbRepository = com.example.data.repository.DailyVerbRepository(database.dailyVerbAssignmentDao())
@@ -198,7 +199,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
                 exportObj.put("nativeLanguage", userSettings.value.nativeLanguage)
                 exportObj.put("learningGoal", userSettings.value.learningGoal)
 
-                val notes = database.savedNoteDao().getAllNotes().first()
+                val notes = savedNotes.value
                 val notesArr = org.json.JSONArray()
                 notes.forEach { n ->
                     val obj = org.json.JSONObject()
@@ -211,12 +212,12 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 exportObj.put("savedNotes", notesArr)
 
-                val idioms = database.savedIdiomDao().getAllSavedIdioms().first()
+                val idioms = savedIdiomIds.value
                 val idiomsArr = org.json.JSONArray()
-                idioms.forEach { i ->
+                idioms.forEach { id ->
                     val obj = org.json.JSONObject()
-                    obj.put("idiomId", i.idiomId)
-                    obj.put("savedAt", i.savedAt)
+                    obj.put("idiomId", id)
+                    obj.put("savedAt", System.currentTimeMillis())
                     idiomsArr.put(obj)
                 }
                 exportObj.put("savedIdioms", idiomsArr)
@@ -247,6 +248,112 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun getEffectiveDailyLimit(): Int {
+        val settings = appSettings.value
+        val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
+            ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
+            ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
+        if (!userKey.isNullOrBlank()) {
+            return 1500 // Full 1,500 daily allowance for custom API key
+        }
+        val activeUsers = if (settings.activeUsersCount <= 0) 100 else settings.activeUsersCount
+        return maxOf(1, 1500 / activeUsers)
+    }
+
+    fun incrementUsage() {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val effectiveLimit = getEffectiveDailyLimit()
+        appSettingsManager.updateSettings { settings ->
+            if (settings.lastUsageDate != today) {
+                settings.copy(usageCount = 1, lastUsageDate = today, dailyLimit = effectiveLimit)
+            } else {
+                settings.copy(usageCount = settings.usageCount + 1, dailyLimit = effectiveLimit)
+            }
+        }
+    }
+    
+    fun hasCustomUserApiKey(): Boolean {
+        val settings = appSettings.value
+        val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
+            ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
+            ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
+        return !userKey.isNullOrBlank()
+    }
+
+    fun getLimitExceededMessage(): String {
+        return if (hasCustomUserApiKey()) {
+            """
+السلام علیکم!
+معذرت، آپ کی اپنی درج کردہ (Custom) API Key کی حد ختم ہو چکی ہے (API Key Limit Exceeded)۔
+
+برائے مہربانی اسی صفحے سے یا سیٹنگز میں جا کر اپنی ایک نئی، مختلف API Key درج کریں تاکہ آپ کی ایپ دوبارہ سے بلا تعطل کام کرنا شروع کر دے۔
+
+[KEY_GUIDE_ACTION]
+""".trimIndent()
+        } else {
+            """
+السلام علیکم!
+معذرت، اس وقت یہ ایپ جواب دینے سے قاصر ہے۔ ایسا سرور کی عارضی خرابی کی وجہ سے، یا آج کے لیے مقررہ مفت استعمال کی حد (Daily Limit) پوری ہو جانے کی وجہ سے ہو سکتا ہے۔
+
+پریشان نہ ہوں! آپ اپنی ذاتی اور بالکل مفت "API Key" بنا کر خود ایپ میں شامل کر سکتے ہیں۔ اس کے بعد آپ کسی رکاوٹ اور کسی بھی سبسکرپشن کے بغیر یہ ایپ مکمل طور پر استعمال کر سکیں گے۔ نیچے دیے گئے بٹن پر کلک کر کے تصویری رہنما اور آسان مراحل دیکھیں:
+
+[KEY_GUIDE_ACTION]
+""".trimIndent()
+        }
+    }
+
+    fun getUsagePromptStatus(): Boolean {
+        val settings = appSettings.value
+        val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
+            ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
+            ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
+        if (!userKey.isNullOrBlank()) {
+            return false // Custom API key active: NO LIMIT BLOCK!
+        }
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        // Reset usage on new day
+        val currentUsage = if (settings.lastUsageDate != today) 0 else settings.usageCount
+        val limit = getEffectiveDailyLimit()
+        return currentUsage >= limit
+    }
+    
+    fun getRemainingRequests(): Int {
+        val settings = appSettings.value
+        val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
+            ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
+            ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
+        if (!userKey.isNullOrBlank()) {
+            return 1500
+        }
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val limit = getEffectiveDailyLimit()
+        return if (settings.lastUsageDate != today) {
+            limit
+        } else {
+            (limit - settings.usageCount).coerceAtLeast(0)
+        }
+    }
+
+    fun setActiveUsersCount(count: Int) {
+        val cleanCount = count.coerceAtLeast(1)
+        val newLimit = maxOf(1, 1500 / cleanCount)
+        appSettingsManager.updateSettings { 
+            it.copy(activeUsersCount = cleanCount, dailyLimit = newLimit) 
+        }
+    }
+    
+    private val _showApiKeyGuideModal = MutableStateFlow(false)
+    val showApiKeyGuideModal: StateFlow<Boolean> = _showApiKeyGuideModal.asStateFlow()
+    fun setShowApiKeyGuideModal(show: Boolean) { _showApiKeyGuideModal.value = show }
+
+    fun setUserApiKey(key: String) {
+        val cleanKey = key.trim()
+        _geminiApiKey.value = cleanKey
+        prefs.edit().putString("user_gemini_api_key", cleanKey).apply()
+        appSettingsManager.updateSettings { it.copy(userApiKey = cleanKey) }
+        com.example.data.remote.RetrofitClient.setCustomApiKey(cleanKey)
+    }
+    
     fun updateAppSettings(update: (com.example.data.model.AppSettings) -> com.example.data.model.AppSettings) {
         appSettingsManager.updateSettings(update)
     }
@@ -579,12 +686,43 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
                 val newSavedAt = if (assignment.savedAt != null) null else now
                 database.dailyVerbAssignmentDao().updateAssignment(assignment.copy(savedAt = newSavedAt))
                 _isDailyVerbSaved.value = newSavedAt != null
+                if (newSavedAt != null) {
+                    libraryRepository.saveToLibrary(
+                        com.example.data.model.LibraryItem(
+                            id = "daily_verb_${verb.id}",
+                            contentType = "DailyVerb",
+                            contentId = verb.id,
+                            title = verb.baseForm,
+                            preview = verb.urduMeaning,
+                            payloadJson = null
+                        )
+                    )
+                } else {
+                    libraryRepository.removeFromLibrary("DailyVerb", verb.id)
+                }
             }
         }
     }
 
     fun sendDailyHelperMessage(message: String) {
         if (message.isBlank()) return
+        
+        if (getUsagePromptStatus()) {
+             val history = _dailyHelperChatHistory.value.toMutableList()
+             val userMsg = ChatMessageEntity(role = "user", text = message)
+             history.add(userMsg)
+             val limitMsg = ChatMessageEntity(
+                 role = "model",
+                 text = "⚠️ **Daily Free Allowance Reached** / **روزانہ کی حد مکمل ہو گئی**\n\nYou have completed your daily free messages allowance. Your app is working 100% fine!\n\nTo continue chatting without limits, please add your free Gemini API key.\n\n[KEY_GUIDE_ACTION]"
+             )
+             history.add(limitMsg)
+             _dailyHelperChatHistory.value = history
+             _showApiKeyGuideModal.value = true
+             return
+        }
+        
+        incrementUsage()
+
         val verb = _dailyVerb.value
         val task = _dailyChallengeQuestions.value.getOrNull(_currentDailyQuestionIndex.value)
         val history = _dailyHelperChatHistory.value.toMutableList()
@@ -780,9 +918,13 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     // --- Library & Liked ---
     val allLibraryItems = libraryRepository.allLibraryItems.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allLikedItems = libraryRepository.allLikedItems.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val totalLikesCount: StateFlow<Int> = libraryRepository.totalLikesCount.stateIn(viewModelScope, SharingStarted.Lazily, 0)
+    val totalDislikesCount: StateFlow<Int> = libraryRepository.totalDislikesCount.stateIn(viewModelScope, SharingStarted.Lazily, 0)
+    val allFeedback: StateFlow<List<com.example.data.model.FeedbackEntity>> = libraryRepository.allFeedback.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     fun isSaved(type: String, id: String) = libraryRepository.isSaved(type, id).stateIn(viewModelScope, SharingStarted.Lazily, false)
     fun isLiked(type: String, id: String) = libraryRepository.isLiked(type, id).stateIn(viewModelScope, SharingStarted.Lazily, false)
+    fun isDisliked(type: String, id: String) = libraryRepository.isDisliked(type, id).stateIn(viewModelScope, SharingStarted.Lazily, false)
 
     fun toggleLibrarySave(item: LibraryItem) {
         viewModelScope.launch {
@@ -802,7 +944,32 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
                 libraryRepository.unlikeItem(item.contentType, item.contentId)
             } else {
                 libraryRepository.likeItem(item)
+                libraryRepository.undislikeItem(item.contentType, item.contentId)
             }
+        }
+    }
+
+    fun toggleDislike(item: com.example.data.model.DislikedItem) {
+        viewModelScope.launch {
+            val currentlyDisliked = libraryRepository.isDisliked(item.contentType, item.contentId).first()
+            if (currentlyDisliked) {
+                libraryRepository.undislikeItem(item.contentType, item.contentId)
+            } else {
+                libraryRepository.dislikeItem(item)
+                libraryRepository.unlikeItem(item.contentType, item.contentId)
+            }
+        }
+    }
+
+    fun submitFeedback(subject: String, message: String, category: String = "General") {
+        viewModelScope.launch {
+            val feedback = com.example.data.model.FeedbackEntity(
+                userId = learnerProfile.value.userId,
+                subject = subject,
+                message = message,
+                category = category
+            )
+            libraryRepository.submitFeedback(feedback)
         }
     }
 
@@ -1130,21 +1297,44 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         }
     }
 
-    fun sendChatMessage(message: String, isRetry: Boolean = false) {
-        if (message.isBlank()) return
+    fun sendChatMessage(message: String, imageUri: String? = null, isRetry: Boolean = false) {
+        if (message.isBlank() && imageUri == null) return
         
         if (!isRetry) {
-            val userContent = com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = message)))
+            val userContent = com.example.data.model.Content(
+                role = "user", 
+                parts = listOf(com.example.data.model.Part(text = message)),
+                imageUri = imageUri
+            )
             _chatHistory.value = _chatHistory.value + userContent
         }
 
         val (detected, effective) = LanguageDetector.resolveEffectiveResponseLanguage(_activeLanguage.value, message)
         _detectedInputLanguage.value = detected.label
         _effectiveResponseLanguage.value = effective
+
+        if (getUsagePromptStatus()) {
+            val limitText = getLimitExceededMessage()
+            val modelContent = com.example.data.model.Content(
+                role = "model",
+                parts = listOf(com.example.data.model.Part(text = limitText))
+            )
+            _chatHistory.value = _chatHistory.value + modelContent
+            viewModelScope.launch {
+                if (!isRetry) {
+                    chatMessageRepository.saveMessage("user", message, imageUri)
+                }
+                chatMessageRepository.saveMessage("model", limitText)
+            }
+            _showApiKeyGuideModal.value = true
+            return
+        }
+
+        incrementUsage()
         
         viewModelScope.launch {
             if (!isRetry) {
-                chatMessageRepository.saveMessage("user", message)
+                chatMessageRepository.saveMessage("user", message, imageUri)
             }
             _isChatLoading.value = true
             _chatError.value = null
@@ -1155,12 +1345,15 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     learnerProfileManager.buildPersonalizedPromptContext()
                 }
                 val result = RetrofitClient.getTutorResponse(
+                    context = getApplication<android.app.Application>(),
                     history = _chatHistory.value,
                     mode = _activeTutorMode.value,
                     language = _activeLanguage.value,
                     userName = _userName.value,
                     learnerProfileSummary = profileSummary,
-                    isStudyModeOn = _isStudyModeOn.value
+                    isStudyModeOn = _isStudyModeOn.value,
+                    learnerLevel = _proficiencyLevel.value.labelEn,
+                    imageCompressionPreset = appSettings.value.imageCompressionPreset
                 )
                 
                 val modelContent = com.example.data.model.Content(
@@ -1172,9 +1365,34 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                 _chatHistory.value = _chatHistory.value + modelContent
                 chatMessageRepository.saveMessage("model", result.responseText)
                 learnerProfileManager.recordTutorInteraction(message, result.responseText)
+                
+                // Background LLM memory extraction
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val extractedMemories = RetrofitClient.extractMemoryAndPreferences(message, result.responseText)
+                        extractedMemories.forEach { memory ->
+                            if (memory.isNotBlank()) {
+                                learnerProfileManager.addManualMemory(memory)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("LisanViewModel", "Background memory extraction failed: ${e.message}")
+                    }
+                }
+
+                saveCurrentSessionToHistory()
             } catch (e: Exception) {
                 val msg = e.message ?: ""
-                if (msg.contains("Gemini is not connected") || msg.contains("API Key is missing")) {
+                if (msg.contains("429") || msg.contains("Quota") || msg.contains("RESOURCE_EXHAUSTED") || msg.contains("limit") || msg.contains("quota")) {
+                    val limitText = getLimitExceededMessage()
+                    val modelContent = com.example.data.model.Content(
+                        role = "model",
+                        parts = listOf(com.example.data.model.Part(text = limitText))
+                    )
+                    _chatHistory.value = _chatHistory.value + modelContent
+                    chatMessageRepository.saveMessage("model", limitText)
+                    _showApiKeyGuideModal.value = true
+                } else if (msg.contains("Gemini is not connected") || msg.contains("API Key is missing")) {
                     _chatError.value = "Gemini is not connected. Add a valid GEMINI_API_KEY in the app’s secure environment settings, then redeploy."
                 } else {
                     _chatError.value = "Error: ${e.message ?: "Failed to get response. Please check your connection."}"
@@ -1186,19 +1404,23 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     }
 
     fun retryLastChatMessage() {
-        val lastUserMsg = _chatHistory.value.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text
-        if (lastUserMsg != null) {
+        val lastUserContent = _chatHistory.value.lastOrNull { it.role == "user" }
+        val lastUserMsg = lastUserContent?.parts?.firstOrNull()?.text
+        val lastUserImageUri = lastUserContent?.imageUri
+        if (lastUserContent != null) {
             val indexOfLastUser = _chatHistory.value.indexOfLast { it.role == "user" }
             if (indexOfLastUser >= 0) {
                 _chatHistory.value = _chatHistory.value.take(indexOfLastUser + 1)
             }
-            sendChatMessage(lastUserMsg, isRetry = true)
+            sendChatMessage(lastUserMsg ?: "", lastUserImageUri, isRetry = true)
         }
     }
 
     private val conversationSessionDao = database.conversationSessionDao()
     val conversationSessions: StateFlow<List<ConversationSessionEntity>> = conversationSessionDao.getSessionsForUser("current-user-id")
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    var activeConversationId: String? = null
 
     fun saveCurrentSessionToHistory() {
         viewModelScope.launch {
@@ -1208,7 +1430,11 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
             val title = if (firstUserMsg.length > 35) firstUserMsg.take(35) + "..." else firstUserMsg
             val preview = messages.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
             val previewTrunc = if (preview.length > 80) preview.take(80) + "..." else preview
-            val sessionId = "session_${System.currentTimeMillis()}"
+            
+            if (activeConversationId == null) {
+                activeConversationId = "session_${System.currentTimeMillis()}"
+            }
+            
             val topicLabel = when {
                 firstUserMsg.contains("idiom", true) || firstUserMsg.contains("""محاورہ""", true) -> "Idiom"
                 firstUserMsg.contains("pronounce", true) || firstUserMsg.contains("speech", true) -> "Pronunciation"
@@ -1221,7 +1447,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                 messages
             )
             val entity = ConversationSessionEntity(
-                id = sessionId,
+                id = activeConversationId!!,
                 userId = learnerProfile.value.userId,
                 title = "Practising $title",
                 topicLabel = topicLabel,
@@ -1261,6 +1487,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     )
                     _chatHistory.value = list
                     chatMessageRepository.clearHistory()
+                    activeConversationId = sessionId
                     for (content in list) {
                         val role = content.role ?: "model"
                         val text = content.parts.firstOrNull()?.text ?: ""
@@ -1280,18 +1507,22 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         viewModelScope.launch {
             saveCurrentSessionToHistory()
             chatMessageRepository.clearHistory()
+            activeConversationId = null
             initChatWelcomeMessage()
         }
     }
 
     suspend fun fetchGeminiWithFallback(prompt: String): String {
-        val apiKey = prefs.getString("user_gemini_api_key", "") ?: ""
+        val apiKey = _geminiApiKey.value.ifBlank {
+            prefs.getString("user_gemini_api_key", null)?.ifBlank { null }
+                ?: appSettings.value.userApiKey?.ifBlank { null }
+                ?: com.example.BuildConfig.GEMINI_API_KEY
+        }
         val models = listOf(
-            "gemini-2.5-flash-preview-09-2025",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash"
-        )
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash"
+        ).distinct()
         
         val request = com.example.data.model.GenerateContentRequest(
             contents = listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = prompt))))
@@ -1300,7 +1531,8 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         for (model in models) {
             try {
                 val response = RetrofitClient.service.generateContent(model, apiKey, request)
-                return response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+                val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!text.isNullOrBlank()) return text
             } catch (e: Exception) {
                 continue
             }
@@ -1338,6 +1570,10 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     }
 
     fun setAnalyzerInput(input: String) { _analyzerInput.value = input }
+
+    fun clearAnalyzerOutput() {
+        _analyzerOutput.value = null
+    }
 
     fun runDeepAnalyzer() {
         val input = _analyzerInput.value.trim()
@@ -1970,6 +2206,20 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
                 val newSavedAt = if (assignment.savedAt != null) null else now
                 dailyIdiomAssignmentDao.updateAssignment(assignment.copy(savedAt = newSavedAt))
                 _isDailyIdiomSaved.value = newSavedAt != null
+                if (newSavedAt != null) {
+                    libraryRepository.saveToLibrary(
+                        com.example.data.model.LibraryItem(
+                            id = "daily_idiom_${idiom.id}",
+                            contentType = "DailyIdiom",
+                            contentId = idiom.id,
+                            title = idiom.expression,
+                            preview = idiom.urduMeaning,
+                            payloadJson = null
+                        )
+                    )
+                } else {
+                    libraryRepository.removeFromLibrary("DailyIdiom", idiom.id)
+                }
             }
         }
     }
@@ -2140,6 +2390,7 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         val savedApiKey = prefs.getString("user_gemini_api_key", "") ?: ""
         if (savedApiKey.isNotBlank()) {
             RetrofitClient.setCustomApiKey(savedApiKey)
+            appSettingsManager.updateSettings { it.copy(userApiKey = savedApiKey) }
         }
         try {
             setupSpeechRecognizer()

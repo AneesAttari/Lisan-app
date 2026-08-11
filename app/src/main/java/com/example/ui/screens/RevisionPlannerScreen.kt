@@ -227,15 +227,34 @@ fun RevisionPlannerDashboard(
 
         // 3. Topics List Header
         item {
-            EditorialSectionTitle(text = "REVISION TOPICS • گرامر کے ابواب")
+            EditorialSectionTitle(text = "REVISION TOPICS • گرامر کے مکمل ابواب")
         }
 
         // 4. Topics List
         val activeTopics = listOf(
-            Pair("verb_to_be", Pair("Verb 'To Be' (Am/Is/Are)", "فعلِ ربط")),
-            Pair("articles_a_an_the", Pair("Definite & Indefinite Articles", "حروفِ تنکیر و تعریف")),
-            Pair("present_simple", Pair("Present Simple Tense", "فعلِ حال سادہ")),
-            Pair("present_continuous", Pair("Present Continuous", "فعلِ حال جاری"))
+            // Present Tenses (30 Quizzes Each)
+            Pair("present_simple", Pair("Present Simple Tense", "فعلِ حال سادہ • 30 Quizzes")),
+            Pair("present_continuous", Pair("Present Continuous Tense", "فعلِ حال جاری • 30 Quizzes")),
+            Pair("present_perfect", Pair("Present Perfect Tense", "فعلِ حال مکمل • 30 Quizzes")),
+            Pair("present_perfect_continuous", Pair("Present Perfect Continuous", "فعلِ حال مکمل جاری • 30 Quizzes")),
+
+            // Past Tenses (30 Quizzes Each)
+            Pair("past_simple", Pair("Past Simple Tense", "فعلِ ماضی سادہ • 30 Quizzes")),
+            Pair("past_continuous", Pair("Past Continuous Tense", "فعلِ ماضی جاری • 30 Quizzes")),
+            Pair("past_perfect", Pair("Past Perfect Tense", "فعلِ ماضی مکمل • 30 Quizzes")),
+            Pair("past_perfect_continuous", Pair("Past Perfect Continuous", "فعلِ ماضی مکمل جاری • 30 Quizzes")),
+
+            // Future Tenses (30 Quizzes Each)
+            Pair("future_simple", Pair("Future Simple Tense", "فعلِ مستقبل سادہ • 30 Quizzes")),
+            Pair("future_continuous", Pair("Future Continuous Tense", "فعلِ مستقبل جاری • 30 Quizzes")),
+            Pair("future_perfect", Pair("Future Perfect Tense", "فعلِ مستقبل مکمل • 30 Quizzes")),
+            Pair("future_perfect_continuous", Pair("Future Perfect Continuous", "فعلِ مستقبل مکمل جاری • 30 Quizzes")),
+
+            // Core Grammar Mastery Modules (20-30 Quizzes Each)
+            Pair("direct_indirect_speech", Pair("Direct & Indirect Speech", "روایتِ لفظی و معنوی • 30 Quizzes")),
+            Pair("articles_a_an_the", Pair("Definite & Indefinite Articles", "حروفِ تنکیر و تعریف • 30 Quizzes")),
+            Pair("active_passive_voice", Pair("Active & Passive Voice", "فعل معروف و مجہول • 30 Quizzes")),
+            Pair("flexible_phrasal_verbs", Pair("Flexible & Phrasal Verbs", "حسبِ ضرورت افعالِ مرکب • 30 Quizzes"))
         )
 
         items(activeTopics) { (topicId, names) ->
@@ -251,22 +270,6 @@ fun RevisionPlannerDashboard(
                     viewModel.startRevisionSession("topic", topicId, 10)
                 }
             )
-        }
-
-        // 5. Coming Soon Topics (Ensuring full integrity)
-        item {
-            EditorialSectionTitle(text = "UPCOMING REVISION MODULES")
-        }
-
-        val comingSoonTopics = listOf(
-            Pair("past_simple", Pair("Past Simple Tense", "فعلِ ماضی سادہ")),
-            Pair("future_simple", Pair("Future Simple", "فعلِ مستقبل سادہ")),
-            Pair("passive_voice", Pair("Passive Voice", "فعلِ مجہول"))
-        )
-
-        items(comingSoonTopics) { (_, names) ->
-            val (titleEn, titleUr) = names
-            LockedTopicCard(titleEn = titleEn, titleUr = titleUr)
         }
     }
 }

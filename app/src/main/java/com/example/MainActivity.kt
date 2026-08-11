@@ -35,6 +35,7 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TutorChatScreen
 import com.example.ui.screens.HelpAndFeedbackScreen
 import com.example.ui.screens.PictureVocabularyRootScreen
+import com.example.ui.screens.ImplementApiKeyScreen
 import com.example.ui.theme.EditorialBackground
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.LisanViewModel
@@ -71,6 +72,10 @@ import com.example.ui.screens.UnifiedLibraryScreen
 import com.example.ui.screens.PastConversationsScreen
 import com.example.ui.components.AuthDialog
 import com.example.ui.components.ProfileDialog
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.example.data.model.AuthState
 
 class MainActivity : ComponentActivity() {
@@ -104,6 +109,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+data class DrawerItem(
+    val title: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val index: Int,
+    val badge: String? = null
+)
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -181,9 +193,9 @@ fun LisanMainApp(
         9 to "Progress",
         10 to "Settings",
         11 to "Help & Feedback",
-        12 to "Past Conversations",
         13 to "Pronunciation Practice",
-        14 to "Learn with Pictures"
+        14 to "Learn with Pictures",
+        15 to "Implement Your API Key"
     )
 
     if (showLevelDialog) {
@@ -216,48 +228,158 @@ fun LisanMainApp(
             drawerContent = {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     ModalDrawerSheet(
-                        modifier = Modifier.width(300.dp),
+                        modifier = Modifier.width(320.dp),
                         drawerContainerColor = EditorialBackground,
-                        drawerTonalElevation = 4.dp
+                        drawerTonalElevation = 6.dp
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(24.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(20.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            // Header Card
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, EditorialBorder),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = "More Options",
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EditorialPrimary
-                                )
-                                IconButton(onClick = { scope.launch { drawerState.close() } }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = EditorialPrimary)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .background(Color(0xFF2563EB), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MenuBook,
+                                                contentDescription = null,
+                                                tint = Color.White
+                                            )
+                                        }
+                                        Column {
+                                            Text(
+                                                text = "Lisan Navigation",
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EditorialPrimary
+                                            )
+                                            Text(
+                                                text = "لسان گرامر مینو",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF2563EB)
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { scope.launch { drawerState.close() } },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close",
+                                            tint = EditorialPrimary
+                                        )
+                                    }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(24.dp))
-                            
-                            val menuItems = listOf(
-                                Triple("Learn with Pictures", Icons.Default.Image, 14),
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Section 1: Special Features
+                            Text(
+                                text = "SPECIAL TOOLS • اہم خصوصیات",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF2563EB),
+                                modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
+                            )
+
+                            val specialItems = listOf(
+                                DrawerItem("Implement Your API Key", Icons.Default.Key, 15, "مفت Key"),
+                                DrawerItem("Learn with Pictures", Icons.Default.Image, 14, "جدید")
+                            )
+
+                            specialItems.forEach { item ->
+                                val (title, icon, index, badge) = item
+                                NavigationDrawerItem(
+                                    label = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Surface(
+                                                color = if (index == 15) Color(0xFFDC2626) else Color(0xFF2563EB),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = badge ?: "",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    selected = selectedTab == index,
+                                    onClick = {
+                                        HashRouter.navigate(HashRouter.tabToRoute(index))
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    icon = { Icon(icon, contentDescription = null, tint = if (selectedTab == index) Color(0xFF2563EB) else EditorialTextSecondary) },
+                                    colors = NavigationDrawerItemDefaults.colors(
+                                        selectedContainerColor = Color(0xFFEFF6FF),
+                                        selectedIconColor = Color(0xFF2563EB),
+                                        selectedTextColor = Color(0xFF1E3A8A),
+                                        unselectedIconColor = EditorialTextSecondary,
+                                        unselectedTextColor = EditorialTextPrimary
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.padding(vertical = 3.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = EditorialBorder)
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Section 2: Learning & Practice
+                            Text(
+                                text = "LEARNING & PRACTICE • تعلیم و مشق",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialTextSecondary,
+                                modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
+                            )
+
+                            val learningItems = listOf(
                                 Triple("Lisan Daily", Icons.Default.CalendarToday, 5),
                                 Triple("Pronunciation Practice", Icons.Default.Hearing, 13),
                                 Triple("Quizzes", Icons.Default.CheckCircle, 6),
                                 Triple("Revision Planner", Icons.AutoMirrored.Filled.EventNote, 7),
                                 Triple("Lisan Journey", Icons.Default.EmojiEvents, 8),
-                                Triple("Progress", Icons.Default.BarChart, 9),
-                                Triple("Past Conversations", Icons.Default.History, 12),
-                                Triple("Settings", Icons.Default.Settings, 10),
-                                Triple("Help & Feedback", Icons.AutoMirrored.Filled.HelpOutline, 11)
+                                Triple("Progress Dashboard", Icons.Default.BarChart, 9)
                             )
 
-                            menuItems.forEach { (title, icon, index) ->
+                            learningItems.forEach { (title, icon, index) ->
                                 NavigationDrawerItem(
-                                    label = { Text(title, fontWeight = FontWeight.SemiBold) },
+                                    label = { Text(title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) },
                                     selected = selectedTab == index,
                                     onClick = {
                                         HashRouter.navigate(HashRouter.tabToRoute(index))
@@ -271,7 +393,47 @@ fun LisanMainApp(
                                         unselectedIconColor = EditorialTextSecondary,
                                         unselectedTextColor = EditorialTextPrimary
                                     ),
-                                    modifier = Modifier.padding(vertical = 4.dp)
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = EditorialBorder)
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Section 3: App Settings & Help
+                            Text(
+                                text = "SYSTEM • سیٹنگز و مدد",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialTextSecondary,
+                                modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
+                            )
+
+                            val systemItems = listOf(
+                                Triple("Settings", Icons.Default.Settings, 10),
+                                Triple("Help & Feedback", Icons.AutoMirrored.Filled.HelpOutline, 11)
+                            )
+
+                            systemItems.forEach { (title, icon, index) ->
+                                NavigationDrawerItem(
+                                    label = { Text(title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) },
+                                    selected = selectedTab == index,
+                                    onClick = {
+                                        HashRouter.navigate(HashRouter.tabToRoute(index))
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    icon = { Icon(icon, contentDescription = null) },
+                                    colors = NavigationDrawerItemDefaults.colors(
+                                        selectedContainerColor = EditorialPillBg,
+                                        selectedIconColor = EditorialPrimary,
+                                        selectedTextColor = EditorialPrimary,
+                                        unselectedIconColor = EditorialTextSecondary,
+                                        unselectedTextColor = EditorialTextPrimary
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.padding(vertical = 2.dp)
                                 )
                             }
                         }
@@ -280,6 +442,14 @@ fun LisanMainApp(
             }
         ) {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+                LaunchedEffect(drawerState.isOpen) {
+                    if (drawerState.isOpen) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    }
+                }
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
@@ -298,7 +468,10 @@ fun LisanMainApp(
                                     is AuthState.LoggedOut -> showAuthDialog = true
                                 }
                             },
-                            onMoreClick = { scope.launch { drawerState.open() } },
+                            onMoreClick = {
+                                keyboardController?.hide()
+                                scope.launch { drawerState.open() }
+                            },
                             userPhotoPath = currentUser?.profilePhotoPath,
                             userDisplayName = currentUser?.displayName
                         )
@@ -336,9 +509,9 @@ fun LisanMainApp(
                                 9 -> ProgressDashboardScreen(viewModel = viewModel)
                                 10 -> SettingsScreen(viewModel = viewModel)
                                 11 -> HelpAndFeedbackScreen(viewModel = viewModel)
-                                12 -> PastConversationsScreen(viewModel = viewModel)
                                 13 -> PronunciationPracticeScreen(viewModel = viewModel)
                                 14 -> PictureVocabularyRootScreen(viewModel = pictureVocabularyViewModel)
+                                15 -> ImplementApiKeyScreen(viewModel = viewModel)
                                 else -> LessonScreen(viewModel = viewModel)
                             }
                         }

@@ -200,6 +200,27 @@ class LearnerProfileManager(context: Context) {
             addUniqueMemory(memories, "Student asked Tutor AI about $detectedTopic.")
         }
 
+        // Explicit Heuristics Extractions
+        val lowerPrompt = userPrompt.lowercase(Locale.getDefault())
+        if (lowerPrompt.contains("talk") && (lowerPrompt.contains("urdu") || lowerPrompt.contains("اردو"))) {
+            addUniqueMemory(memories, "User requested to ALWAYS communicate/explain in Urdu.")
+        }
+        if (userPrompt.contains("اردو میں") || userPrompt.contains("اردو سیکھ")) {
+            addUniqueMemory(memories, "User requested to ALWAYS communicate/explain in Urdu.")
+        }
+        if (lowerPrompt.contains("talk") && (lowerPrompt.contains("arabic") || lowerPrompt.contains("عربی"))) {
+            addUniqueMemory(memories, "User requested to ALWAYS communicate/explain in Arabic.")
+        }
+        if (userPrompt.contains("عربی میں") || userPrompt.contains("بالعربية")) {
+            addUniqueMemory(memories, "User requested to ALWAYS communicate/explain in Arabic.")
+        }
+        if (lowerPrompt.contains("my name is ")) {
+            val namePart = userPrompt.substringAfter("my name is ", "").trim().substringBefore(".").substringBefore(" ")
+            if (namePart.isNotBlank() && namePart.length > 1) {
+                addUniqueMemory(memories, "User's name is $namePart.")
+            }
+        }
+
         val mistakes = current.commonMistakes.toMutableList()
         if (userPrompt.contains("in on at", ignoreCase = true) || userPrompt.contains("preposition", ignoreCase = true)) {
             val existingIdx = mistakes.indexOfFirst { it.topic == "Prepositions" }
@@ -374,6 +395,30 @@ class LearnerProfileManager(context: Context) {
     fun toggleMemoryEnabled(enabled: Boolean) {
         val updated = _learnerProfile.value.copy(isMemoryEnabled = enabled)
         saveProfile(updated)
+    }
+
+    fun addManualMemory(memory: String) {
+        val current = _learnerProfile.value
+        val memories = current.usefulMemories.toMutableList()
+        addUniqueMemory(memories, memory)
+        saveProfile(current.copy(usefulMemories = memories.take(25)))
+    }
+
+    fun removeMemory(memory: String) {
+        val current = _learnerProfile.value
+        val memories = current.usefulMemories.toMutableList()
+        memories.remove(memory)
+        saveProfile(current.copy(usefulMemories = memories))
+    }
+
+    fun updateMemory(oldMemory: String, newMemory: String) {
+        val current = _learnerProfile.value
+        val memories = current.usefulMemories.toMutableList()
+        val index = memories.indexOf(oldMemory)
+        if (index >= 0) {
+            memories[index] = newMemory
+            saveProfile(current.copy(usefulMemories = memories))
+        }
     }
 
     private fun addInteractionTimestamp(current: LearnerProfile): LearnerProfile {

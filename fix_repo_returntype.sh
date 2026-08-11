@@ -1,1 +1,0 @@
-sed -i 's/suspend fun getDailyQuestions(): DailyChallengeQuestion {/suspend fun getDailyQuestions(): List<DailyChallengeQuestion> {/' app/src/main/java/com/example/data/repository/DailyGrammarRepository.kt

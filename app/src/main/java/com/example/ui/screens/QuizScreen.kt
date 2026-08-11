@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -77,6 +78,7 @@ import com.example.ui.theme.EditorialTextMuted
 import com.example.ui.theme.EditorialTextPrimary
 import com.example.ui.theme.EditorialTextSecondary
 import com.example.ui.viewmodel.LisanViewModel
+import com.example.utils.TutorVisuals
 
 @Composable
 fun QuizScreen(
@@ -93,8 +95,23 @@ fun QuizScreen(
     val dailyProgress by viewModel.dailyChallengeProgress.collectAsState()
     val todayAssignment by viewModel.todayAssignment.collectAsState()
 
-    val questions = viewModel.getFilteredQuestions()
-    val currentQuestion = questions.getOrNull(currentIndex)
+    val currentDayOfYear = remember {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.get(java.util.Calendar.DAY_OF_YEAR)
+    }
+
+    var selectedDayNumber by remember { mutableStateOf((dailyProgress?.totalCompletedDays ?: 0) + 1) }
+    var isChallengeActive by remember { mutableStateOf(false) }
+
+    val activeQuestions = remember(categoryFilter, isChallengeActive, selectedDayNumber) {
+        if (isChallengeActive) {
+            com.example.data.model.DailyQuiz365Generator.getQuestionsForDay(selectedDayNumber)
+        } else {
+            viewModel.getFilteredQuestions()
+        }
+    }
+
+    val currentQuestion = activeQuestions.getOrNull(currentIndex)
 
     var saveConfirmationMessage by remember { mutableStateOf<String?>(null) }
 
@@ -111,12 +128,29 @@ fun QuizScreen(
         DailyQuizChallengeCard(
             progress = dailyProgress,
             assignment = todayAssignment,
-            onStart = { /* TODO: Handle start */ }
+            selectedDayNumber = selectedDayNumber,
+            onDaySelected = { day ->
+                selectedDayNumber = day
+                isChallengeActive = true
+                viewModel.restartQuiz()
+            },
+            onStart = {
+                isChallengeActive = true
+                viewModel.restartQuiz()
+            }
         )
 
         TenseFilterBar(
-            selectedCategory = categoryFilter,
-            onSelectCategory = { viewModel.setQuizCategoryFilter(it) }
+            selectedCategory = if (isChallengeActive) "DAILY_CHALLENGE" else categoryFilter,
+            onSelectCategory = { code ->
+                if (code == "DAILY_CHALLENGE") {
+                    isChallengeActive = true
+                } else {
+                    isChallengeActive = false
+                    viewModel.setQuizCategoryFilter(code)
+                }
+                viewModel.restartQuiz()
+            }
         )
 
         // 2. Score Banner & Progress Bar
@@ -125,7 +159,7 @@ fun QuizScreen(
             totalAnswered = totalAnswered,
             streak = streak,
             currentIndex = currentIndex + 1,
-            totalQuestions = questions.size
+            totalQuestions = activeQuestions.size
         )
 
         if (currentQuestion != null) {
@@ -133,7 +167,7 @@ fun QuizScreen(
             QuestionCard(
                 question = currentQuestion,
                 currentIndex = currentIndex + 1,
-                totalQuestions = questions.size,
+                totalQuestions = activeQuestions.size,
                 selectedOption = selectedOption,
                 isSubmitted = isSubmitted,
                 onSelectOption = { viewModel.selectQuizOption(it) }
@@ -205,7 +239,7 @@ fun QuizScreen(
                     )
                 }
 
-                if (currentIndex < questions.size - 1) {
+                if (currentIndex < activeQuestions.size - 1) {
                     Button(
                         onClick = {
                             saveConfirmationMessage = null
@@ -241,6 +275,12 @@ fun QuizScreen(
                     Button(
                         onClick = {
                             saveConfirmationMessage = null
+                            if (isChallengeActive) {
+                                // Advance to next challenge day
+                                if (selectedDayNumber < 365) {
+                                    selectedDayNumber++
+                                }
+                            }
                             viewModel.restartQuiz()
                         },
                         shape = RoundedCornerShape(16.dp),
@@ -251,7 +291,7 @@ fun QuizScreen(
                             .testTag("finish_quiz_button")
                     ) {
                         Text(
-                            text = "ختم کریں اور نیا چکر 🏆",
+                            text = if (isChallengeActive) "اگلا دن (Day ${selectedDayNumber + 1}) 🏆" else "ختم کریں اور نیا چکر 🏆",
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
@@ -289,6 +329,7 @@ private fun TenseFilterBar(
     modifier: Modifier = Modifier
 ) {
     val categories = listOf(
+        "DAILY_CHALLENGE" to "📅 365 Daily Challenge",
         "ALL" to "تمام اسباق (All)",
         "PRESENT" to "فعل حال (Present)",
         "PAST" to "فعل ماضی (Past)",
@@ -536,6 +577,7 @@ private fun OptionButton(
     val isCorrectOption = optionIndex == correctOptionIndex
     val isUserSelected = optionIndex == selectedOptionIndex
 
+    val isDark = isSystemInDarkTheme()
     val backgroundColor: Color
     val borderColor: Color
     val textColor: Color
@@ -547,14 +589,14 @@ private fun OptionButton(
     } else {
         if (isCorrectOption) {
             // Highlight correct answer in green
-            backgroundColor = Color(0xFFE8F5E9)
-            borderColor = Color(0xFF2E7D32)
-            textColor = Color(0xFF1B5E20)
+            backgroundColor = if (isDark) Color(0xFF143820) else Color(0xFFE8F5E9)
+            borderColor = if (isDark) Color(0xFF4ADE80) else Color(0xFF2E7D32)
+            textColor = if (isDark) Color(0xFF86EFAC) else Color(0xFF1B5E20)
         } else if (isUserSelected) {
             // User selected wrong answer - soft red
-            backgroundColor = Color(0xFFFFEBEE)
-            borderColor = Color(0xFFC62828)
-            textColor = Color(0xFFB71C1C)
+            backgroundColor = if (isDark) Color(0xFF381418) else Color(0xFFFFEBEE)
+            borderColor = if (isDark) Color(0xFFF87171) else Color(0xFFC62828)
+            textColor = if (isDark) Color(0xFFFCA5A5) else Color(0xFFB71C1C)
         } else {
             // Other unselected incorrect options
             backgroundColor = EditorialContainer.copy(alpha = 0.5f)
@@ -638,6 +680,7 @@ private fun FeedbackCard(
     onSaveNote: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = isSystemInDarkTheme()
     val isCorrect = selectedOptionIndex == question.correctOptionIndex
 
     Surface(
@@ -648,7 +691,7 @@ private fun FeedbackCard(
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(
             2.dp,
-            if (isCorrect) Color(0xFF2E7D32) else Color(0xFFC62828)
+            if (isCorrect) (if (isDark) Color(0xFF4ADE80) else Color(0xFF2E7D32)) else (if (isDark) Color(0xFFF87171) else Color(0xFFC62828))
         )
     ) {
         Column(
@@ -664,7 +707,7 @@ private fun FeedbackCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    color = if (isCorrect) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                    color = if (isCorrect) (if (isDark) Color(0xFF143820) else Color(0xFFE8F5E9)) else (if (isDark) Color(0xFF381418) else Color(0xFFFFEBEE)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
@@ -675,14 +718,14 @@ private fun FeedbackCard(
                         Icon(
                             imageVector = if (isCorrect) Icons.Default.CheckCircle else Icons.Default.Cancel,
                             contentDescription = null,
-                            tint = if (isCorrect) Color(0xFF2E7D32) else Color(0xFFC62828),
+                            tint = if (isCorrect) (if (isDark) Color(0xFF4ADE80) else Color(0xFF2E7D32)) else (if (isDark) Color(0xFFF87171) else Color(0xFFC62828)),
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = if (isCorrect) "درست جواب! بہت خوب 👏" else "جواب درست نہیں ہے ❌",
+                            text = if (isCorrect) "${TutorVisuals.correct} درست جواب! بہت خوب 👏" else "${TutorVisuals.incorrect} جواب درست نہیں ہے",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isCorrect) Color(0xFF1B5E20) else Color(0xFFB71C1C)
+                            color = if (isCorrect) (if (isDark) Color(0xFF86EFAC) else Color(0xFF1B5E20)) else (if (isDark) Color(0xFFFCA5A5) else Color(0xFFB71C1C))
                         )
                     }
                 }
@@ -712,11 +755,11 @@ private fun FeedbackCard(
             EditorialDivider()
 
             // Detailed Arabic Comparative Rule Explanation
-            EditorialSectionTitle(text = "TEACHER EXPLANATION")
+            EditorialSectionTitle(text = "${TutorVisuals.explanation} TEACHER EXPLANATION")
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "English explanation:",
+                    text = "${TutorVisuals.explanation} English explanation:",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = EditorialTextMuted
@@ -731,7 +774,7 @@ private fun FeedbackCard(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "اردو وضاحت:",
+                    text = "${TutorVisuals.explanation} اردو وضاحت:",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = EditorialTextMuted
@@ -740,13 +783,13 @@ private fun FeedbackCard(
                     text = question.explanationUr,
                     fontSize = 15.sp,
                     color = EditorialTextPrimary,
-                    lineHeight = 22.sp
+                    lineHeight = 25.sp
                 )
 
                 question.arabicReference?.let {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Arabic grammar reference / comparison:",
+                        text = "${TutorVisuals.analysis} Arabic grammar reference / comparison:",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = EditorialTextMuted
@@ -769,7 +812,7 @@ private fun FeedbackCard(
                 question.extraExample?.let {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Example:",
+                        text = "${TutorVisuals.practice} Example:",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = EditorialTextMuted

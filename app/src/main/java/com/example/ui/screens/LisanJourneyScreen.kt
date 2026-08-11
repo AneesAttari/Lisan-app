@@ -46,16 +46,16 @@ fun LisanJourneyScreen(
     val progressMap = remember(progressList) { progressList.associateBy { it.achievementId } }
 
     val categories = listOf(
-        "ALL" to "All",
-        "getting_started" to "Getting Started",
-        "daily_habit" to "Daily Habits",
-        "tutor" to "Tutor Chat",
-        "grammar_revision" to "Grammar & Revision",
-        "picture_vocabulary" to "Vocabulary",
-        "streak" to "Streaks",
-        "pronunciation" to "Pronunciation",
-        "sentence_analyzer" to "Analyzer",
-        "daily_challenge" to "Challenge"
+        "ALL" to "🌐 All",
+        "getting_started" to "🌱 Getting Started",
+        "daily_habit" to "⚡ Daily Habits",
+        "tutor" to "💬 Tutor Chat",
+        "grammar_revision" to "📚 Grammar & Revision",
+        "picture_vocabulary" to "📖 Vocabulary",
+        "streak" to "🔥 Streaks",
+        "pronunciation" to "🗣️ Pronunciation",
+        "sentence_analyzer" to "🔍 Analyzer",
+        "daily_challenge" to "🎯 Challenge"
     )
 
     val stats = userStats ?: UserAchievementStatsEntity()

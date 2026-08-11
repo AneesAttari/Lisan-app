@@ -18,6 +18,8 @@ import com.example.data.model.DailyQuizChallengeProgressEntity
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.LibraryItem
 import com.example.data.model.LikedItem
+import com.example.data.model.DislikedItem
+import com.example.data.model.FeedbackEntity
 import com.example.data.model.ConversationSessionEntity
 import com.example.data.model.CachedLessonEntity
 import com.example.data.model.DailyVerbAssignment
@@ -50,6 +52,8 @@ import com.example.data.model.UserAchievementStatsEntity
         DailyChallengeResultEntity::class, 
         LibraryItem::class, 
         LikedItem::class, 
+        DislikedItem::class,
+        FeedbackEntity::class,
         ChatMessageEntity::class,
         DailyIdiomAssignment::class,
         DailyChallengeAssignment::class,
@@ -80,9 +84,10 @@ import com.example.data.model.UserAchievementStatsEntity
         RewardTransactionEntity::class,
         UserAchievementStatsEntity::class,
         DailyQuizChallengeProgressEntity::class,
-        DailyQuizAssignmentEntity::class
+        DailyQuizAssignmentEntity::class,
+        com.example.data.model.ExamSessionEntity::class
     ], 
-    version = 16, 
+    version = 18, 
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -91,6 +96,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dailyChallengeDao(): DailyChallengeDao
     abstract fun libraryDao(): LibraryDao
     abstract fun likedDao(): LikedDao
+    abstract fun dislikedDao(): DislikedDao
+    abstract fun feedbackDao(): FeedbackDao
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun dailyIdiomAssignmentDao(): DailyIdiomAssignmentDao
     abstract fun dailyChallengeAssignmentDao(): DailyChallengeAssignmentDao
@@ -109,6 +116,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun pictureVocabularyDao(): PictureVocabularyDao
     abstract fun lisanJourneyDao(): LisanJourneyDao
     abstract fun dailyQuizChallengeDao(): DailyQuizChallengeDao
+    abstract fun examSessionDao(): com.example.data.local.ExamSessionDao
 
     companion object {
         @Volatile

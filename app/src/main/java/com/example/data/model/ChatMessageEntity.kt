@@ -8,5 +8,6 @@ data class ChatMessageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val role: String,
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val imageUri: String? = null
 )

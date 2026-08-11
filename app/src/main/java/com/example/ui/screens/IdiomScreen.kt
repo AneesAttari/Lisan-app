@@ -292,12 +292,28 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
 
                     val isLiked by viewModel.isLiked("Idiom", idiom.id).collectAsState(initial = false)
                     IconButton(onClick = {
+                        val fullIdiomText = """
+                            |【 IDIOM / EXPRESSION 】
+                            |${idiom.expression}
+                            |
+                            |【 MEANING 】
+                            |English: ${idiom.simpleMeaning}
+                            |Urdu: ${idiom.urduMeaning}
+                            |Arabic: ${idiom.arabicMeaning}
+                            |
+                            |【 EXAMPLE 】
+                            |${idiom.example}
+                            |
+                            |【 ORIGIN 】
+                            |${idiom.origin ?: "General English idiom"}
+                        """.trimMargin()
                         viewModel.toggleLike(
                             com.example.data.model.LikedItem(
                                 id = "like_idiom_${idiom.id}",
                                 contentType = "Idiom",
                                 contentId = idiom.id,
-                                title = idiom.expression
+                                title = idiom.expression,
+                                preview = fullIdiomText
                             )
                         )
                     }) {
@@ -310,13 +326,28 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
 
                     val isSaved by viewModel.isSaved("Idiom", idiom.id).collectAsState(initial = false)
                     IconButton(onClick = {
+                        val fullIdiomText = """
+                            |【 IDIOM / EXPRESSION 】
+                            |${idiom.expression}
+                            |
+                            |【 MEANING 】
+                            |English: ${idiom.simpleMeaning}
+                            |Urdu: ${idiom.urduMeaning}
+                            |Arabic: ${idiom.arabicMeaning}
+                            |
+                            |【 EXAMPLE 】
+                            |${idiom.example}
+                            |
+                            |【 ORIGIN 】
+                            |${idiom.origin ?: "General English idiom"}
+                        """.trimMargin()
                         viewModel.toggleLibrarySave(
                             com.example.data.model.LibraryItem(
                                 id = "lib_idiom_${idiom.id}",
                                 contentType = "Idiom",
                                 contentId = idiom.id,
                                 title = idiom.expression,
-                                preview = idiom.urduMeaning,
+                                preview = fullIdiomText,
                                 payloadJson = null
                             )
                         )

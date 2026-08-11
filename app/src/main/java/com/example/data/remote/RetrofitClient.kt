@@ -84,8 +84,8 @@ object RetrofitClient {
     }
 
     private suspend fun <T> runWithRetry(
-        maxAttempts: Int = 5,
-        initialDelayMillis: Long = 2000,
+        maxAttempts: Int = 2,
+        initialDelayMillis: Long = 1000,
         block: suspend () -> T
     ): T {
         var currentDelay = initialDelayMillis
@@ -113,8 +113,7 @@ object RetrofitClient {
         val candidateModels = listOf(
             preferredModel,
             "gemini-3.5-flash",
-            "gemini-3.1-pro-preview",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite"
         ).distinct()
 
         var lastException: Exception? = null
@@ -128,9 +127,10 @@ object RetrofitClient {
             } catch (e: Exception) {
                 lastException = e
                 val code = (e as? retrofit2.HttpException)?.code() ?: 0
-                if (code == 429 || code == 401 || code == 403) {
+                if (code == 401 || code == 403) {
                     throw e
                 }
+                // For 429 (quota exceeded), 500, 503, continue to next fallback model
             }
         }
 
@@ -143,7 +143,7 @@ object RetrofitClient {
             } catch (e: Exception) {
                 lastException = e
                 val code = (e as? retrofit2.HttpException)?.code() ?: 0
-                if (code == 429 || code == 401 || code == 403) {
+                if (code == 401 || code == 403) {
                     throw e
                 }
             }
@@ -368,10 +368,11 @@ object RetrofitClient {
                     Analyze this input for a learner: "$inputSentence"
                     
                     CORE OPERATIONAL RULES:
-                    1. NO ENGLISH TEXT IN URDU/ARABIC FIELDS: Never mix English words or echo the original English sentence inside Urdu or Arabic fields.
+                    1. MIX ENGLISH WITH URDU/ARABIC: Always mix and pair the original English words and grammatical terms with their Urdu/Arabic translations/explanations, especially in the Word-by-Word Analysis, so the learner can easily understand which English word maps to which grammatical logic.
                     2. ACCURATE GRAMMAR PARSING: Perform true grammatical parsing. Identify exact subjects, verbs, complements, and tenses correctly.
                     3. CONCISE FOR FAST LATENCY: Keep explanations brief, structured, and direct. Avoid conversational fluff.
                     4. STRICT ARABIC GRAMMAR EQUIVALENT (إعراب ونحو): Explicitly map the English sentence structure to classical Arabic grammar rules using exact Arabic terms.
+                    5. DETAILED WORD-BY-WORD DECOMPOSITION: Never group multi-word verbs, helping verbs, or adverbs together as a single block in the word-by-word breakdown (e.g., do not say "is playing very well" is the whole verb). Divide them into individual words and tell exactly what each word is, its form, and its grammar logic.
                     
                     REQUIRED OUTPUT FORMAT:
                     
@@ -385,6 +386,16 @@ object RetrofitClient {
                     • Subject (فاعل): [Identify the exact noun/pronoun subject]
                     • Verb / Predicate (فعل): [Identify the main verb and auxiliary verbs]
                     • Complement / Object (مفعول / متعلقات): [Identify the object or complement, or state "None"]
+                    
+                    **Word-by-Word Analysis (لفظ بہ لفظ تجزیہ):**
+                    [Deconstruct every single word in the English sentence individually. For each word, show its precise English form and grammar role, plus its Urdu/Arabic translation and explanation. 
+                    Examples:
+                    • Ali: Subject (فاعل) / Proper Noun (اسمِ خاص)
+                    • is: Auxiliary/Helping Verb (امدادی فعل) - Present tense singular
+                    • playing: Main Verb (اصل فعل) - Present participle form (verb + -ing) representing continuous action (حالتِ استمراری)
+                    • very: Adverb of degree (متعلق فعل کی شدت ظاہر کرنے والا لفظ) modifying "well"
+                    • well: Adverb of manner (متعلق فعل - اچھے طریقے سے) modifying the action "playing"
+                    Ensure all words of the sentence are listed and parsed with exact detail.]
                     
                     **Tense & Aspect (زمانہ):**
                     [Exact English Tense] ([Urdu name for tense])
@@ -400,7 +411,7 @@ object RetrofitClient {
                     [Explain 1 common grammatical mistake learners make in Urdu]
                 """.trimIndent()
                 val request = GenerateContentRequest(contents = listOf(Content(parts = listOf(Part(text = prompt)))))
-                val response = callWithModelFallback(apiKey, request, MODEL_PRO)
+                val response = callWithModelFallback(apiKey, request, MODEL_FLASH)
                 val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (!text.isNullOrBlank()) return@withContext text
             } catch (e: Exception) {
@@ -1036,13 +1047,57 @@ object RetrofitClient {
         "بہت خوب! آپ کا جواب: \"$userAnswer\".\nجیسے آپ نے عربی میں سیکھا ہے: احسنت، إجابتك صحيحة ومطابقة للقاعدة."
     }
 
+    private fun getBase64FromUri(context: android.content.Context, uriString: String): Pair<String, String>? {
+        return try {
+            val uri = android.net.Uri.parse(uriString)
+            val contentResolver = context.contentResolver
+            val mimeType = contentResolver.getType(uri) ?: "image/jpeg"
+            
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            contentResolver.openInputStream(uri).use { inputStream ->
+                android.graphics.BitmapFactory.decodeStream(inputStream, null, options)
+            }
+            
+            val reqWidth = 1024
+            val reqHeight = 1024
+            var inSampleSize = 1
+            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
+                val halfHeight = options.outHeight / 2
+                val halfWidth = options.outWidth / 2
+                while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                    inSampleSize *= 2
+                }
+            }
+            
+            options.inJustDecodeBounds = false
+            options.inSampleSize = inSampleSize
+            
+            val bitmap = contentResolver.openInputStream(uri).use { inputStream ->
+                android.graphics.BitmapFactory.decodeStream(inputStream, null, options)
+            } ?: return null
+            
+            val outputStream = java.io.ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+            val base64Data = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
+            Pair(mimeType, base64Data)
+        } catch (e: Exception) {
+            Log.e("RetrofitClient", "Error reading image Uri: ${e.message}", e)
+            null
+        }
+    }
+
     suspend fun getTutorResponse(
+        context: android.content.Context,
         history: List<com.example.data.model.Content>,
         mode: String,
         language: String,
         userName: String,
         learnerProfileSummary: String? = null,
-        isStudyModeOn: Boolean = false
+        isStudyModeOn: Boolean = false,
+        learnerLevel: String = "Beginner",
+        imageCompressionPreset: String = "BALANCED"
     ): com.example.data.model.TutorResponseResult = withContext(Dispatchers.IO) {
         val lastUserMessage = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
         val (detectedInputLang, effectiveResponseLang) = LanguageDetector.resolveEffectiveResponseLanguage(language, lastUserMessage)
@@ -1054,15 +1109,17 @@ object RetrofitClient {
             throw Exception("Gemini is not connected. Add a valid GEMINI_API_KEY in the app’s secure environment settings, then redeploy.")
         }
 
-        val profileContext = learnerProfileSummary ?: "Student profile: Level Beginner."
+        val profileContext = learnerProfileSummary ?: "Student profile: Level $learnerLevel."
         val systemPrompt = if (isStudyModeOn) {
             """
             You are the senior English teacher inside Lisan Grammar, teaching English grammar to Arabic/Urdu-speaking learners.
             Learner: $userName
+            Selected Proficiency Level: $learnerLevel
             Response Language: $effectiveResponseLang
 
             [STUDY MODE ACTIVE]
             Your role is to be a structured, strict-but-supportive, demanding, and highly focused teacher.
+            ADAPT YOUR EXPLANATIONS TO THE LEARNER'S PROFICIENCY LEVEL ($learnerLevel). For Beginner: simple vocabulary and short examples. For Intermediate/Advanced: deeper rules, idiomatic expressions, and nuance.
 
             CONVERSATION START PROTOCOL:
             At the beginning of every new conversation, greet the learner with exactly:
@@ -1070,24 +1127,58 @@ object RetrofitClient {
             Then say exactly:
             Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar.
 
+            EMOJI AND ICON SYSTEM RULES:
+            You must intelligently use appropriate emojis when they genuinely improve understanding or make the response feel friendly.
+            - Do NOT randomly or excessively add emojis to every sentence (e.g. do NOT say: "Hello 😊 Today 📚 we will...").
+            - Emojis should function as visual labels, indicators, encouragement, or section markers.
+            - Whenever an emoji is used as a section marker, you MUST pair it with clear text (Emoji + Text pairing).
+            - Use these specific pairs for headings and markers:
+              💡 Explanation
+              📚 Lesson
+              📝 Practice
+              💭 Hint
+              📌 Remember
+              ⚠️ Important
+              ✅ Correct
+              ❌ Try Again / ❌ Not quite
+              🎯 Your Goal / 🎯 Next Step
+              🌟 Great Work / 🔥 Great progress
+              🔍 Analysis
+              💬 Suggestion
+            - EMOTIONAL RESPONSE SYSTEM:
+              - If the student answers correctly:
+                ✅ Correct!
+                Excellent work. You understood the rule.
+              - If the student makes a mistake:
+                😊 Good attempt!
+                Let's look at the rule again.
+              - Never make mistakes feel embarrassing or negative. Avoid excessive/mocking expressions like 😂😂😂, 🤣🤣🤣, or 😭😭😭.
+            - EXPLANATION STRUCTURE:
+              Use these structured visual sections when appropriate (do not force all sections into every response):
+              💡 Explanation
+              📌 Important Rule
+              📝 Example
+              🤔 Try It Yourself
+              ✅ Answer
+
             TEACHING PROTOCOLS:
             1. PRIORITIZE ACTIVE LEARNING: Avoid casual small talk or just giving answers. Direct the student's focus to grammatical principles and guide them to reason through explanations.
             2. TEACH ONE CONCEPT AT A TIME: Break grammar concepts down into clear, manageable steps. Focus on quality over quantity.
             3. ERROR DIAGNOSIS & RECOVERY: When the learner makes an error:
-               - Identify the error clearly.
+               - Identify the error clearly using '😊 Good attempt!'.
                - Explain WHY it is incorrect in simple terms, comparing it with Arabic grammar if helpful.
                - Give the corrected version.
                - Ask the learner to write a fresh sentence using the correction or retry the question.
             4. ACTIVE COGNITION: Ask the learner to complete a fill-in-the-blank, translate a short sentence, or form a custom sentence using the grammar rule before you give them the full explanation.
             5. COMPARATIVE SCAFFOLDING & STRUCTURE:
                For every grammar lesson or explanation:
-               - Explain the English rule in simple English.
+               - Explain the English rule in simple English (under '💡 Explanation' or '📚 Lesson').
                - Say exactly: "Likewise in Arabic, you have learned…" (or "كذلك في اللغة العربية، قد تعلمتم...")
                - Compare the English rule with the closest Arabic grammar rule or sentence structure.
                - Explain the similarities and differences clearly.
-               - Give at least three English examples with Arabic translations on their own separate lines.
-               - Point out common mistakes Arabic speakers may make.
-               - Give one short practice question.
+               - Give at least three English examples with Arabic translations on their own separate lines (under '📝 Example').
+               - Point out common mistakes Arabic speakers may make (under '⚠️ Important' or '📌 Remember').
+               - Give one short practice question (under '🤔 Try It Yourself').
                - Wait for the learner's answer and correct it kindly.
             6. LANGUAGE COMPLEXITY: Adapt your vocabulary and grammar complexity to the student's level.
             7. MULTILINGUAL SUPPORT: Use Modern Standard Arabic (العربية الفصحى) or simple Urdu for explanations and translations. Keep English examples clear and readable.
@@ -1131,14 +1222,48 @@ object RetrofitClient {
             Then say:
             Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar.
 
+            EMOJI AND ICON SYSTEM RULES:
+            You must intelligently use appropriate emojis when they genuinely improve understanding or make the response feel friendly.
+            - Do NOT randomly or excessively add emojis to every sentence.
+            - Emojis should function as visual labels, indicators, encouragement, or section markers.
+            - Whenever an emoji is used as a section marker, you MUST pair it with clear text (Emoji + Text pairing).
+            - Use these specific pairs for headings and markers:
+              💡 Explanation
+              📚 Lesson
+              📝 Practice
+              💭 Hint
+              📌 Remember
+              ⚠️ Important
+              ✅ Correct
+              ❌ Try Again / ❌ Not quite
+              🎯 Your Goal / 🎯 Next Step
+              🌟 Great Work / 🔥 Great progress
+              🔍 Analysis
+              💬 Suggestion
+            - EMOTIONAL RESPONSE SYSTEM:
+              - If the student answers correctly:
+                ✅ Correct!
+                Excellent work. You understood the rule.
+              - If the student makes a mistake:
+                😊 Good attempt!
+                Let's look at the rule again.
+              - Never make mistakes feel embarrassing or negative. Avoid excessive/mocking expressions like 😂😂😂, 🤣🤣🤣, or 😭😭😭.
+            - EXPLANATION STRUCTURE:
+              Use these structured visual sections when appropriate (do not force all sections into every response):
+              💡 Explanation
+              📌 Important Rule
+              📝 Example
+              🤔 Try It Yourself
+              ✅ Answer
+
             For every grammar lesson or explanation:
-            1. Explain the English rule in simple English.
+            1. Explain the English rule in simple English (under '💡 Explanation' or '📚 Lesson').
             2. Say exactly: "Likewise in Arabic, you have learned…" (or "كذلك في اللغة العربية، قد تعلمتم...")
             3. Compare the English rule with the closest Arabic grammar rule or sentence structure.
             4. Explain the similarities and differences clearly.
-            5. Give at least three English examples with Arabic translations.
-            6. Point out common mistakes Arabic speakers may make.
-            7. Give one short practice question.
+            5. Give at least three English examples with Arabic translations (under '📝 Example').
+            6. Point out common mistakes Arabic speakers may make (under '⚠️ Important' or '📌 Remember').
+            7. Give one short practice question (under '🤔 Try It Yourself').
             8. Wait for the learner’s answer and correct it kindly.
 
             LANGUAGE & TONE RULES:
@@ -1165,8 +1290,42 @@ object RetrofitClient {
         val modelName = MODEL_FLASH
         val endpointCalled = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
         
+        val requestContents = fullContents.map { content ->
+            val mappedParts = mutableListOf<com.example.data.model.Part>()
+            content.parts.forEach { part ->
+                if (!part.text.isNullOrEmpty()) {
+                    mappedParts.add(com.example.data.model.Part(text = part.text))
+                }
+            }
+            content.imageUri?.let { uriStr ->
+                try {
+                    val uri = android.net.Uri.parse(uriStr)
+                    val presetEnum = try {
+                        com.example.utils.ImageOptimizer.CompressionPreset.valueOf(imageCompressionPreset.uppercase())
+                    } catch (e: Exception) {
+                        com.example.utils.ImageOptimizer.CompressionPreset.BALANCED
+                    }
+                    val optResult = com.example.utils.ImageOptimizer.optimizeImage(context, uri, presetEnum)
+                    if (optResult != null) {
+                        mappedParts.add(com.example.data.model.Part(
+                            inlineData = com.example.data.model.InlineData(
+                                mimeType = optResult.mimeType,
+                                data = optResult.base64Data
+                            )
+                        ))
+                    }
+                } catch (e: Exception) {
+                    Log.e("RetrofitClient", "Failed to optimize and attach image: ${e.message}", e)
+                }
+            }
+            com.example.data.model.Content(
+                role = content.role,
+                parts = mappedParts
+            )
+        }
+
         val request = GenerateContentRequest(
-            contents = fullContents,
+            contents = requestContents,
             generationConfig = GenerationConfig(temperature = 0.5f)
         )
         
@@ -1206,6 +1365,53 @@ object RetrofitClient {
             )
             com.example.data.model.TutorResponseResult(responseText = fallbackText, debugMetadata = debugMetadata)
         }
+    }
+
+    suspend fun extractMemoryAndPreferences(
+        userMessage: String,
+        tutorReply: String
+    ): List<String> = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
+            return@withContext emptyList<String>()
+        }
+        
+        val prompt = """
+            Analyze this conversational interaction between an English language learner (User) and their AI Tutor.
+            Your task is to extract any key personal facts, explicit preferences, language requests, or specific learning targets about the User.
+            
+            Interaction:
+            User: "$userMessage"
+            Tutor: "$tutorReply"
+            
+            RULES:
+            1. Extract only REAL, EXPLICIT personal facts, language choices, or preferences about the User (e.g. "User prefers to talk in Urdu", "User wants to practice prepositions", "User's name is Ali", "User requested simpler explanations").
+            2. Do NOT extract standard greeting or conversational phrases. Only extract facts/preferences that should be remembered long-term.
+            3. Keep each extracted memory brief (under 10 words).
+            4. If no long-term user facts or preferences are explicitly stated or requested, return an empty list.
+            5. Return the extracted memories as a simple JSON array of strings: ["Fact 1", "Fact 2"]
+            6. Return ONLY the JSON array. Do not include markdown tags like ```json or any other text.
+        """.trimIndent()
+
+        val request = GenerateContentRequest(
+            contents = listOf(
+                com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = prompt)))
+            ),
+            generationConfig = GenerationConfig(temperature = 0.2f)
+        )
+        
+        try {
+            val response = callWithModelFallback(apiKey, request, MODEL_FLASH)
+            val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+            val cleaned = cleanJsonString(text).trim()
+            if (cleaned.startsWith("[")) {
+                val json = Json { ignoreUnknownKeys = true }
+                return@withContext json.decodeFromString<List<String>>(cleaned)
+            }
+        } catch (e: Exception) {
+            Log.e("RetrofitClient", "extractMemoryAndPreferences failed: ${e.message}")
+        }
+        emptyList()
     }
 
     private fun generateSmartLocalTutorResponse(

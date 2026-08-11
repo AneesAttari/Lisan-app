@@ -237,7 +237,9 @@ class TutorTtsManager(private val context: Context) {
              try {
                  mediaPlayer?.let { 
                      if (it.isPlaying) {
-                         it.playbackParams = it.playbackParams.setSpeed(speed)
+                         val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
+                         val relativeSpeed = (speed / currentRate) * baseRateMultiplier
+                         it.playbackParams = it.playbackParams.setSpeed(relativeSpeed)
                      }
                  }
                  nativeTts?.setSpeechRate(speed)
@@ -410,7 +412,7 @@ class TutorTtsManager(private val context: Context) {
                     voice = VoiceSelectionParams(languageCode = langCode, name = voiceId),
                     audioConfig = AudioConfig(
                         audioEncoding = "MP3",
-                        speakingRate = 1.0,
+                        speakingRate = currentRate.toDouble(),
                         pitch = cloudPitch
                     )
                 )
@@ -456,7 +458,7 @@ class TutorTtsManager(private val context: Context) {
                     try {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                             val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
-                            val speed = currentRate * baseRateMultiplier
+                            val speed = baseRateMultiplier
                             it.playbackParams = it.playbackParams.setSpeed(speed)
                         }
                     } catch (e: Exception) {
@@ -613,20 +615,48 @@ class TutorTtsManager(private val context: Context) {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
             
-            val hasUrduMarkers = trimmed.any { 
-                it in listOf('ٹ', 'ڈ', 'ڑ', 'ں', 'ے', 'پ', 'چ', 'ژ', 'گ', 'ھ', 'آ', 'ئ', 'ۓ') 
-            } || trimmed.contains(Regex("(ہے۔|ہیں|کا|کی|کے|کو|میں|سے|پر|نہیں|تھا|تھے|تھی|یہ|وہ|آپ|کر|ہو|اور|اگر|گیا|گئی|ہم|تم|ان|اس|جو|کہ|یا|تفصیلی|وضاحت|گرامر|مثال)"))
-
-            val hasArabicSpecific = trimmed.any { 
-                it in listOf('ة', 'ى', 'ً', 'ٍ', 'ٌ', 'َ', 'ُ', 'ِ', 'ْ', 'ّ') 
-            } || trimmed.contains(Regex("(الجملة|الفعل|الاسم|الفاعل|المفعول|المبتدأ|الخبر|المضارع|الماضي|علامة|ضمير)"))
-
-            val hasArabicScript = trimmed.any { it in '\u0600'..'\u06FF' || it in '\u0750'..'\u077F' }
+            var urduScore = 0
+            var arabicScore = 0
+            
+            // Check character level features
+            for (char in trimmed) {
+                if (char in listOf('ٹ', 'ڈ', 'ڑ', 'ں', 'ے', 'پ', 'چ', 'ژ', 'گ', 'ھ', 'ۓ', '۔')) {
+                    urduScore += 5
+                }
+                if (char in listOf('ة', 'ى', 'ً', 'ٍ', 'ٌ', 'َ', 'ُ', 'ِ', 'ْ', 'ّ')) {
+                    arabicScore += 5
+                }
+            }
+            
+            // Check word level features
+            val words = trimmed.split(Regex("\\s+"))
+            val urduWords = setOf(
+                "ہے", "ہیں", "کا", "کی", "کے", "کو", "میں", "سے", "پر", "نہیں", "تھا", "تھے", "تھی", 
+                "یہ", "وہ", "آپ", "کر", "ہو", "اور", "اگر", "گیا", "گئی", "ہم", "تم", "ان", "اس", 
+                "جو", "کہ", "یا", "تفصیلی", "وضاحت", "گرامر", "مثال", "کیسے", "کیوں", "کیا", "ہوں", "نے", "کتاب"
+            )
+            val arabicWords = setOf(
+                "من", "في", "على", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك", "هو", "هي", "أنا", 
+                "نحن", "أنت", "أنتم", "هم", "كان", "كانت", "التي", "الذي", "إن", "أن", "لا", "ما", 
+                "لم", "لن", "قد", "كل", "بعض", "أو", "أم", "ثم", "بل", "لكن", "حتى", "سوف", "السلام", 
+                "عليكم", "رحمة", "الله", "وبركاته", "مرحبا", "بكم", "دروس", "قواعد", "اللغة", "العربية", 
+                "الإنجليزية", "الفعل", "الاسم", "الحرف", "جملة", "مبتدأ", "خبر", "فاعل", "مفعول"
+            )
+            
+            for (word in words) {
+                val cleanWord = word.replace(Regex("[^\\u0600-\\u06FF]"), "")
+                if (urduWords.contains(cleanWord)) {
+                    urduScore += 3
+                }
+                if (arabicWords.contains(cleanWord)) {
+                    arabicScore += 3
+                }
+            }
             
             val langTag = when {
-                hasUrduMarkers -> "ur"
-                hasArabicSpecific -> "ar"
-                hasArabicScript -> "ur" // Default Arabic-script text to Urdu for Urdu native speakers
+                urduScore > arabicScore -> "ur"
+                arabicScore > urduScore -> "ar"
+                trimmed.any { it in '\u0600'..'\u06FF' } -> "ur" // Fallback to Urdu as default script for Urdu native speakers
                 else -> "en"
             }
             
