@@ -85,9 +85,11 @@ import com.example.data.model.UserAchievementStatsEntity
         UserAchievementStatsEntity::class,
         DailyQuizChallengeProgressEntity::class,
         DailyQuizAssignmentEntity::class,
-        com.example.data.model.ExamSessionEntity::class
+        com.example.data.model.ExamSessionEntity::class,
+        com.example.data.model.DocumentEntity::class,
+        com.example.data.model.DocumentChunkEntity::class
     ], 
-    version = 18, 
+    version = 19, 
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -117,6 +119,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun lisanJourneyDao(): LisanJourneyDao
     abstract fun dailyQuizChallengeDao(): DailyQuizChallengeDao
     abstract fun examSessionDao(): com.example.data.local.ExamSessionDao
+    abstract fun documentDao(): com.example.data.local.DocumentDao
 
     companion object {
         @Volatile

@@ -517,6 +517,30 @@ fun VoiceTutorDialog(
     val isStudyModeOn by viewModel.isStudyModeOn.collectAsState()
     val voiceSessionState by viewModel.voiceSessionState.collectAsState()
     val selectedVoiceLanguage by viewModel.activeVoiceLanguage.collectAsState()
+    val userSettings by viewModel.userSettings.collectAsState()
+
+    // Sync active voice language with persistent app settings on start and whenever settings change
+    LaunchedEffect(userSettings.selectedVoiceLanguage) {
+        val mappedLang = when (userSettings.selectedVoiceLanguage) {
+            "Urdu" -> VoiceInputLanguage.URDU
+            "Arabic" -> VoiceInputLanguage.ARABIC
+            "Auto" -> VoiceInputLanguage.AUTO
+            else -> VoiceInputLanguage.ENGLISH
+        }
+        if (selectedVoiceLanguage != mappedLang) {
+            viewModel.setActiveVoiceLanguage(mappedLang)
+        }
+    }
+
+    // Reset voice language back to AUTO when listening starts if user's saved preference is Auto
+    LaunchedEffect(voiceSessionState) {
+        if (voiceSessionState == VoiceSessionState.LISTENING) {
+            if (userSettings.selectedVoiceLanguage == "Auto") {
+                viewModel.setActiveVoiceLanguage(VoiceInputLanguage.AUTO)
+            }
+        }
+    }
+
     val selectedLanguage = when (selectedVoiceLanguage) {
         VoiceInputLanguage.URDU -> "ur-PK"
         VoiceInputLanguage.ENGLISH -> "en-US"
@@ -578,7 +602,11 @@ fun VoiceTutorDialog(
             } else {
                 connectionStatus = ConnectionStateStatus.CONNECTED
                 viewModel.setVoiceSessionState(VoiceSessionState.READY)
-                val welcome = "السلام عليكم ورحمة الله وبركاته\nWelcome back to Lisan Grammar. I am ready to help you learn English grammar by comparing it with Arabic grammar."
+                val welcome = when (selectedVoiceLanguage) {
+                    VoiceInputLanguage.URDU -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں دوبارہ خوش آمدید۔ میں آپ کا گرامر کا استاد ہوں۔ میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گا۔"
+                    VoiceInputLanguage.ARABIC -> "السلام عليكم ورحمة الله وبركاته. أهلاً بك مجدداً في لسان قواعد اللغة. سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية."
+                    else -> "السلام عليكم ورحمة الله وبركاته\nWelcome back to Lisan Grammar. I am ready to help you learn English grammar by comparing it with Arabic grammar."
+                }
                 tutorSpeechText = welcome
                 viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
                 viewModel.ttsManager.speak(welcome)
@@ -645,8 +673,18 @@ fun VoiceTutorDialog(
         userSpeechText = ""
         consecutiveNoSpeechCount++
         
+        val fallbackText = when (selectedVoiceLanguage) {
+            VoiceInputLanguage.URDU -> "مجھے آپ کی آواز سنائی نہیں دی۔ براہ کرم دوبارہ بولیے۔"
+            VoiceInputLanguage.ARABIC -> "لم أتمكن من سماع صوتك. يرجى المحاولة والتحدث مرة أخرى."
+            else -> "I couldn't hear your voice. Please try speaking again."
+        }
+        val stopMessage = when (selectedVoiceLanguage) {
+            VoiceInputLanguage.URDU -> "گفتگو کا سیشن روک دیا گیا ہے۔ جب آپ بات کرنے کے لیے تیار ہوں، مائیکروفون پر ٹیپ کریں۔"
+            VoiceInputLanguage.ARABIC -> "تم إيقاف الجلسة الصوتية مؤقتاً. اضغط على الميكروفون عندما تكون مستعداً للتحدث."
+            else -> "Voice session paused. Tap the microphone when you are ready to speak."
+        }
+
         if (consecutiveNoSpeechCount <= 2) {
-            val fallbackText = "I couldn't hear your voice. Please try speaking again."
             errorMessage = fallbackText
             tutorSpeechText = ""
             if (!isMuted) {
@@ -658,7 +696,6 @@ fun VoiceTutorDialog(
                 viewModel.setVoiceSessionState(VoiceSessionState.READY)
             }
         } else {
-            val stopMessage = "Voice session paused. Tap the microphone when you are ready to speak."
             errorMessage = stopMessage
             tutorSpeechText = ""
             viewModel.setVoiceSessionState(VoiceSessionState.READY)
@@ -690,11 +727,17 @@ fun VoiceTutorDialog(
                     } else {
                         viewModel.learnerProfileManager.buildPersonalizedPromptContext()
                     }
+                    val langStr = when (selectedVoiceLanguage) {
+                        VoiceInputLanguage.URDU -> "Urdu"
+                        VoiceInputLanguage.ARABIC -> "Arabic"
+                        else -> "English"
+                    }
                     val reply = RetrofitClient.getVoiceTutorResponse(
                         history = updatedHistory,
                         userName = viewModel.userName.value,
                         learnerProfileSummary = profileSummary,
-                        isStudyModeOn = isStudyModeOn
+                        isStudyModeOn = isStudyModeOn,
+                        selectedVoiceLanguage = langStr
                     )
                     
                     val cleanReply = reply.replace(Regex("\\[(pause_short|pause_long|pitch_high|pitch_low|pitch_normal)\\]"), "").replace(Regex("\\s+"), " ").trim()
@@ -862,6 +905,14 @@ fun VoiceTutorDialog(
                                 stopSpeaking()
                                 viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
                             }
+
+                            // Dynamic auto language detection
+                            if (userSettings.selectedVoiceLanguage == "Auto") {
+                                val detected = detectLanguageFromText(newTextSegment)
+                                if (detected != null) {
+                                    viewModel.setActiveVoiceLanguage(detected)
+                                }
+                            }
                             
                             // Accumulate the speech input segment
                             accumulatedSpeechText = if (accumulatedSpeechText.isBlank()) {
@@ -908,6 +959,14 @@ fun VoiceTutorDialog(
                                 Log.d("VoiceTutor", "Barge-in onPartialResults detected! Interrupting.")
                                 stopSpeaking()
                                 viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                            }
+
+                            // Dynamic auto language detection from partial results
+                            if (userSettings.selectedVoiceLanguage == "Auto") {
+                                val detected = detectLanguageFromText(partialText)
+                                if (detected != null) {
+                                    viewModel.setActiveVoiceLanguage(detected)
+                                }
                             }
                             
                             // Show live partial results alongside the accumulated text
@@ -998,8 +1057,23 @@ fun VoiceTutorDialog(
                 } else {
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
+                        
+                        if (selectedVoiceLanguage == VoiceInputLanguage.AUTO) {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US") // Default fallback primary
+                            putExtra(RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES, arrayListOf("en-US", "ur-PK", "ar-SA"))
+                            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
+                            
+                            // For API 34+ (Android 14+) automatic language detection and switching
+                            if (android.os.Build.VERSION.SDK_INT >= 34) {
+                                putExtra("android.speech.extra.EXTRA_ENABLE_LANGUAGE_DETECTION", true)
+                                putExtra("android.speech.extra.EXTRA_ENABLE_LANGUAGE_SWITCH", "balanced")
+                                putExtra("android.speech.extra.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
+                            }
+                        } else {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, selectedLanguage)
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, selectedLanguage)
+                        }
+                        
                         putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
                         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
@@ -1083,7 +1157,11 @@ fun VoiceTutorDialog(
             if (!hasAudioPermission) {
                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
-            val welcome = "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
+            val welcome = when (selectedVoiceLanguage) {
+                VoiceInputLanguage.URDU -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں خوش آمدید۔ میں آپ کا گرامر کا استاد ہوں۔ میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گا۔"
+                VoiceInputLanguage.ARABIC -> "السلام عليكم ورحمة الله وبركاته. أهلاً بك في لسان قواعد اللغة. سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية."
+                else -> "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
+            }
             tutorSpeechText = welcome
             viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
             viewModel.ttsManager.speak(welcome)
@@ -1533,7 +1611,7 @@ fun PremiumVoiceSelectionDialog(
     viewModel: LisanViewModel,
     onDismiss: () -> Unit
 ) {
-    val settings by viewModel.appSettings.collectAsState()
+    val userSettings by viewModel.userSettings.collectAsState()
     val ttsCurrentlySpeaking by viewModel.ttsManager.currentlySpeaking.collectAsState()
     var previewSpeaker by remember { mutableStateOf<String?>(null) }
     val isSpeakingPreview = ttsCurrentlySpeaking != null && previewSpeaker != null
@@ -1588,7 +1666,7 @@ fun PremiumVoiceSelectionDialog(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // Young Voice Card
-                    val isYoungSelected = settings.selectedSpeaker.contains("Young", ignoreCase = true)
+                    val isYoungSelected = userSettings.selectedSpeaker.contains("Young", ignoreCase = true)
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1630,7 +1708,7 @@ fun PremiumVoiceSelectionDialog(
                             IconButton(
                                 onClick = {
                                     previewSpeaker = "Young Voice"
-                                    val text = when (settings.selectedVoiceLanguage) {
+                                    val text = when (userSettings.selectedVoiceLanguage) {
                                         "Urdu" -> "ہیلو! میں آپ کا دوست اور استاد ہوں۔ آئیں اردو کے ذریعے انگریزی گرامر کو بہت آسان طریقے سے سیکھیں۔"
                                         "Arabic" -> "أهلاً بك! أنا معلمك الذكي والصديق. دعنا نتعلم قواعد اللغة الإنجليزية معاً بطريقة ممتعة وسهلة."
                                         else -> "Hey there! I am your friendly AI teacher. Let's learn English grammar together in an energetic and fun way!"
@@ -1658,7 +1736,7 @@ fun PremiumVoiceSelectionDialog(
                     }
 
                     // Mature Voice Card
-                    val isMatureSelected = settings.selectedSpeaker.contains("Mature", ignoreCase = true)
+                    val isMatureSelected = userSettings.selectedSpeaker.contains("Mature", ignoreCase = true)
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1700,7 +1778,7 @@ fun PremiumVoiceSelectionDialog(
                             IconButton(
                                 onClick = {
                                     previewSpeaker = "Mature Voice"
-                                    val text = when (settings.selectedVoiceLanguage) {
+                                    val text = when (userSettings.selectedVoiceLanguage) {
                                         "Urdu" -> "السلام علیکم۔ میں آپ کا گرامر کا استاد ہوں۔ ہم پرسکون اور سنجیدہ انداز میں انگریزی گرامر کی تمام باریکیوں کو سمجھیں گے۔"
                                         "Arabic" -> "السلام عليكم. أنا معلمك المحترف لتعلم القواعد. سنمضي في رحلتنا خطوة بخطوة وبكل هدوء لنتقن اللغة الإنجليزية."
                                         else -> "Hello. I am your professional AI instructor. We will take a calm, structured, and deep approach to mastering English grammar."
@@ -1726,39 +1804,127 @@ fun PremiumVoiceSelectionDialog(
                             }
                         }
                     }
+
+                    // Gentle Voice Card
+                    val isGentleSelected = userSettings.selectedSpeaker.contains("Gentle", ignoreCase = true)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.updateAppSettings { it.copy(selectedSpeaker = "Gentle Voice") }
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isGentleSelected) EditorialAccentPurple.copy(alpha = 0.08f) else Color(0xFFF8FAFC)
+                        ),
+                        border = BorderStroke(
+                            width = if (isGentleSelected) 2.dp else 1.dp,
+                            color = if (isGentleSelected) EditorialAccentPurple else Color(0xFFE2E8F0)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("🎙 Gentle Voice", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = EditorialPrimary)
+                                    if (isGentleSelected) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EditorialAccentPurple, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                                Text("Warm AI Teacher", fontSize = 12.sp, color = EditorialAccentPurple, fontWeight = FontWeight.SemiBold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Patient, soothing, pleasant, and gentle pace.", fontSize = 11.sp, color = EditorialTextMuted)
+                            }
+                            
+                            val isThisPreviewing = isSpeakingPreview && previewSpeaker?.contains("Gentle", ignoreCase = true) == true
+                            IconButton(
+                                onClick = {
+                                    previewSpeaker = "Gentle Voice"
+                                    val text = when (userSettings.selectedVoiceLanguage) {
+                                        "Urdu" -> "پیارے دوست، خوش آمدید۔ میں آپ کا دوست اور استاد ہوں۔ ہم بہت آرام سے اور صبر کے ساتھ انگریزی گرامر سیکھیں گے۔"
+                                        "Arabic" -> "مرحباً بك يا صديقي. أنا معلمك الصبور. سنتعلم معاً بكل هدوء وخطوة بخطوة."
+                                        else -> "Welcome, my friend. I am your gentle AI instructor. We will learn English grammar at a pleasant, warm, and highly patient pace."
+                                    }
+                                    if (isThisPreviewing) {
+                                        viewModel.stopSpeech()
+                                        previewSpeaker = null
+                                    } else {
+                                        viewModel.ttsManager.applySpeakerPreset("Gentle Voice")
+                                        viewModel.speak(text)
+                                    }
+                                },
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = if (isThisPreviewing) Color(0xFFEF4444) else EditorialAccentPurple
+                                ),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                if (isThisPreviewing) {
+                                    AiVoiceWaves(isAnimating = true, color = Color.White)
+                                } else {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.White, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Language selection chips
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Select Voice Language", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            "English" to "🇬🇧 English",
-                            "Urdu" to "🇵🇰 Urdu",
-                            "Arabic" to "🌙 Arabic"
-                        ).forEach { (langKey, display) ->
-                            val isLangSelected = settings.selectedVoiceLanguage == langKey
-                            FilterChip(
-                                selected = isLangSelected,
-                                onClick = {
-                                    viewModel.updateAppSettings { it.copy(selectedVoiceLanguage = langKey) }
-                                    val newLang = when (langKey) {
-                                        "Urdu" -> VoiceInputLanguage.URDU
-                                        "Arabic" -> VoiceInputLanguage.ARABIC
-                                        else -> VoiceInputLanguage.ENGLISH
-                                    }
-                                    viewModel.setActiveVoiceLanguage(newLang)
-                                },
-                                label = { Text(display, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                modifier = Modifier.weight(1f),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = EditorialAccentPurple.copy(alpha = 0.15f),
-                                    selectedLabelColor = EditorialAccentPurple
+                    
+                    val items = listOf(
+                        "Auto" to "✨ Auto Detect",
+                        "English" to "🇬🇧 English",
+                        "Urdu" to "🇵🇰 Urdu",
+                        "Arabic" to "🌙 Arabic"
+                    )
+                    
+                    // Display in 2 Rows of 2 columns for superior responsiveness
+                    items.chunked(2).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowItems.forEach { (langKey, display) ->
+                                val isLangSelected = userSettings.selectedVoiceLanguage == langKey
+                                FilterChip(
+                                    selected = isLangSelected,
+                                    onClick = {
+                                        viewModel.updateAppSettings { it.copy(selectedVoiceLanguage = langKey) }
+                                        val newLang = when (langKey) {
+                                            "Urdu" -> VoiceInputLanguage.URDU
+                                            "Arabic" -> VoiceInputLanguage.ARABIC
+                                            "Auto" -> VoiceInputLanguage.AUTO
+                                            else -> VoiceInputLanguage.ENGLISH
+                                        }
+                                        viewModel.setActiveVoiceLanguage(newLang)
+                                    },
+                                    label = { Text(display, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EditorialAccentPurple,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = Color(0xFFF1F5F9),
+                                        labelColor = Color(0xFF475569)
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isLangSelected,
+                                        borderColor = Color(0xFFE2E8F0),
+                                        selectedBorderColor = EditorialAccentPurple,
+                                        borderWidth = 1.dp,
+                                        selectedBorderWidth = 1.dp
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -1980,4 +2146,43 @@ fun VoiceTutorSettingsDialog(
             }
         }
     }
+}
+
+private fun detectLanguageFromText(text: String): VoiceInputLanguage? {
+    if (text.isBlank()) return null
+    
+    var arabicCount = 0
+    var englishCount = 0
+    
+    for (char in text) {
+        val code = char.code
+        // Arabic block ranges (including Urdu and Persian extensions)
+        if (code in 0x0600..0x06FF || code in 0x0750..0x077F || code in 0xFB50..0xFDFF || code in 0xFE70..0xFEFF) {
+            arabicCount++
+        } else if (char.isLetter()) {
+            englishCount++
+        }
+    }
+    
+    if (arabicCount > 0) {
+        // Distinguish between Urdu and Arabic
+        val urduSpecific = listOf('ٹ', 'ڈ', 'ڑ', 'ں', 'ہ', 'ھ', 'ے', 'چ', 'پ', 'گ', 'ی')
+        val arabicSpecific = listOf('ة', 'ي', 'ؤ', 'ئ', 'أ', 'إ', 'ى', 'ء')
+        
+        var urduScore = 0
+        var arabicScore = 0
+        for (char in text) {
+            if (char in urduSpecific) urduScore++
+            if (char in arabicSpecific) arabicScore++
+        }
+        
+        return if (urduScore >= arabicScore) {
+            VoiceInputLanguage.URDU
+        } else {
+            VoiceInputLanguage.ARABIC
+        }
+    } else if (englishCount > 0) {
+        return VoiceInputLanguage.ENGLISH
+    }
+    return null
 }

@@ -45,11 +45,11 @@ import kotlinx.coroutines.launch
 fun ImplementApiKeyScreen(viewModel: LisanViewModel) {
     val context = LocalContext.current
     val colors = EditorialTheme.colors
-    val appSettings by viewModel.appSettings.collectAsState()
+    val userSettings by viewModel.userSettings.collectAsState()
     val geminiKeyFlow by viewModel.geminiApiKey.collectAsState()
 
-    val currentKey = remember(appSettings, geminiKeyFlow) {
-        appSettings.userApiKey?.takeIf { it.isNotBlank() }
+    val currentKey = remember(userSettings, geminiKeyFlow) {
+        userSettings.userApiKey?.takeIf { it.isNotBlank() }
             ?: geminiKeyFlow.takeIf { it.isNotBlank() }
             ?: ""
     }

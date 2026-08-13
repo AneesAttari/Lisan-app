@@ -540,7 +540,7 @@ Column(
                         onClick = {
                             coroutineScope.launch {
                                 if (filteredSessions.isNotEmpty()) {
-                                    listState.animateScrollToItem(filteredSessions.size - 1)
+                                    listState.animateScrollToItem(filteredSessions.size - 1, scrollOffset = 10000)
                                 }
                             }
                         },

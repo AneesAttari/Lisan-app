@@ -8,13 +8,25 @@ import kotlinx.coroutines.flow.map
 
 class ChatMessageRepository(private val chatMessageDao: ChatMessageDao) {
 
-    val chatMessagesFlow: Flow<List<Content>> = chatMessageDao.getAllMessages().map { list ->
+    val chatMessagesFlow: Flow<List<Content>> = chatMessageDao.getRecentMessages(40).map { list ->
+        list.map { entity ->
+            Content(role = entity.role, parts = listOf(Part(text = entity.text)), imageUri = entity.imageUri)
+        }
+    }
+
+    fun getRecentMessagesFlow(limit: Int = 40): Flow<List<Content>> = chatMessageDao.getRecentMessages(limit).map { list ->
         list.map { entity ->
             Content(role = entity.role, parts = listOf(Part(text = entity.text)), imageUri = entity.imageUri)
         }
     }
 
     suspend fun loadMessagesList(): List<Content> {
+        return chatMessageDao.getRecentMessagesList(40).map { entity ->
+            Content(role = entity.role, parts = listOf(Part(text = entity.text)), imageUri = entity.imageUri)
+        }
+    }
+
+    suspend fun loadAllMessagesList(): List<Content> {
         return chatMessageDao.getAllMessagesList().map { entity ->
             Content(role = entity.role, parts = listOf(Part(text = entity.text)), imageUri = entity.imageUri)
         }

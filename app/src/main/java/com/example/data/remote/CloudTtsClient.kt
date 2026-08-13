@@ -69,7 +69,7 @@ object CloudTtsClient {
 
     fun getApiKey(): String {
         return try {
-            BuildConfig.GEMINI_API_KEY
+            RetrofitClient.getCustomApiKey()
         } catch (e: Exception) {
             ""
         }

@@ -21,11 +21,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -393,9 +395,12 @@ fun LisanDailyScreen(
                 )
                 Text(
                     text = verb.urduMeaning,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     color = EditorialPrimary,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Normal,
+                    lineHeight = 26.sp,
+                    textAlign = TextAlign.Right,
+                    style = TextStyle(textDirection = TextDirection.Rtl),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -444,8 +449,13 @@ fun LisanDailyScreen(
                             )
                             Text(
                                 text = example.urdu,
-                                fontSize = 14.sp,
-                                color = EditorialTextSecondary
+                                fontSize = 15.sp,
+                                color = EditorialTextSecondary,
+                                lineHeight = 26.sp,
+                                fontWeight = FontWeight.Normal,
+                                textAlign = TextAlign.Right,
+                                style = TextStyle(textDirection = TextDirection.Rtl),
+                                modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
                             )
                         }
                     }
@@ -565,9 +575,12 @@ fun LisanDailyScreen(
                 )
                 Text(
                     text = idiom.urduMeaning,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     color = EditorialPrimary,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Normal,
+                    lineHeight = 26.sp,
+                    textAlign = TextAlign.Right,
+                    style = TextStyle(textDirection = TextDirection.Rtl),
                     modifier = Modifier.fillMaxWidth()
                 )
 

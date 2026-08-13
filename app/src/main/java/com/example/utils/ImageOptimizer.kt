@@ -3,6 +3,8 @@ package com.example.utils
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import android.util.Log
@@ -18,9 +20,9 @@ object ImageOptimizer {
         val maxDimension: Int,
         val quality: Int
     ) {
-        HIGH("High Quality", "جودة عالية", 1280, 85),
-        BALANCED("Balanced", "متوازن", 800, 75),
-        DATA_SAVER("Data Saver", "توفير البيانات", 512, 60)
+        HIGH("High Quality", "جودة عالية", 2560, 92),
+        BALANCED("Balanced", "متوازن", 1600, 85),
+        DATA_SAVER("Data Saver", "توفير البيانات", 1024, 75)
     }
 
     data class ImageMetadata(
@@ -123,24 +125,51 @@ object ImageOptimizer {
                 BitmapFactory.decodeStream(inputStream, null, options)
             } ?: return null
 
-            // Step 4: Perform exact resizing if the sampled bitmap is still larger than target dimension
-            val finalBitmap = if (sampledBitmap.width > maxDim || sampledBitmap.height > maxDim) {
-                val ratio = sampledBitmap.width.toFloat() / sampledBitmap.height.toFloat()
-                val (targetWidth, targetHeight) = if (sampledBitmap.width > sampledBitmap.height) {
-                    maxDim to (maxDim / ratio).toInt()
-                } else {
-                    (maxDim * ratio).toInt() to maxDim
-                }
-                val resized = Bitmap.createScaledBitmap(sampledBitmap, targetWidth, targetHeight, true)
-                if (resized != sampledBitmap) {
+            // Step 4: Handle EXIF orientation rotation
+            val rotationDegrees = try {
+                contentResolver.openInputStream(uri)?.use { inputStream ->
+                    val exif = ExifInterface(inputStream)
+                    when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                        ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                        ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                        ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                        else -> 0
+                    }
+                } ?: 0
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to parse EXIF orientation: ${e.message}")
+                0
+            }
+
+            val rotatedBitmap = if (rotationDegrees != 0) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                val rotated = Bitmap.createBitmap(sampledBitmap, 0, 0, sampledBitmap.width, sampledBitmap.height, matrix, true)
+                if (rotated != sampledBitmap) {
                     sampledBitmap.recycle()
                 }
-                resized
+                rotated
             } else {
                 sampledBitmap
             }
 
-            // Step 5: Compress to JPEG byte array
+            // Step 5: Perform exact resizing if the rotated bitmap is still larger than target dimension
+            val finalBitmap = if (rotatedBitmap.width > maxDim || rotatedBitmap.height > maxDim) {
+                val ratio = rotatedBitmap.width.toFloat() / rotatedBitmap.height.toFloat()
+                val (targetWidth, targetHeight) = if (rotatedBitmap.width > rotatedBitmap.height) {
+                    maxDim to (maxDim / ratio).toInt()
+                } else {
+                    (maxDim * ratio).toInt() to maxDim
+                }
+                val resized = Bitmap.createScaledBitmap(rotatedBitmap, targetWidth, targetHeight, true)
+                if (resized != rotatedBitmap) {
+                    rotatedBitmap.recycle()
+                }
+                resized
+            } else {
+                rotatedBitmap
+            }
+
+            // Step 6: Compress to JPEG byte array
             val outputStream = ByteArrayOutputStream()
             // Even if original is PNG, converting to JPEG is much more size-efficient for Gemini analysis
             finalBitmap.compress(Bitmap.CompressFormat.JPEG, preset.quality, outputStream)

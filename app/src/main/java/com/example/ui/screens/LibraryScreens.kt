@@ -9,7 +9,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryBooks
@@ -20,9 +22,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.example.data.model.LibraryItem
 import com.example.ui.components.EditorialCard
 import com.example.ui.theme.*
@@ -139,66 +145,86 @@ private fun LibraryItemDetailDialog(
 ) {
     val sdf = SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault())
     val dateStr = sdf.format(Date(item.savedTimestamp))
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Column {
-                Surface(
-                    color = EditorialPrimary.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
+            SelectionContainer {
+                Column {
+                    Surface(
+                        color = EditorialPrimary.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = item.contentType.uppercase(),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = EditorialPrimary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = item.contentType.uppercase(),
+                        text = item.title,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
-                        color = EditorialPrimary,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        color = EditorialTextPrimary
+                    )
+                    Text(
+                        text = "Saved on: $dateStr (Offline)",
+                        fontSize = 11.sp,
+                        color = EditorialTextMuted,
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = item.title,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialTextPrimary
-                )
-                Text(
-                    text = "Saved on: $dateStr (Offline)",
-                    fontSize = 11.sp,
-                    color = EditorialTextMuted,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
             }
         },
         text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 520.dp)
-            ) {
-                HorizontalDivider(color = EditorialBorderSoft)
-                Spacer(modifier = Modifier.height(12.dp))
-                val scrollState = rememberScrollState()
-                Box(modifier = Modifier.weight(1f, fill = false)) {
-                    Column(modifier = Modifier.verticalScroll(scrollState)) {
-                        Text(
-                            text = item.preview ?: "No additional details available.",
-                            fontSize = 15.sp,
-                            color = EditorialTextSecondary,
-                            lineHeight = 24.sp
-                        )
+            SelectionContainer {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                ) {
+                    HorizontalDivider(color = EditorialBorderSoft)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val scrollState = rememberScrollState()
+                    Box(modifier = Modifier.weight(1f, fill = false)) {
+                        Column(modifier = Modifier.verticalScroll(scrollState)) {
+                            Text(
+                                text = item.preview ?: "No additional details available.",
+                                fontSize = 15.sp,
+                                color = EditorialTextSecondary,
+                                lineHeight = 24.sp
+                            )
+                        }
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Close", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val textToCopy = "${item.title}\n\n${item.preview ?: ""}".trim()
+                        clipboardManager.setText(AnnotatedString(textToCopy))
+                        Toast.makeText(context, "Copied to clipboard • کاپی ہو گیا", Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Copy • کاپی کریں", fontSize = 12.sp)
+                }
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Close", fontWeight = FontWeight.Bold)
+                }
             }
         },
         containerColor = EditorialSurface,
@@ -272,51 +298,55 @@ private fun LikedItemsTab(viewModel: LisanViewModel) {
         AlertDialog(
             onDismissRequest = { openedLikedItem = null },
             title = {
-                Column {
-                    Surface(
-                        color = Color.Red.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
+                SelectionContainer {
+                    Column {
+                        Surface(
+                            color = Color.Red.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = item.contentType.uppercase(),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                color = Color.Red,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = item.contentType.uppercase(),
+                            text = item.title,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            color = Color.Red,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            color = EditorialTextPrimary
+                        )
+                        Text(
+                            text = "Liked on: $dateStr (Offline)",
+                            fontSize = 11.sp,
+                            color = EditorialTextMuted,
+                            modifier = Modifier.padding(top = 2.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = item.title,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialTextPrimary
-                    )
-                    Text(
-                        text = "Liked on: $dateStr (Offline)",
-                        fontSize = 11.sp,
-                        color = EditorialTextMuted,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
                 }
             },
             text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 520.dp)
-                ) {
-                    HorizontalDivider(color = EditorialBorderSoft)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    val scrollState = rememberScrollState()
-                    Box(modifier = Modifier.weight(1f, fill = false)) {
-                        Column(modifier = Modifier.verticalScroll(scrollState)) {
-                            Text(
-                                text = item.preview ?: "No additional details available for this liked item.",
-                                fontSize = 15.sp,
-                                color = EditorialTextSecondary,
-                                lineHeight = 24.sp
-                            )
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 520.dp)
+                    ) {
+                        HorizontalDivider(color = EditorialBorderSoft)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        val scrollState = rememberScrollState()
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            Column(modifier = Modifier.verticalScroll(scrollState)) {
+                                Text(
+                                    text = item.preview ?: "No additional details available for this liked item.",
+                                    fontSize = 15.sp,
+                                    color = EditorialTextSecondary,
+                                    lineHeight = 24.sp
+                                )
+                            }
                         }
                     }
                 }

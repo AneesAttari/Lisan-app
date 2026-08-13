@@ -36,6 +36,7 @@ import com.example.ui.screens.TutorChatScreen
 import com.example.ui.screens.HelpAndFeedbackScreen
 import com.example.ui.screens.PictureVocabularyRootScreen
 import com.example.ui.screens.ImplementApiKeyScreen
+import com.example.ui.screens.ChatThemeSelectionScreen
 import com.example.ui.theme.EditorialBackground
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.LisanViewModel
@@ -88,23 +89,40 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val userSettings by viewModel.userSettings.collectAsState()
-            val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
-            val darkTheme = when (userSettings.themeMode) {
-                "Dark" -> true
-                "Light" -> false
-                else -> isSystemDark
-            }
-            MyApplicationTheme(
-                darkTheme = darkTheme,
-                dynamicColor = userSettings.dynamicColor,
-                fontSizeSetting = userSettings.fontSize
-            ) {
-                LisanMainApp(
-                    viewModel = viewModel,
-                    pictureVocabularyViewModel = pictureVocabularyViewModel,
-                    lisanJourneyViewModel = lisanJourneyViewModel
-                )
+            val isSettingsLoaded by viewModel.isSettingsLoaded.collectAsState()
+            if (isSettingsLoaded) {
+                val userSettings by viewModel.userSettings.collectAsState()
+                val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+                val darkTheme = when (userSettings.themeMode) {
+                    "Dark" -> true
+                    "Light" -> false
+                    else -> isSystemDark
+                }
+                MyApplicationTheme(
+                    darkTheme = darkTheme,
+                    dynamicColor = userSettings.dynamicColor,
+                    fontSizeSetting = userSettings.fontSize
+                ) {
+                    LisanMainApp(
+                        viewModel = viewModel,
+                        pictureVocabularyViewModel = pictureVocabularyViewModel,
+                        lisanJourneyViewModel = lisanJourneyViewModel
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1E0040)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.lisan_ai_splash_screen_1786018639638),
+                        contentDescription = "Lisan AI Splash Screen",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
         }
     }
@@ -134,7 +152,13 @@ fun LisanMainApp(
     val currentRoute by HashRouter.currentRoute.collectAsState()
     val selectedTab = remember(currentRoute) { HashRouter.routeToTab(currentRoute) }
     val proficiencyLevel by viewModel.proficiencyLevel.collectAsState()
+    val isTutorChatActive by viewModel.isTutorChatActive.collectAsState()
     val userSettings by viewModel.userSettings.collectAsState()
+
+    LaunchedEffect(userSettings.defaultLearningTab) {
+        HashRouter.initializeStartupRoute(userSettings.defaultLearningTab)
+    }
+
     val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
     val isDarkTheme = when (userSettings.themeMode) {
         "Dark" -> true
@@ -195,7 +219,9 @@ fun LisanMainApp(
         11 to "Help & Feedback",
         13 to "Pronunciation Practice",
         14 to "Learn with Pictures",
-        15 to "Implement Your API Key"
+        15 to "Implement Your API Key",
+        16 to "Chat Theme",
+        17 to "Create Image"
     )
 
     if (showLevelDialog) {
@@ -454,27 +480,29 @@ fun LisanMainApp(
                     modifier = Modifier.fillMaxSize(),
                     containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
                     topBar = {
-                        EditorialHeader(
-                            subtitle = "(English & Arabic Grammar Guide)",
-                            title = tabTitles[selectedTab] ?: "Lisan Grammar",
-                            levelBadge = proficiencyLevel.labelEn,
-                            onLevelClick = { showLevelDialog = true },
-                            isDarkTheme = isDarkTheme,
-                            onToggleTheme = { viewModel.toggleTheme() },
-                            onProfileClick = {
-                                when (authState) {
-                                    is AuthState.LoggedIn -> showProfileDialog = true
-                                    is AuthState.Guest -> showProfileDialog = true
-                                    is AuthState.LoggedOut -> showAuthDialog = true
-                                }
-                            },
-                            onMoreClick = {
-                                keyboardController?.hide()
-                                scope.launch { drawerState.open() }
-                            },
-                            userPhotoPath = currentUser?.profilePhotoPath,
-                            userDisplayName = currentUser?.displayName
-                        )
+                        if (selectedTab != 2 || !isTutorChatActive) {
+                            EditorialHeader(
+                                subtitle = "(English & Arabic Grammar Guide)",
+                                title = tabTitles[selectedTab] ?: "Lisan Grammar",
+                                levelBadge = proficiencyLevel.labelEn,
+                                onLevelClick = { showLevelDialog = true },
+                                isDarkTheme = isDarkTheme,
+                                onToggleTheme = { viewModel.toggleTheme() },
+                                onProfileClick = {
+                                    when (authState) {
+                                        is AuthState.LoggedIn -> showProfileDialog = true
+                                        is AuthState.Guest -> showProfileDialog = true
+                                        is AuthState.LoggedOut -> showAuthDialog = true
+                                    }
+                                },
+                                onMoreClick = {
+                                    keyboardController?.hide()
+                                    scope.launch { drawerState.open() }
+                                },
+                                userPhotoPath = currentUser?.profilePhotoPath,
+                                userDisplayName = currentUser?.displayName
+                            )
+                        }
                     },
                     bottomBar = {
                         if (!WindowInsets.isImeVisible) {
@@ -512,6 +540,7 @@ fun LisanMainApp(
                                 13 -> PronunciationPracticeScreen(viewModel = viewModel)
                                 14 -> PictureVocabularyRootScreen(viewModel = pictureVocabularyViewModel)
                                 15 -> ImplementApiKeyScreen(viewModel = viewModel)
+                                16 -> ChatThemeSelectionScreen(viewModel = viewModel)
                                 else -> LessonScreen(viewModel = viewModel)
                             }
                         }

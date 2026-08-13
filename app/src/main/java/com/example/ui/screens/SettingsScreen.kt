@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -716,6 +717,48 @@ fun SettingsScreen(
                     checked = userSettings.reduceMotion,
                     onCheckedChange = { valOn -> viewModel.updateUserSettings { it.copy(reduceMotion = valOn) } }
                 )
+
+                Divider(color = EditorialTheme.colors.divider, modifier = Modifier.padding(vertical = 12.dp))
+
+                Surface(
+                    onClick = { com.example.ui.navigation.HashRouter.navigate("#/chat-theme") },
+                    color = EditorialAccentPurple.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth().testTag("chat_theme_row_settings")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Palette,
+                            contentDescription = null,
+                            tint = EditorialAccentPurple,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Chat Theme & Wallpaper",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialPrimary
+                            )
+                            Text(
+                                text = "Change chat background theme or choose custom photo",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = EditorialAccentPurple,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -792,7 +835,7 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("Young Voice", "Mature Voice").forEach { speaker ->
+                    listOf("Young Voice", "Mature Voice", "Gentle Voice").forEach { speaker ->
                         SettingsPillChip(
                             selected = userSettings.selectedSpeaker == speaker,
                             onClick = {

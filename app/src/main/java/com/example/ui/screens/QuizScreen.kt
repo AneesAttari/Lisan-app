@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -117,205 +118,207 @@ fun QuizScreen(
 
     val scrollState = rememberScrollState()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Daily Quiz Challenge Card
-        DailyQuizChallengeCard(
-            progress = dailyProgress,
-            assignment = todayAssignment,
-            selectedDayNumber = selectedDayNumber,
-            onDaySelected = { day ->
-                selectedDayNumber = day
-                isChallengeActive = true
-                viewModel.restartQuiz()
-            },
-            onStart = {
-                isChallengeActive = true
-                viewModel.restartQuiz()
-            }
-        )
-
-        TenseFilterBar(
-            selectedCategory = if (isChallengeActive) "DAILY_CHALLENGE" else categoryFilter,
-            onSelectCategory = { code ->
-                if (code == "DAILY_CHALLENGE") {
+    SelectionContainer {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Daily Quiz Challenge Card
+            DailyQuizChallengeCard(
+                progress = dailyProgress,
+                assignment = todayAssignment,
+                selectedDayNumber = selectedDayNumber,
+                onDaySelected = { day ->
+                    selectedDayNumber = day
                     isChallengeActive = true
-                } else {
-                    isChallengeActive = false
-                    viewModel.setQuizCategoryFilter(code)
+                    viewModel.restartQuiz()
+                },
+                onStart = {
+                    isChallengeActive = true
+                    viewModel.restartQuiz()
                 }
-                viewModel.restartQuiz()
-            }
-        )
-
-        // 2. Score Banner & Progress Bar
-        ScoreProgressBanner(
-            score = score,
-            totalAnswered = totalAnswered,
-            streak = streak,
-            currentIndex = currentIndex + 1,
-            totalQuestions = activeQuestions.size
-        )
-
-        if (currentQuestion != null) {
-            // 3. Question Card
-            QuestionCard(
-                question = currentQuestion,
-                currentIndex = currentIndex + 1,
-                totalQuestions = activeQuestions.size,
-                selectedOption = selectedOption,
-                isSubmitted = isSubmitted,
-                onSelectOption = { viewModel.selectQuizOption(it) }
             )
 
-            // 4. Immediate Feedback Panel (Revealed upon selecting an option)
-            AnimatedVisibility(
-                visible = isSubmitted,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { 40 }),
-                exit = fadeOut()
-            ) {
-                FeedbackCard(
-                    question = currentQuestion,
-                    selectedOptionIndex = selectedOption,
-                    onSaveNote = {
-                        viewModel.saveQuizQuestionToNotes(currentQuestion)
-                        saveConfirmationMessage = "سؤال کوئز اور گرامر موازنہ کامیابی کے ساتھ نوٹس میں محفوظ ہو گیا! 📌"
+            TenseFilterBar(
+                selectedCategory = if (isChallengeActive) "DAILY_CHALLENGE" else categoryFilter,
+                onSelectCategory = { code ->
+                    if (code == "DAILY_CHALLENGE") {
+                        isChallengeActive = true
+                    } else {
+                        isChallengeActive = false
+                        viewModel.setQuizCategoryFilter(code)
                     }
+                    viewModel.restartQuiz()
+                }
+            )
+
+            // 2. Score Banner & Progress Bar
+            ScoreProgressBanner(
+                score = score,
+                totalAnswered = totalAnswered,
+                streak = streak,
+                currentIndex = currentIndex + 1,
+                totalQuestions = activeQuestions.size
+            )
+
+            if (currentQuestion != null) {
+                // 3. Question Card
+                QuestionCard(
+                    question = currentQuestion,
+                    currentIndex = currentIndex + 1,
+                    totalQuestions = activeQuestions.size,
+                    selectedOption = selectedOption,
+                    isSubmitted = isSubmitted,
+                    onSelectOption = { viewModel.selectQuizOption(it) }
                 )
-            }
 
-            // Save Confirmation Toast/Badge
-            if (saveConfirmationMessage != null) {
-                Surface(
-                    color = EditorialAccentPurple.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
+                // 4. Immediate Feedback Panel (Revealed upon selecting an option)
+                AnimatedVisibility(
+                    visible = isSubmitted,
+                    enter = fadeIn() + slideInVertically(initialOffsetY = { 40 }),
+                    exit = fadeOut()
                 ) {
-                    Text(
-                        text = saveConfirmationMessage!!,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary,
-                        modifier = Modifier.padding(12.dp),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            // 5. Navigation Controls (Next Question / Restart)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { viewModel.restartQuiz() },
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, EditorialBorder),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .testTag("restart_quiz_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "کوئز دوبارہ شروع کریں",
-                        tint = EditorialPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "دوبارہ شروع کریں",
-                        color = EditorialPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
+                    FeedbackCard(
+                        question = currentQuestion,
+                        selectedOptionIndex = selectedOption,
+                        onSaveNote = {
+                            viewModel.saveQuizQuestionToNotes(currentQuestion)
+                            saveConfirmationMessage = "سؤال کوئز اور گرامر موازنہ کامیابی کے ساتھ نوٹس میں محفوظ ہو گیا! 📌"
+                        }
                     )
                 }
 
-                if (currentIndex < activeQuestions.size - 1) {
-                    Button(
-                        onClick = {
-                            saveConfirmationMessage = null
-                            viewModel.nextQuizQuestion()
-                        },
-                        enabled = isSubmitted,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = EditorialPrimary,
-                            disabledContainerColor = EditorialPrimary.copy(alpha = 0.4f)
-                        ),
-                        modifier = Modifier
-                            .weight(1.5f)
-                            .height(52.dp)
-                            .testTag("next_question_button")
+                // Save Confirmation Toast/Badge
+                if (saveConfirmationMessage != null) {
+                    Surface(
+                        color = EditorialAccentPurple.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "اگلا سوال",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            text = saveConfirmationMessage!!,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary,
+                            modifier = Modifier.padding(12.dp),
+                            textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                }
+
+                // 5. Navigation Controls (Next Question / Restart)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { viewModel.restartQuiz() },
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, EditorialBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .testTag("restart_quiz_button")
+                    ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "السؤال التالي",
-                            tint = Color.White,
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "کوئز دوبارہ شروع کریں",
+                            tint = EditorialPrimary,
                             modifier = Modifier.size(18.dp)
                         )
-                    }
-                } else {
-                    // Quiz Completed State Button
-                    Button(
-                        onClick = {
-                            saveConfirmationMessage = null
-                            if (isChallengeActive) {
-                                // Advance to next challenge day
-                                if (selectedDayNumber < 365) {
-                                    selectedDayNumber++
-                                }
-                            }
-                            viewModel.restartQuiz()
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
-                        modifier = Modifier
-                            .weight(1.5f)
-                            .height(52.dp)
-                            .testTag("finish_quiz_button")
-                    ) {
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isChallengeActive) "اگلا دن (Day ${selectedDayNumber + 1}) 🏆" else "ختم کریں اور نیا چکر 🏆",
-                            color = Color.White,
+                            text = "دوبارہ شروع کریں",
+                            color = EditorialPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+
+                    if (currentIndex < activeQuestions.size - 1) {
+                        Button(
+                            onClick = {
+                                saveConfirmationMessage = null
+                                viewModel.nextQuizQuestion()
+                            },
+                            enabled = isSubmitted,
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EditorialPrimary,
+                                disabledContainerColor = EditorialPrimary.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier
+                                .weight(1.5f)
+                                .height(52.dp)
+                                .testTag("next_question_button")
+                        ) {
+                            Text(
+                                text = "اگلا سوال",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "السؤال التالي",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else {
+                        // Quiz Completed State Button
+                        Button(
+                            onClick = {
+                                saveConfirmationMessage = null
+                                if (isChallengeActive) {
+                                    // Advance to next challenge day
+                                    if (selectedDayNumber < 365) {
+                                        selectedDayNumber++
+                                    }
+                                }
+                                viewModel.restartQuiz()
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                            modifier = Modifier
+                                .weight(1.5f)
+                                .height(52.dp)
+                                .testTag("finish_quiz_button")
+                        ) {
+                            Text(
+                                text = if (isChallengeActive) "اگلا دن (Day ${selectedDayNumber + 1}) 🏆" else "ختم کریں اور نیا چکر 🏆",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
-            }
-        } else {
-            // Empty / Completed State
-            EditorialCard {
-                Text(
-                    text = "🎉 بہت خوب! آپ نے اس سیکشن کے تمام سوالات مکمل کر لیے ہیں۔",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialPrimary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Button(
-                    onClick = { viewModel.restartQuiz() },
-                    colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("دوبارہ شروع کریں")
+            } else {
+                // Empty / Completed State
+                EditorialCard {
+                    Text(
+                        text = "🎉 بہت خوب! آپ نے اس سیکشن کے تمام سوالات مکمل کر لیے ہیں۔",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialPrimary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = { viewModel.restartQuiz() },
+                        colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("دوبارہ شروع کریں")
+                    }
                 }
             }
         }

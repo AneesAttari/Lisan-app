@@ -18,7 +18,7 @@ import org.robolectric.annotation.Config
  * and data-grounded contextual prompt construction.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class StudyModeTest {
 
     // ==========================================

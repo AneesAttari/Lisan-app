@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -220,206 +221,208 @@ fun AnalyzerScreen(
     Scaffold(
         containerColor = EditorialSurface
     ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            Column(
+        SelectionContainer {
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(padding)
             ) {
-                // Input Card
-                EditorialCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "ENTER A SENTENCE TO LISTEN & ANALYZE",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EditorialTextMuted
-                            )
-
-                            // Speed Toggle
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        val newRate = if (speechRate == 1.0f) 1.2f else if (speechRate == 1.2f) 0.8f else 1.0f
-                                        viewModel.setAnalyzerSpeechRate(newRate)
-                                    },
-                                color = EditorialContainer,
-                                border = BorderStroke(1.dp, EditorialBorderSoft)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Input Card
+                    EditorialCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "${speechRate}x Speed",
-                                    fontSize = 10.sp,
+                                    "ENTER A SENTENCE TO LISTEN & ANALYZE",
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = EditorialAccentPurple,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    color = EditorialTextMuted
                                 )
-                            }
-                        }
 
-                        TextField(
-                            value = inputSentence,
-                            onValueChange = { viewModel.setAnalyzerInput(it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = EditorialContainer,
-                                unfocusedContainerColor = EditorialContainer,
-                                focusedTextColor = EditorialTextPrimary,
-                                unfocusedTextColor = EditorialTextPrimary,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
-                            ),
-                            placeholder = {
-                                Text(
-                                    "e.g. She has finished her homework.",
-                                    color = EditorialTextMuted,
-                                    fontSize = 13.sp
-                                )
-                            }
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { viewModel.speak(inputSentence, "analyzer_input", speechRate) },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = EditorialSurface,
-                                    contentColor = EditorialTextSecondary
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Listen", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            Button(
-                                onClick = { viewModel.runDeepAnalyzer() },
-                                enabled = !isAnalyzing && inputSentence.isNotBlank(),
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isAnalyzing) EditorialTextMuted else EditorialPrimary,
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isAnalyzing) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Analyzing...", fontSize = 12.sp)
-                                } else {
-                                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Analyze", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Category Selector Dropdown Card (permanently placed directly at the end/outside of the analyzer input box)
-                SleekDropdownSelector(
-                    selectedItem = selectedCategory,
-                    items = categories,
-                    itemLabel = { it },
-                    onItemSelected = { selectedCategory = it },
-                    labelPrefix = "Grammar Category",
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Analysis Output
-                if (!analysisResult.isNullOrBlank()) {
-                    EditorialCard {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "GRAMMATICAL ANALYSIS",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EditorialTextMuted,
-                                letterSpacing = 1.0.sp
-                            )
-                            TextButton(
-                                onClick = { viewModel.clearAnalyzerOutput() },
-                                modifier = Modifier.height(30.dp)
-                            ) {
-                                Text("Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        EditorialDivider()
-                        EditorialMixedText(text = analysisResult!!, fontSize = 13.sp)
-                    }
-                }
-
-                // Subcategories & Examples
-                val subcategoryMap = categorizedExamples[selectedCategory] ?: emptyMap()
-                subcategoryMap.forEach { (subcatTitle, sentenceList) ->
-                    EditorialCard {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = subcatTitle.uppercase(),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EditorialAccentPurple,
-                                letterSpacing = 1.sp
-                            )
-
-                            sentenceList.forEach { sentence ->
+                                // Speed Toggle
                                 Surface(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .clip(RoundedCornerShape(8.dp))
                                         .clickable {
-                                            viewModel.setAnalyzerInput(sentence)
-                                            viewModel.runDeepAnalyzer()
+                                            val newRate = if (speechRate == 1.0f) 1.2f else if (speechRate == 1.2f) 0.8f else 1.0f
+                                            viewModel.setAnalyzerSpeechRate(newRate)
                                         },
                                     color = EditorialContainer,
                                     border = BorderStroke(1.dp, EditorialBorderSoft)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Text(
+                                        "${speechRate}x Speed",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EditorialAccentPurple,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            TextField(
+                                value = inputSentence,
+                                onValueChange = { viewModel.setAnalyzerInput(it) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = EditorialContainer,
+                                    unfocusedContainerColor = EditorialContainer,
+                                    focusedTextColor = EditorialTextPrimary,
+                                    unfocusedTextColor = EditorialTextPrimary,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                placeholder = {
+                                    Text(
+                                        "e.g. She has finished her homework.",
+                                        color = EditorialTextMuted,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.speak(inputSentence, "analyzer_input", speechRate) },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = EditorialSurface,
+                                        contentColor = EditorialTextSecondary
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.VolumeUp, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Listen", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = { viewModel.runDeepAnalyzer() },
+                                    enabled = !isAnalyzing && inputSentence.isNotBlank(),
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isAnalyzing) EditorialTextMuted else EditorialPrimary,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    if (isAnalyzing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Analyzing...", fontSize = 12.sp)
+                                    } else {
+                                        Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Analyze", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Category Selector Dropdown Card (permanently placed directly at the end/outside of the analyzer input box)
+                    SleekDropdownSelector(
+                        selectedItem = selectedCategory,
+                        items = categories,
+                        itemLabel = { it },
+                        onItemSelected = { selectedCategory = it },
+                        labelPrefix = "Grammar Category",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Analysis Output
+                    if (!analysisResult.isNullOrBlank()) {
+                        EditorialCard {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "GRAMMATICAL ANALYSIS",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialTextMuted,
+                                    letterSpacing = 1.0.sp
+                                )
+                                TextButton(
+                                    onClick = { viewModel.clearAnalyzerOutput() },
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Close", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            EditorialDivider()
+                            EditorialMixedText(text = analysisResult!!, fontSize = 13.sp)
+                        }
+                    }
+
+                    // Subcategories & Examples
+                    val subcategoryMap = categorizedExamples[selectedCategory] ?: emptyMap()
+                    subcategoryMap.forEach { (subcatTitle, sentenceList) ->
+                        EditorialCard {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(
+                                    text = subcatTitle.uppercase(),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialAccentPurple,
+                                    letterSpacing = 1.sp
+                                )
+
+                                sentenceList.forEach { sentence ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                viewModel.setAnalyzerInput(sentence)
+                                                viewModel.runDeepAnalyzer()
+                                            },
+                                        color = EditorialContainer,
+                                        border = BorderStroke(1.dp, EditorialBorderSoft)
                                     ) {
-                                        Text(
-                                            text = "“$sentence”",
-                                            fontSize = 13.sp,
-                                            fontFamily = FontFamily.Serif,
-                                            fontStyle = FontStyle.Italic,
-                                            color = EditorialTextPrimary,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Icon(
-                                                Icons.AutoMirrored.Filled.VolumeUp,
-                                                null,
-                                                modifier = Modifier.size(16.dp),
-                                                tint = EditorialTextMuted
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "“$sentence”",
+                                                fontSize = 13.sp,
+                                                fontFamily = FontFamily.Serif,
+                                                fontStyle = FontStyle.Italic,
+                                                color = EditorialTextPrimary,
+                                                modifier = Modifier.weight(1f)
                                             )
-                                            Icon(
-                                                Icons.Default.ChevronRight,
-                                                null,
-                                                modifier = Modifier.size(16.dp),
-                                                tint = EditorialPrimary
-                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.VolumeUp,
+                                                    null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = EditorialTextMuted
+                                                )
+                                                Icon(
+                                                    Icons.Default.ChevronRight,
+                                                    null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = EditorialPrimary
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -427,14 +430,14 @@ fun AnalyzerScreen(
                         }
                     }
                 }
-            }
 
-            ScrollToBottomFAB(
-                scrollState = scrollState,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            )
+                ScrollToBottomFAB(
+                    scrollState = scrollState,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                )
+            }
         }
     }
 }

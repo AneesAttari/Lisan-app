@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Share
@@ -63,200 +64,202 @@ fun SavedNotesScreen(
     val savedIdioms = allIdioms.filter { savedIdiomIds.contains(it.id) }
     val context = LocalContext.current
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+    SelectionContainer {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Grammar Notes Section
-            item {
-                EditorialSectionTitle("Saved Grammar Notes & Lesson Summaries")
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Review pinned grammar rules and exported lesson notes offline.",
-                    fontSize = 12.sp,
-                    color = EditorialTextMuted
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            if (notes.isEmpty()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // Grammar Notes Section
                 item {
-                    EditorialCard {
-                        Text(
-                            text = "No grammar notes or lesson summaries saved yet. Complete a lesson and click 'Save Summary Note' to pin or export it here.",
-                            modifier = Modifier.padding(16.dp),
-                            color = EditorialTextMuted,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                    }
+                    EditorialSectionTitle("Saved Grammar Notes & Lesson Summaries")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Review pinned grammar rules and exported lesson notes offline.",
+                        fontSize = 12.sp,
+                        color = EditorialTextMuted
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-            } else {
-                items(notes, key = { it.id }) { note ->
-                    EditorialCard {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
+
+                if (notes.isEmpty()) {
+                    item {
+                        EditorialCard {
+                            Text(
+                                text = "No grammar notes or lesson summaries saved yet. Complete a lesson and click 'Save Summary Note' to pin or export it here.",
+                                modifier = Modifier.padding(16.dp),
+                                color = EditorialTextMuted,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                } else {
+                    items(notes, key = { it.id }) { note ->
+                        EditorialCard {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (note.isPinned) {
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = "Pinned",
+                                                tint = EditorialAccentPurple,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = note.category.uppercase(),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = EditorialTextMuted,
+                                            letterSpacing = 1.2.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = note.titleEn,
+                                        fontSize = 18.sp,
+                                        fontFamily = FontFamily.Serif,
+                                        fontWeight = FontWeight.Bold,
+                                        fontStyle = FontStyle.Italic,
+                                        color = EditorialPrimary
+                                    )
+                                    Text(
+                                        text = note.titleAr,
+                                        fontSize = 13.sp,
+                                        color = EditorialAccentPurple
+                                    )
+                                }
+
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (note.isPinned) {
+                                    // Pin toggle button
+                                    Surface(
+                                        color = if (note.isPinned) EditorialAccentPurple.copy(alpha = 0.15f) else EditorialContainer,
+                                        shape = CircleShape,
+                                        border = BorderStroke(1.dp, if (note.isPinned) EditorialAccentPurple else EditorialBorderAccent),
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .clickable { viewModel.togglePinNote(note.id, note.isPinned) }
+                                    ) {
                                         Icon(
-                                            imageVector = Icons.Default.Star,
-                                            contentDescription = "Pinned",
+                                            imageVector = if (note.isPinned) Icons.Default.Star else Icons.Default.StarBorder,
+                                            contentDescription = "Pin Note",
                                             tint = EditorialAccentPurple,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier
+                                                .padding(8.dp)
+                                                .size(16.dp)
                                         )
                                     }
-                                    Text(
-                                        text = note.category.uppercase(),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EditorialTextMuted,
-                                        letterSpacing = 1.2.sp
-                                    )
-                                }
-                                Text(
-                                    text = note.titleEn,
-                                    fontSize = 18.sp,
-                                    fontFamily = FontFamily.Serif,
-                                    fontWeight = FontWeight.Bold,
-                                    fontStyle = FontStyle.Italic,
-                                    color = EditorialPrimary
-                                )
-                                Text(
-                                    text = note.titleAr,
-                                    fontSize = 13.sp,
-                                    color = EditorialAccentPurple
-                                )
-                            }
 
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Pin toggle button
-                                Surface(
-                                    color = if (note.isPinned) EditorialAccentPurple.copy(alpha = 0.15f) else EditorialContainer,
-                                    shape = CircleShape,
-                                    border = BorderStroke(1.dp, if (note.isPinned) EditorialAccentPurple else EditorialBorderAccent),
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .clickable { viewModel.togglePinNote(note.id, note.isPinned) }
-                                ) {
-                                    Icon(
-                                        imageVector = if (note.isPinned) Icons.Default.Star else Icons.Default.StarBorder,
-                                        contentDescription = "Pin Note",
-                                        tint = EditorialAccentPurple,
+                                    // Export / Share button
+                                    Surface(
+                                        color = EditorialContainer,
+                                        shape = CircleShape,
+                                        border = BorderStroke(1.dp, EditorialBorderAccent),
                                         modifier = Modifier
-                                            .padding(8.dp)
-                                            .size(16.dp)
-                                    )
-                                }
-
-                                // Export / Share button
-                                Surface(
-                                    color = EditorialContainer,
-                                    shape = CircleShape,
-                                    border = BorderStroke(1.dp, EditorialBorderAccent),
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .clickable {
-                                            val shareIntent = Intent().apply {
-                                                action = Intent.ACTION_SEND
-                                                putExtra(Intent.EXTRA_SUBJECT, note.titleEn)
-                                                putExtra(
-                                                    Intent.EXTRA_TEXT,
-                                                    "=== Lisan Grammar Note ===\n${note.titleEn} (${note.titleAr})\n\n${note.englishText}\n\n${note.arabicComparisonText}"
-                                                )
-                                                type = "text/plain"
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                val shareIntent = Intent().apply {
+                                                    action = Intent.ACTION_SEND
+                                                    putExtra(Intent.EXTRA_SUBJECT, note.titleEn)
+                                                    putExtra(
+                                                        Intent.EXTRA_TEXT,
+                                                        "=== Lisan Grammar Note ===\n${note.titleEn} (${note.titleAr})\n\n${note.englishText}\n\n${note.arabicComparisonText}"
+                                                    )
+                                                    type = "text/plain"
+                                                }
+                                                context.startActivity(Intent.createChooser(shareIntent, "Export Lesson Note"))
                                             }
-                                            context.startActivity(Intent.createChooser(shareIntent, "Export Lesson Note"))
-                                        }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Share,
-                                        contentDescription = "Export Note",
-                                        tint = EditorialPrimary,
-                                        modifier = Modifier
-                                            .padding(8.dp)
-                                            .size(16.dp)
-                                    )
-                                }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = "Export Note",
+                                            tint = EditorialPrimary,
+                                            modifier = Modifier
+                                                .padding(8.dp)
+                                                .size(16.dp)
+                                        )
+                                    }
 
-                                // Delete button
-                                Surface(
-                                    color = EditorialContainer,
-                                    shape = CircleShape,
-                                    border = BorderStroke(1.dp, EditorialBorderAccent),
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .clickable { viewModel.deleteSavedNote(note.id) }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DeleteOutline,
-                                        contentDescription = "Delete",
-                                        tint = Color.Red,
+                                    // Delete button
+                                    Surface(
+                                        color = EditorialContainer,
+                                        shape = CircleShape,
+                                        border = BorderStroke(1.dp, EditorialBorderAccent),
                                         modifier = Modifier
-                                            .padding(8.dp)
-                                            .size(16.dp)
-                                    )
+                                            .clip(CircleShape)
+                                            .clickable { viewModel.deleteSavedNote(note.id) }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Delete",
+                                            tint = Color.Red,
+                                            modifier = Modifier
+                                                .padding(8.dp)
+                                                .size(16.dp)
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        EditorialDivider()
+                            EditorialDivider()
 
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            EditorialMixedText(
-                                text = note.englishText,
-                                fontSize = 14.sp,
-                                lineHeight = 21.sp,
-                                color = EditorialTextPrimary
-                            )
-                            EditorialMixedText(
-                                text = note.arabicComparisonText,
-                                fontSize = 14.sp,
-                                lineHeight = 22.sp,
-                                color = EditorialPrimary,
-                                fontFamily = FontFamily.Serif,
-                                fontStyle = FontStyle.Italic
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                EditorialMixedText(
+                                    text = note.englishText,
+                                    fontSize = 14.sp,
+                                    lineHeight = 21.sp,
+                                    color = EditorialTextPrimary
+                                )
+                                EditorialMixedText(
+                                    text = note.arabicComparisonText,
+                                    fontSize = 14.sp,
+                                    lineHeight = 22.sp,
+                                    color = EditorialPrimary,
+                                    fontFamily = FontFamily.Serif,
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            // Saved Idioms Section
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-                EditorialSectionTitle("Saved Idioms")
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            if (savedIdioms.isEmpty()) {
+                // Saved Idioms Section
                 item {
-                    EditorialCard {
-                        Text(
-                            text = "No idioms saved yet.",
-                            modifier = Modifier.padding(16.dp),
-                            color = EditorialTextMuted
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    EditorialSectionTitle("Saved Idioms")
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-            } else {
-                items(savedIdioms, key = { it.id }) { idiom ->
-                    IdiomCard(idiom, viewModel)
+
+                if (savedIdioms.isEmpty()) {
+                    item {
+                        EditorialCard {
+                            Text(
+                                text = "No idioms saved yet.",
+                                modifier = Modifier.padding(16.dp),
+                                color = EditorialTextMuted
+                            )
+                        }
+                    }
+                } else {
+                    items(savedIdioms, key = { it.id }) { idiom ->
+                        IdiomCard(idiom, viewModel)
+                    }
                 }
             }
         }

@@ -23,9 +23,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
@@ -748,9 +750,13 @@ fun FeedbackPanel(res: AnswerResult) {
 
             Text(
                 text = res.explanationUrdu,
-                fontSize = 14.sp,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Normal,
                 color = EditorialTextPrimary,
-                lineHeight = 22.sp
+                lineHeight = 26.sp,
+                textAlign = TextAlign.Right,
+                style = TextStyle(textDirection = TextDirection.Rtl),
+                modifier = Modifier.fillMaxWidth()
             )
 
             if (res.explanationArabic.isNotBlank()) {

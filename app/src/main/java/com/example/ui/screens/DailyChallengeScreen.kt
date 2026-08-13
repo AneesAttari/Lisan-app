@@ -18,11 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.DailyChallengeQuestionType
@@ -164,12 +166,13 @@ fun QuestionView(
         if (!question.urduTranslation.isNullOrBlank()) {
             Text(
                 text = question.urduTranslation,
-                fontSize = 16.sp,
-                fontFamily = FontFamily.Serif,
-                fontStyle = FontStyle.Italic,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Normal,
                 color = EditorialTextSecondary,
-                modifier = Modifier.padding(top = 8.dp),
-                textAlign = TextAlign.End
+                lineHeight = 26.sp,
+                textAlign = TextAlign.Right,
+                style = TextStyle(textDirection = TextDirection.Rtl),
+                modifier = Modifier.padding(top = 8.dp).fillMaxWidth()
             )
         }
 

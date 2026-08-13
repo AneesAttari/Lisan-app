@@ -75,6 +75,9 @@ class TutorTtsManager(private val context: Context) {
             if (upper.contains("FEMALE") || upper.contains("WOMAN") || upper.contains("GIRL") ||
                 upper.contains("ZIRA") || upper.contains("HAZEL") || upper.contains("SUSAN")) return true
             
+            // Native Urdu/Arabic female voice identifiers
+            if (upper.contains("-URF-") || upper.contains("-ARF-")) return true
+
             val lastSegment = upper.substringAfterLast("-")
             if (upper.startsWith("EN-")) {
                 return listOf("A", "C", "E", "F", "G", "H", "O").contains(lastSegment)
@@ -90,12 +93,15 @@ class TutorTtsManager(private val context: Context) {
 
         fun isPreferredVoice(voiceName: String, features: Set<String>? = null): Boolean {
             val nameLower = voiceName.lowercase(Locale.getDefault())
+            val upper = voiceName.uppercase(Locale.US)
+            
             if (nameLower.contains("female") || nameLower.contains("woman") || nameLower.contains("girl") ||
                 nameLower.contains("zira") || nameLower.contains("hazel") || nameLower.contains("susan")) {
                 return false
             }
 
-            val upper = voiceName.uppercase(Locale.US)
+            if (upper.contains("-URF-") || upper.contains("-ARF-")) return false
+
             val lastSegment = upper.substringAfterLast("-")
             if (upper.startsWith("EN-") && listOf("A", "C", "E", "F", "G", "H", "O").contains(lastSegment)) return false
             if (upper.startsWith("AR-") && listOf("A", "D").contains(lastSegment)) return false
@@ -106,7 +112,8 @@ class TutorTtsManager(private val context: Context) {
                 if (features.contains("female")) return false
             }
 
-            if (nameLower.contains("male") || nameLower.contains("guy") || nameLower.contains("boy") || nameLower.contains("man")) {
+            if (nameLower.contains("male") || nameLower.contains("guy") || nameLower.contains("boy") || nameLower.contains("man") ||
+                upper.contains("-URM-") || upper.contains("-URD-") || upper.contains("-ARM-") || upper.contains("-ARD-")) {
                 return true
             }
 
@@ -124,8 +131,10 @@ class TutorTtsManager(private val context: Context) {
         ServerVoice("ur-PK-Standard-B", "Urdu Native Mature (پاکستانی گويا - Standard)", "ur-PK"),
         ServerVoice("en-US-Standard-B", "English Young (US - Standard B)", "en-US"),
         ServerVoice("en-US-Standard-I", "English Mature (US - Standard I)", "en-US"),
+        ServerVoice("en-US-Standard-D", "English Gentle (US - Standard D)", "en-US"),
         ServerVoice("ar-SA-Standard-B", "Arabic Native Young (ar-SA)", "ar-SA"),
-        ServerVoice("ar-XA-Wavenet-B", "Arabic Native Mature (ar-XA)", "ar-XA")
+        ServerVoice("ar-XA-Wavenet-B", "Arabic Native Mature (ar-XA)", "ar-XA"),
+        ServerVoice("ar-SA-Standard-C", "Arabic Native Gentle (ar-SA C)", "ar-SA")
     ))
     val availableVoices: StateFlow<List<ServerVoice>> = _availableVoices.asStateFlow()
 
@@ -191,16 +200,38 @@ class TutorTtsManager(private val context: Context) {
     }
 
     fun applySpeakerPreset(speaker: String) {
-        val mappedPreset = if (speaker.contains("Young", ignoreCase = true)) "Young Voice" else "Mature Voice"
+        val mappedPreset = when {
+            speaker.contains("Young", ignoreCase = true) -> "Young Voice"
+            speaker.contains("Gentle", ignoreCase = true) -> "Gentle Voice"
+            else -> "Mature Voice"
+        }
+        if (currentSpeakerPreset == mappedPreset) return
+        
+        val wasSpeaking = isPlayingQueue
+        val textToResume = lastSpokenText
+        val idToResume = _currentlySpeaking.value
+        
+        if (wasSpeaking) {
+            stop()
+        }
+        
         currentSpeakerPreset = mappedPreset
         if (mappedPreset == "Young Voice") {
             setEnglishVoice("en-US-Standard-B")
             setArabicVoice("ar-SA-Standard-B")
             setUrduVoice("ur-PK-Wavenet-B")
+        } else if (mappedPreset == "Gentle Voice") {
+            setEnglishVoice("en-US-Standard-D")
+            setArabicVoice("ar-SA-Standard-C")
+            setUrduVoice("ur-PK-Standard-B")
         } else {
             setEnglishVoice("en-US-Standard-I")
             setArabicVoice("ar-XA-Wavenet-B")
             setUrduVoice("ur-PK-Standard-B")
+        }
+        
+        if (wasSpeaking && !textToResume.isNullOrBlank()) {
+            speak(textToResume, idToResume)
         }
     }
 
@@ -360,10 +391,7 @@ class TutorTtsManager(private val context: Context) {
                 val voiceId = when (chunk.languageTag) {
                     "ur" -> {
                         val selected = _selectedVoiceIdUr.value ?: "ur-PK-Wavenet-B"
-                        if (isFemaleVoiceId(selected)) {
-                             Log.w("TutorTtsManager", "No suitable Urdu voice found, skipping Urdu audio")
-                             null
-                        } else selected
+                        if (isFemaleVoiceId(selected)) "ur-PK-Wavenet-B" else selected
                     }
                     "ar" -> {
                         val selected = _selectedVoiceIdAr.value ?: "ar-SA-Standard-B"
@@ -404,7 +432,14 @@ class TutorTtsManager(private val context: Context) {
                 }
 
                 // Adjust speech rate and pitch based on age variant
-                val baseCloudPitch = if (currentSpeakerPreset == "Young Voice") 1.5 else -2.5
+                val isUrduOrArabic = chunk.languageTag == "ur" || chunk.languageTag == "ar"
+                val baseCloudPitch = if (isUrduOrArabic) {
+                    0.5 // clear, loud, confident, and professional tone
+                } else if (currentSpeakerPreset == "Young Voice") {
+                    1.5
+                } else {
+                    -2.5
+                }
                 val cloudPitch = baseCloudPitch + ((chunk.pitchMod - 1.0) * 10.0)
 
                 val request = SynthesizeRequest(
@@ -510,9 +545,20 @@ class TutorTtsManager(private val context: Context) {
                 }
                 
                 // Adjust speech rate and pitch based on age variant
-                val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
+                val isUrduOrArabic = chunk.languageTag == "ur" || chunk.languageTag == "ar"
+                val baseRateMultiplier = if (isUrduOrArabic) {
+                    1.05f // Energetic, clear, confident pacing
+                } else if (currentSpeakerPreset == "Young Voice") {
+                    1.05f
+                } else {
+                    1.0f
+                }
                 val adjustedSpeakingRate = currentRate * baseRateMultiplier
-                val nativePitch = (if (currentSpeakerPreset == "Young Voice") 1.1f else 0.85f) * chunk.pitchMod
+                val nativePitch = if (isUrduOrArabic) {
+                    1.02f * chunk.pitchMod // Confident, bright pitch, never lazy or exhausted
+                } else {
+                    (if (currentSpeakerPreset == "Young Voice") 1.1f else 0.85f) * chunk.pitchMod
+                }
 
                 tts.setSpeechRate(adjustedSpeakingRate)
                 tts.setPitch(nativePitch)
@@ -530,10 +576,8 @@ class TutorTtsManager(private val context: Context) {
                     }
                     if (preferredVoice != null) {
                         tts.voice = preferredVoice
-                    } else if (chunk.languageTag == "ur") {
-                        Log.w("TutorTtsManager", "No suitable Urdu voice found in Native TTS, skipping Urdu audio")
-                        processNextChunk()
-                        return
+                    } else {
+                        Log.w("TutorTtsManager", "No suitable preferred voice found in Native TTS for ${chunk.languageTag}, using default device voice")
                     }
                 } catch (e: Exception) {
                     Log.e("TutorTtsManager", "Could not set native preferred voice", e)
@@ -656,7 +700,10 @@ class TutorTtsManager(private val context: Context) {
             val langTag = when {
                 urduScore > arabicScore -> "ur"
                 arabicScore > urduScore -> "ar"
-                trimmed.any { it in '\u0600'..'\u06FF' } -> "ur" // Fallback to Urdu as default script for Urdu native speakers
+                trimmed.any { it in '\u0600'..'\u06FF' } -> {
+                    val activeLang = getSelectedVoiceLanguage()
+                    if (activeLang == "Arabic") "ar" else "ur"
+                }
                 else -> "en"
             }
             
@@ -674,6 +721,26 @@ class TutorTtsManager(private val context: Context) {
         }
         
         return mergedChunks
+    }
+
+    private fun getSelectedVoiceLanguage(): String {
+        return try {
+            val appPrefs = context.getSharedPreferences("lisan_app_settings_v2", Context.MODE_PRIVATE)
+            val raw = appPrefs.getString("settings_json_v1", null)
+            if (!raw.isNullOrBlank()) {
+                if (raw.contains("\"selectedVoiceLanguage\":\"Urdu\"")) {
+                    "Urdu"
+                } else if (raw.contains("\"selectedVoiceLanguage\":\"Arabic\"")) {
+                    "Arabic"
+                } else {
+                    "English"
+                }
+            } else {
+                "English"
+            }
+        } catch (e: Exception) {
+            "English"
+        }
     }
 
     fun shutdown() {

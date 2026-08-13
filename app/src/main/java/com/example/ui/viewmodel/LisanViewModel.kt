@@ -48,6 +48,33 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val dailyVerbRepository = com.example.data.repository.DailyVerbRepository(database.dailyVerbAssignmentDao())
     private val chatMessageRepository = com.example.data.local.ChatMessageRepository(database.chatMessageDao())
     val revisionRepository = com.example.data.repository.RevisionRepository(database)
+    val documentRepository = com.example.data.repository.DocumentRepository.getInstance(application)
+
+    val allDocuments: StateFlow<List<com.example.data.model.DocumentEntity>> = documentRepository.allDocuments
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val activeDocument: StateFlow<com.example.data.model.DocumentEntity?> = documentRepository.activeDocument
+    val documentProcessingState: StateFlow<com.example.data.model.DocumentProcessingState> = documentRepository.processingState
+
+    fun processSelectedDocument(uri: android.net.Uri, fileName: String? = null) {
+        viewModelScope.launch {
+            documentRepository.processAndStoreDocument(getApplication(), uri, fileName)
+        }
+    }
+
+    fun setActiveDocument(doc: com.example.data.model.DocumentEntity?) {
+        documentRepository.setActiveDocument(doc)
+    }
+
+    fun deleteDocument(documentId: String) {
+        viewModelScope.launch {
+            documentRepository.deleteDocument(documentId)
+        }
+    }
+
+    fun resetDocumentProcessingState() {
+        documentRepository.resetProcessingState()
+    }
     
     val topicProgress: StateFlow<List<TopicProgressEntity>> = revisionRepository.topicProgressFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -92,12 +119,12 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     val authManager = com.example.data.repository.AuthManager(application)
     val authState = authManager.authState
 
-    val appSettingsManager = com.example.data.repository.AppSettingsManager(application)
-    val appSettings = appSettingsManager.settings
-
     val settingsRepository = com.example.data.repository.SettingsRepository(application)
     val userSettings: StateFlow<com.example.data.repository.UserSettings> = settingsRepository.userSettingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, com.example.data.repository.UserSettings())
+
+    private val _isSettingsLoaded = MutableStateFlow(false)
+    val isSettingsLoaded: StateFlow<Boolean> = _isSettingsLoaded.asStateFlow()
 
     // --- TTS Manager ---
     val ttsManager = TutorTtsManager(application.applicationContext)
@@ -141,6 +168,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             userSettings.collect { settings ->
+                _isSettingsLoaded.value = true
                 ttsManager.applySpeakerPreset(settings.selectedSpeaker)
                 ttsManager.setPlaybackSpeed(settings.speechRate)
                 ttsManager.setPitch(settings.pitch)
@@ -249,7 +277,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getEffectiveDailyLimit(): Int {
-        val settings = appSettings.value
+        val settings = userSettings.value
         val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
             ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
             ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
@@ -263,17 +291,17 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     fun incrementUsage() {
         val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
         val effectiveLimit = getEffectiveDailyLimit()
-        appSettingsManager.updateSettings { settings ->
+        viewModelScope.launch { settingsRepository.updateSettings { settings ->
             if (settings.lastUsageDate != today) {
                 settings.copy(usageCount = 1, lastUsageDate = today, dailyLimit = effectiveLimit)
             } else {
                 settings.copy(usageCount = settings.usageCount + 1, dailyLimit = effectiveLimit)
             }
-        }
+        } }
     }
     
     fun hasCustomUserApiKey(): Boolean {
-        val settings = appSettings.value
+        val settings = userSettings.value
         val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
             ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
             ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
@@ -303,7 +331,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getUsagePromptStatus(): Boolean {
-        val settings = appSettings.value
+        val settings = userSettings.value
         val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
             ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
             ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
@@ -318,7 +346,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun getRemainingRequests(): Int {
-        val settings = appSettings.value
+        val settings = userSettings.value
         val userKey = settings.userApiKey?.takeIf { it.isNotBlank() }
             ?: _geminiApiKey.value.takeIf { it.isNotBlank() }
             ?: prefs.getString("user_gemini_api_key", null)?.takeIf { it.isNotBlank() }
@@ -337,9 +365,9 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     fun setActiveUsersCount(count: Int) {
         val cleanCount = count.coerceAtLeast(1)
         val newLimit = maxOf(1, 1500 / cleanCount)
-        appSettingsManager.updateSettings { 
+        viewModelScope.launch { settingsRepository.updateSettings { 
             it.copy(activeUsersCount = cleanCount, dailyLimit = newLimit) 
-        }
+        } }
     }
     
     private val _showApiKeyGuideModal = MutableStateFlow(false)
@@ -350,16 +378,18 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         val cleanKey = key.trim()
         _geminiApiKey.value = cleanKey
         prefs.edit().putString("user_gemini_api_key", cleanKey).apply()
-        appSettingsManager.updateSettings { it.copy(userApiKey = cleanKey) }
+        viewModelScope.launch { settingsRepository.updateSettings { it.copy(userApiKey = cleanKey) } }
         com.example.data.remote.RetrofitClient.setCustomApiKey(cleanKey)
     }
     
-    fun updateAppSettings(update: (com.example.data.model.AppSettings) -> com.example.data.model.AppSettings) {
-        appSettingsManager.updateSettings(update)
+    fun updateAppSettings(update: (com.example.data.repository.UserSettings) -> com.example.data.repository.UserSettings) {
+        viewModelScope.launch {
+            settingsRepository.updateSettings(update)
+        }
     }
 
     fun resetAppSettings() {
-        appSettingsManager.resetToDefaults()
+        resetUserSettings()
     }
 
     fun signUp(email: String, pass: String, name: String, onResult: (Boolean, String?) -> Unit) {
@@ -977,8 +1007,9 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
-    private val _isDarkTheme = MutableStateFlow(prefs.getBoolean("is_dark_theme", false))
-    val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+    val isDarkTheme: StateFlow<Boolean> = userSettings
+        .map { it.themeMode == "Dark" }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _proficiencyLevel = MutableStateFlow(ProficiencyLevel.BEGINNER)
     val proficiencyLevel: StateFlow<ProficiencyLevel> = _proficiencyLevel.asStateFlow()
@@ -991,10 +1022,9 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun toggleTheme() {
-        val nextVal = !_isDarkTheme.value
-        _isDarkTheme.value = nextVal
-        prefs.edit().putBoolean("is_dark_theme", nextVal).apply()
-        updateUserSettings { it.copy(themeMode = if (nextVal) "Dark" else "Light") }
+        val currentMode = userSettings.value.themeMode
+        val nextMode = if (currentMode == "Dark") "Light" else "Dark"
+        updateUserSettings { it.copy(themeMode = nextMode) }
     }
     fun setProficiencyLevel(level: ProficiencyLevel) { _proficiencyLevel.value = level }
 
@@ -1159,6 +1189,13 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeTutorMode = MutableStateFlow("General")
     val activeTutorMode: StateFlow<String> = _activeTutorMode.asStateFlow()
 
+    private val _isTutorChatActive = MutableStateFlow(false)
+    val isTutorChatActive: StateFlow<Boolean> = _isTutorChatActive.asStateFlow()
+
+    fun setTutorChatActive(active: Boolean) {
+        _isTutorChatActive.value = active
+    }
+
     private val _activeLanguage = MutableStateFlow(prefs.getString("tutor_response_language", "Auto") ?: "Auto")
     val activeLanguage: StateFlow<String> = _activeLanguage.asStateFlow()
 
@@ -1282,6 +1319,17 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         }
     }
 
+    fun reloadStoredChatHistory() {
+        loadStoredChatHistory()
+    }
+
+    fun injectSystemExamMessage(messageText: String) {
+        viewModelScope.launch {
+            chatMessageRepository.saveMessage("model", messageText)
+            loadStoredChatHistory()
+        }
+    }
+
     private fun loadStoredChatHistory() {
         viewModelScope.launch {
             val stored = chatMessageRepository.loadMessagesList()
@@ -1339,11 +1387,21 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
             _isChatLoading.value = true
             _chatError.value = null
             try {
-                val profileSummary = if (_isStudyModeOn.value) {
+                var profileSummary = if (_isStudyModeOn.value) {
                     buildPersonalizedStudyContext()
                 } else {
                     learnerProfileManager.buildPersonalizedPromptContext()
                 }
+
+                // Retrieve Document Grounding Context if an Active Document is selected
+                val currentActiveDoc = activeDocument.value
+                if (currentActiveDoc != null && currentActiveDoc.processingStatus == com.example.data.model.ProcessingStatus.READY.name) {
+                    val docContext = documentRepository.retrieveGroundingContext(currentActiveDoc.documentId, message)
+                    if (docContext.isNotBlank()) {
+                        profileSummary += "\n\n$docContext"
+                    }
+                }
+
                 val result = RetrofitClient.getTutorResponse(
                     context = getApplication<android.app.Application>(),
                     history = _chatHistory.value,
@@ -1353,7 +1411,8 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     learnerProfileSummary = profileSummary,
                     isStudyModeOn = _isStudyModeOn.value,
                     learnerLevel = _proficiencyLevel.value.labelEn,
-                    imageCompressionPreset = appSettings.value.imageCompressionPreset
+                    imageCompressionPreset = userSettings.value.imageCompressionPreset,
+                    sessionId = activeConversationId
                 )
                 
                 val modelContent = com.example.data.model.Content(
@@ -1392,8 +1451,8 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     _chatHistory.value = _chatHistory.value + modelContent
                     chatMessageRepository.saveMessage("model", limitText)
                     _showApiKeyGuideModal.value = true
-                } else if (msg.contains("Gemini is not connected") || msg.contains("API Key is missing")) {
-                    _chatError.value = "Gemini is not connected. Add a valid GEMINI_API_KEY in the app’s secure environment settings, then redeploy."
+                } else if (msg.contains("Gemini service is not configured") || msg.contains("API Key is missing")) {
+                    _chatError.value = "Gemini service is not configured. Please configure your personal API Key under Settings, or set up a secure backend proxy URL."
                 } else {
                     _chatError.value = "Error: ${e.message ?: "Failed to get response. Please check your connection."}"
                 }
@@ -1457,6 +1516,51 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                 messagesJson = messagesJson
             )
             conversationSessionDao.insertSession(entity)
+            
+            // Identify older messages excluded from the active AI context
+            val maxMessageCount = 10
+            val maxCharacterCount = 8000
+            
+            val boundedHistory = mutableListOf<com.example.data.model.Content>()
+            var currentChars = 0
+            for (msg in messages.reversed()) {
+                if (boundedHistory.size >= maxMessageCount) break
+                val textLen = msg.parts.sumOf { it.text?.length ?: 0 }
+                if (currentChars + textLen > maxCharacterCount && boundedHistory.isNotEmpty()) {
+                    break
+                }
+                boundedHistory.add(0, msg)
+                currentChars += textLen
+            }
+            
+            val olderMessages = messages.filter { !boundedHistory.contains(it) }
+            val sessionId = activeConversationId
+            if (sessionId != null && olderMessages.isNotEmpty()) {
+                val summaryPrefs = getApplication<android.app.Application>().getSharedPreferences("lisan_summaries", android.content.Context.MODE_PRIVATE)
+                val lastSummarizedCount = summaryPrefs.getInt("summarized_count_for_$sessionId", 0)
+                // Summarize when at least 2 new older messages are available to prevent excessive API rate limits
+                if (olderMessages.size >= lastSummarizedCount + 2) {
+                    val existingSummary = summaryPrefs.getString("summary_for_$sessionId", null)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            val newSummary = com.example.data.remote.RetrofitClient.generateConversationSummary(
+                                context = getApplication(),
+                                olderMessages = olderMessages,
+                                existingSummary = existingSummary
+                            )
+                            if (newSummary.isNotBlank()) {
+                                summaryPrefs.edit()
+                                    .putString("summary_for_$sessionId", newSummary)
+                                    .putInt("summarized_count_for_$sessionId", olderMessages.size)
+                                    .apply()
+                                android.util.Log.d("LisanViewModel", "Successfully updated conversation summary for $sessionId in background.")
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("LisanViewModel", "Background conversation summary failed: ${e.message}", e)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1485,10 +1589,11 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                         kotlinx.serialization.builtins.ListSerializer(com.example.data.model.Content.serializer()),
                         session.messagesJson
                     )
-                    _chatHistory.value = list
+                    val recentList = if (list.size > 40) list.takeLast(40) else list
+                    _chatHistory.value = recentList
                     chatMessageRepository.clearHistory()
                     activeConversationId = sessionId
-                    for (content in list) {
+                    for (content in recentList) {
                         val role = content.role ?: "model"
                         val text = content.parts.firstOrNull()?.text ?: ""
                         if (text.isNotBlank()) {
@@ -1513,11 +1618,17 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     }
 
     suspend fun fetchGeminiWithFallback(prompt: String): String {
-        val apiKey = _geminiApiKey.value.ifBlank {
+        val userKey = _geminiApiKey.value.ifBlank {
             prefs.getString("user_gemini_api_key", null)?.ifBlank { null }
-                ?: appSettings.value.userApiKey?.ifBlank { null }
-                ?: com.example.BuildConfig.GEMINI_API_KEY
+                ?: userSettings.value.userApiKey?.ifBlank { null }
+                ?: ""
         }
+        val useBackend = RetrofitClient.isUsingBackend()
+
+        if (!useBackend && userKey.isBlank()) {
+            return "Connection error: Gemini is not configured. Please enter your personal API Key under Settings, or configure a secure backend proxy URL."
+        }
+
         val models = listOf(
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
@@ -1530,7 +1641,11 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
 
         for (model in models) {
             try {
-                val response = RetrofitClient.service.generateContent(model, apiKey, request)
+                val response = if (useBackend) {
+                    RetrofitClient.backendService.generateContent(model, RetrofitClient.getBackendAuthHeader(), request)
+                } else {
+                    RetrofitClient.service.generateContent(model, userKey, request)
+                }
                 val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (!text.isNullOrBlank()) return text
             } catch (e: Exception) {
@@ -2390,7 +2505,7 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         val savedApiKey = prefs.getString("user_gemini_api_key", "") ?: ""
         if (savedApiKey.isNotBlank()) {
             RetrofitClient.setCustomApiKey(savedApiKey)
-            appSettingsManager.updateSettings { it.copy(userApiKey = savedApiKey) }
+            viewModelScope.launch { settingsRepository.updateSettings { it.copy(userApiKey = savedApiKey) } }
         }
         try {
             setupSpeechRecognizer()
@@ -2474,12 +2589,81 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         _isSessionCompleted.value = false
     }
 
+    private val _createImageState = MutableStateFlow<CreateImageUiState>(CreateImageUiState.Idle)
+    val createImageState: StateFlow<CreateImageUiState> = _createImageState.asStateFlow()
+
+    fun clearCreateImageState() {
+        _createImageState.value = CreateImageUiState.Idle
+    }
+
+    fun generateImage(prompt: String) {
+        if (prompt.isBlank()) {
+            _createImageState.value = CreateImageUiState.Error("Please enter a description for the image.")
+            return
+        }
+        _createImageState.value = CreateImageUiState.Loading
+        viewModelScope.launch {
+            try {
+                val userKey = _geminiApiKey.value.ifBlank {
+                    prefs.getString("user_gemini_api_key", null)?.ifBlank { null }
+                        ?: userSettings.value.userApiKey?.ifBlank { null }
+                        ?: ""
+                }
+                val useBackend = RetrofitClient.isUsingBackend()
+                
+                if (!useBackend && userKey.isBlank()) {
+                    _createImageState.value = CreateImageUiState.Error("Gemini API key is not configured. Please add your key in the secure settings.")
+                    return@launch
+                }
+
+                val request = com.example.data.model.GenerateContentRequest(
+                    contents = listOf(
+                        com.example.data.model.Content(
+                            role = "user",
+                            parts = listOf(com.example.data.model.Part(text = prompt))
+                        )
+                    ),
+                    generationConfig = com.example.data.model.GenerationConfig(
+                        imageConfig = com.example.data.model.ImageConfig(aspectRatio = "1:1", imageSize = "1K"),
+                        responseModalities = listOf("TEXT", "IMAGE")
+                    )
+                )
+
+                val response = if (useBackend) {
+                    RetrofitClient.backendService.generateContent("gemini-2.5-flash-image", RetrofitClient.getBackendAuthHeader(), request)
+                } else {
+                    RetrofitClient.service.generateContent("gemini-2.5-flash-image", userKey, request)
+                }
+                
+                val partWithImage = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull { it.inlineData != null }
+                val inlineData = partWithImage?.inlineData
+                
+                if (inlineData != null && inlineData.data.isNotBlank()) {
+                    _createImageState.value = CreateImageUiState.Success(inlineData.data, inlineData.mimeType)
+                } else {
+                    val errorMsg = response.error?.message ?: "No image was returned by the model. Make sure your description does not violate Gemini safety guidelines."
+                    _createImageState.value = CreateImageUiState.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                Log.e("LisanViewModel", "Image generation failed", e)
+                _createImageState.value = CreateImageUiState.Error(e.message ?: "An unexpected error occurred during image generation.")
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         ttsManager.shutdown()
         tutorAudioManager.release()
         speechRecognizer?.destroy()
     }
+}
+
+sealed interface CreateImageUiState {
+    object Idle : CreateImageUiState
+    object Loading : CreateImageUiState
+    data class Success(val base64Image: String, val mimeType: String) : CreateImageUiState
+    data class Error(val message: String) : CreateImageUiState
 }
 
 enum class VoiceSessionState { READY, LISTENING, PROCESSING, REPLYING, SPEAKING, PAUSED, ERROR, INACTIVE }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -101,12 +102,13 @@ fun PronunciationPracticeScreen(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .padding(16.dp)
-    ) {
+    SelectionContainer {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(colors.background)
+                .padding(16.dp)
+        ) {
         // Teacher Welcome Header Message
         Surface(
             modifier = Modifier
@@ -374,6 +376,7 @@ fun PronunciationPracticeScreen(
             }
         }
     }
+}
 }
 
 @Composable

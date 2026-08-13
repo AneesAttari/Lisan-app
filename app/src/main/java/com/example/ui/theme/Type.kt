@@ -86,3 +86,65 @@ val Typography =
       )
   )
 
+object UrduTypography {
+    val body = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 15.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.2.sp
+    )
+
+    val medium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 15.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.2.sp
+    )
+
+    val heading = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 18.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    )
+
+    val chatMessage = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 15.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.2.sp
+    )
+
+    val label = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 13.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.5.sp
+    )
+}
+
+fun isUrduOrArabicText(text: String): Boolean {
+    var arabicCharCount = 0
+    var totalLetters = 0
+    for (char in text) {
+        val code = char.code
+        if (code in 0x0600..0x06FF || code in 0x0750..0x077F || code in 0x08A0..0x08FF || code in 0xFB50..0xFDFF || code in 0xFE70..0xFEFF) {
+            arabicCharCount++
+        }
+        if (char.isLetter()) {
+            totalLetters++
+        }
+    }
+    return if (totalLetters > 0) {
+        (arabicCharCount.toFloat() / totalLetters) > 0.25f || arabicCharCount >= 3
+    } else {
+        arabicCharCount > 0
+    }
+}
+
+

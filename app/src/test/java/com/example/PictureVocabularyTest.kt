@@ -34,7 +34,7 @@ class FakeTtsManager(private val context: Context) : FakeSpeaker {
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class PictureVocabularyTest {
 
     private lateinit var db: AppDatabase

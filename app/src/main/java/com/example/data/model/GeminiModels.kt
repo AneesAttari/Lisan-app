@@ -45,6 +45,12 @@ data class InlineData(
 )
 
 @Serializable
+data class ImageConfig(
+    val aspectRatio: String,
+    val imageSize: String
+)
+
+@Serializable
 data class GenerationConfig(
     val temperature: Float? = null,
     val topP: Float? = null,
@@ -52,7 +58,8 @@ data class GenerationConfig(
     val thinkingConfig: ThinkingConfig? = null,
     val responseModalities: List<String>? = null,
     val responseMimeType: String? = null,
-    val responseSchema: JsonObject? = null
+    val responseSchema: JsonObject? = null,
+    val imageConfig: ImageConfig? = null
 )
 
 @Serializable

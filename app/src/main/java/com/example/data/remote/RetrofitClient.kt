@@ -62,17 +62,51 @@ object RetrofitClient {
         retrofit.create(GeminiApiService::class.java)
     }
 
+    val backendUrl: String
+        get() = try {
+            BuildConfig.BACKEND_URL.takeIf { it.isNotBlank() && it != "https://lisan-ai-backend.example.com" } ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+
+    val backendSecret: String
+        get() = try {
+            BuildConfig.BACKEND_API_SECRET.takeIf { it.isNotBlank() } ?: "lisan_secure_tutor_token_2026"
+        } catch (e: Exception) {
+            "lisan_secure_tutor_token_2026"
+        }
+
+    fun isUsingBackend(): Boolean {
+        return customApiKey.isBlank() && backendUrl.isNotBlank()
+    }
+
+    fun getBackendAuthHeader(): String {
+        return "Bearer $backendSecret"
+    }
+
+    val backendService: BackendApiService by lazy {
+        val url = if (backendUrl.isNotBlank()) {
+            if (backendUrl.endsWith("/")) backendUrl else "$backendUrl/"
+        } else {
+            "https://lisan-ai-backend.example.com/"
+        }
+        val retrofit = Retrofit.Builder()
+            .baseUrl(url)
+            .client(okHttpClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+        retrofit.create(BackendApiService::class.java)
+    }
+
+    fun getCustomApiKey(): String {
+        return customApiKey
+    }
+
     private fun getApiKey(): String {
         if (customApiKey.isNotBlank()) {
             return customApiKey
         }
-        val key = BuildConfig.GEMINI_API_KEY.takeIf { it.isNotBlank() && it != "MY_GEMINI_API_KEY" } ?: ""
-        if (key.isEmpty()) {
-            Log.e(TAG, "API Key is missing or default placeholder!")
-        } else {
-            Log.d(TAG, "API Key loaded: ${key.take(4)}****")
-        }
-        return key
+        return ""
     }
 
     private fun cleanJsonString(raw: String): String {
@@ -116,13 +150,18 @@ object RetrofitClient {
             "gemini-3.5-flash-lite"
         ).distinct()
 
+        val useBackend = isUsingBackend()
         var lastException: Exception? = null
 
         // First pass: try v1beta for candidate models
         for (model in candidateModels) {
             try {
                 return runWithRetry {
-                    service.generateContent(model, apiKey, request)
+                    if (useBackend) {
+                        backendService.generateContent(model, getBackendAuthHeader(), request)
+                    } else {
+                        service.generateContent(model, apiKey, request)
+                    }
                 }
             } catch (e: Exception) {
                 lastException = e
@@ -134,17 +173,19 @@ object RetrofitClient {
             }
         }
 
-        // Second pass: try v1 endpoint for candidate models
-        for (model in candidateModels) {
-            try {
-                return runWithRetry {
-                    service.generateContentV1(model, apiKey, request)
-                }
-            } catch (e: Exception) {
-                lastException = e
-                val code = (e as? retrofit2.HttpException)?.code() ?: 0
-                if (code == 401 || code == 403) {
-                    throw e
+        if (!useBackend) {
+            // Second pass: try v1 endpoint for candidate models
+            for (model in candidateModels) {
+                try {
+                    return runWithRetry {
+                        service.generateContentV1(model, apiKey, request)
+                    }
+                } catch (e: Exception) {
+                    lastException = e
+                    val code = (e as? retrofit2.HttpException)?.code() ?: 0
+                    if (code == 401 || code == 403) {
+                        throw e
+                    }
                 }
             }
         }
@@ -207,7 +248,7 @@ object RetrofitClient {
         history: List<com.example.data.model.ChatMessageEntity>
     ): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isEmpty()) {
+        if (apiKey.isEmpty() && !isUsingBackend()) {
             return@withContext "Gemini API key is not set. Please enter a valid API key in Settings."
         }
         val contents = history.map {
@@ -237,11 +278,17 @@ object RetrofitClient {
         history: List<Content>,
         userName: String,
         learnerProfileSummary: String,
-        isStudyModeOn: Boolean = false
+        isStudyModeOn: Boolean = false,
+        selectedVoiceLanguage: String = "English"
     ): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
-            return@withContext generateLocalVoiceTutorResponse(history, userName)
+        if (apiKey.isEmpty() && !isUsingBackend()) {
+            return@withContext generateLocalVoiceTutorResponse(history, userName, selectedVoiceLanguage)
+        }
+        val languageInstruction = when (selectedVoiceLanguage) {
+            "Urdu" -> "You are a specialized Urdu-to-English grammar voice tutor. Explain English grammar rules, terms, and comparisons in clear, fluent Urdu (پاکستانی اردو). Give example sentences in English and translate them to Urdu. Keep responses very short (1-2 sentences in English, then 1 simple sentence in Urdu translation) so that Text-To-Speech is pleasant."
+            "Arabic" -> "You are a specialized Arabic-to-English grammar voice tutor. Explain English grammar rules, terms, and comparisons in clear, fluent Arabic (اللغة العربية الفصحى). Give example sentences in English and translate them to Arabic. Keep responses very short (1-2 sentences in English, then 1 simple sentence in Arabic translation) so that Text-To-Speech is pleasant."
+            else -> "You are an English grammar voice tutor speaking only in simple, clear English."
         }
         val sysPrompt = if (isStudyModeOn) {
             """
@@ -251,10 +298,13 @@ object RetrofitClient {
             [STUDY MODE ACTIVE]
             Your role is to be a structured, strict-but-supportive, demanding, and highly focused voice tutor.
 
+            LANGUAGE DIRECTIVE:
+            $languageInstruction
+
             VOICE CONVERSATION GUIDELINES:
             1. Speak like a demanding but respectful and encouraging teacher. Prioritize active English practice over casual chatting.
             2. GENTLY CORRECT ERRORS: When the learner speaks with an error, identify it, briefly explain why in simple terms, give the correction, and ask them to repeat or try a new sentence.
-            3. COMPARATIVE SCAFFOLDING: Compare English rules with Arabic grammar using "Likewise in Arabic, you have learned..." or "كذلك في اللغة العربية، قد تعلمتم...".
+            3. COMPARATIVE SCAFFOLDING: Compare English rules with Arabic or Urdu grammar depending on the learner's language.
             4. Keep answers extremely brief (1 to 3 short sentences maximum) so that speech synthesis is clear and pleasant to listen to. Ask one question and wait for the user to respond.
             5. USE TEXT-TO-SPEECH MARKERS for natural pacing and emotion:
                - Insert `[pause_short]` for a brief, natural hesitation (e.g., "Hmm, [pause_short] let's see.").
@@ -268,8 +318,11 @@ object RetrofitClient {
             """.trimIndent()
         } else {
             """
-            You are Lisan Voice Tutor, a warm, friendly, natural human English tutor speaking with $userName, an Arabic and Urdu speaking learner.
+            You are Lisan Voice Tutor, a warm, friendly, natural human English tutor speaking with $userName.
             
+            LANGUAGE DIRECTIVE:
+            $languageInstruction
+
             VOICE CONVERSATION GUIDELINES:
             1. Speak like a real, empathetic, friendly human teacher. Be conversational, smooth, and express emotions naturally.
             2. USE TEXT-TO-SPEECH MARKERS for natural pacing and emotion:
@@ -297,57 +350,90 @@ object RetrofitClient {
         try {
             val response = callWithModelFallback(apiKey, req, MODEL_FLASH)
             response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                ?: generateLocalVoiceTutorResponse(history, userName)
+                ?: generateLocalVoiceTutorResponse(history, userName, selectedVoiceLanguage)
         } catch (e: Exception) {
             Log.e(TAG, "getVoiceTutorResponse error: ${e.message}, falling back to smart local voice responder")
-            generateLocalVoiceTutorResponse(history, userName)
+            generateLocalVoiceTutorResponse(history, userName, selectedVoiceLanguage)
         }
     }
 
     fun generateLocalVoiceTutorResponse(
         history: List<Content>,
-        userName: String
+        userName: String,
+        selectedVoiceLanguage: String = "English"
     ): String {
         val lastUserMsg = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
         val lowerMsg = lastUserMsg.lowercase(java.util.Locale.ROOT).trim()
 
         if (lowerMsg.isEmpty() || lowerMsg == "listening...") {
-            return "I couldn't hear your voice clearly. Please try speaking again or tell me what grammar rule you would like to practice."
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "مجھے آپ کی آواز سنائی نہیں دی۔ براہ کرم دوبارہ بولیے یا مجھے بتائیں کہ آپ کس گرامر اصول کی مشق کرنا چاہتے ہیں۔"
+                "Arabic" -> "لم أتمكن من سماع صوتك بوضوح. يرجى المحاولة والتحدث مرة أخرى أو إخباري بقاعدة القواعد التي ترغب في ممارستها."
+                else -> "I couldn't hear your voice clearly. Please try speaking again or tell me what grammar rule you would like to practice."
+            }
         }
 
         // Greetings
         if (lowerMsg in listOf("hi", "hello", "hey", "assalam", "سلام", "asalam", "asalamu", "ayyo") || lowerMsg.startsWith("hi ") || lowerMsg.startsWith("hello ")) {
-            return "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar! I will help you learn English grammar by comparing it with Arabic grammar. What topic should we study today? Subject Pronouns, Verb To Be, Nouns, or Adjectives?"
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں خوش آمدید! میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گا۔ آج ہم کون سا موضوع پڑھیں؟ سبجیکٹ پروناؤنز، ورب ٹو بی، ناؤنز، یا ایڈجیکٹوز؟"
+                "Arabic" -> "السلام عليكم ورحمة الله وبركاته\nأهلاً بك في لسان قواعد اللغة! سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية. ما هو الموضوع الذي يجب أن ندرسه اليوم؟ ضمائر الفاعل، فعل الكينونة، الأسماء، أو الصفات؟"
+                else -> "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar! I will help you learn English grammar by comparing it with Arabic grammar. What topic should we study today? Subject Pronouns, Verb To Be, Nouns, or Adjectives?"
+            }
         }
 
         // How are you
         if (lowerMsg.contains("how are you") || lowerMsg.contains("how are u") || lowerMsg.contains("how is it going")) {
-            return "الحمد لله, I am doing excellent, $userName! Ready to help you learn English grammar. What topic would you like to explore today?"
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "الحمد للہ، میں بالکل ٹھیک ہوں، $userName! انگریزی گرامر سیکھنے کے لیے تیار ہوں۔ آج آپ کون سا موضوع پڑھنا پسند کریں گے؟"
+                "Arabic" -> "الحمد لله، أنا بخير وعلى ما يرام، $userName! جاهز لمساعدتك في تعلم قواعد اللغة الإنجليزية. ما هو الموضوع الذي ترغب في استكشافه اليوم؟"
+                else -> "الحمد لله, I am doing excellent, $userName! Ready to help you learn English grammar. What topic would you like to explore today?"
+            }
         }
 
         // Pronouns / Subject Pronouns
         if (lowerMsg.contains("pronoun") || lowerMsg.contains("ضمير") || lowerMsg.contains("ضمائر") || lowerMsg.contains("i you he she")) {
-            return "Let's learn Subject Pronouns! In English, we use pronouns like I, You, He, She, It, We, and They. Likewise in Arabic, you have learned separate pronouns like أنا، أنت، هو، وهي. For example, 'He is a student' corresponds to 'هو طالب'. Arabic speakers sometimes drop the pronoun, but in English the subject pronoun is required. Practice question: How do you say 'She is a teacher' in English?"
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "آئیے سبجیکٹ پروناؤنز سیکھیں! انگریزی میں ہم I, You, He, She, It, We اور They جیسے پروناؤنز استعمال کرتے ہیں۔ اسی طرح اردو میں، آپ نے 'میں، تم، وہ، ہم' جیسے ضمیر سیکھے ہیں۔ مثال کے طور پر، 'He is a student' کا مطلب ہے 'وہ ایک طالب علم ہے'۔ انگریزی میں ضمیر لکھنا لازمی ہوتا ہے۔ مشق کے لیے سوال: آپ انگریزی میں 'وہ ایک استانی ہے' کیسے کہیں گے؟"
+                "Arabic" -> "دعنا نتعلم ضمائر الفاعل! في اللغة الإنجليزية، نستخدم ضمائر مثل I, You, He, She, It, We, و They. وبالمثل في اللغة العربية، تعلمت ضمائر منفصلة مثل أنا، أنت، هو، وهي. على سبيل المثال، 'He is a student' تقابل 'هو طالب'. يميل متحدثو العربية أحيناً إلى حذف الضمير، ولكن في الإنجليزية ضمير الفاعل مطلوب دائماً. سؤال للممارسة: كيف تقول 'هي معلمة' بالإنجليزية؟"
+                else -> "Let's learn Subject Pronouns! In English, we use pronouns like I, You, He, She, It, We, and They. Likewise in Arabic, you have learned separate pronouns like أنا، أنت، هو، وهي. For example, 'He is a student' corresponds to 'هو طالب'. Arabic speakers sometimes drop the pronoun, but in English the subject pronoun is required. Practice question: How do you say 'She is a teacher' in English?"
+            }
         }
 
         // Verb "To Be"
         if (lowerMsg.contains("verb to be") || lowerMsg.contains("verb 'to be'") || lowerMsg.contains("am is are") || lowerMsg.contains("be verb")) {
-            return "The Verb To Be uses 'am', 'is', and 'are' in the present tense. Likewise in Arabic, you have learned nominal sentences (الجملة الاسمية) like 'الولد سعيد' without a present verb. In English, we must say 'The boy is happy'. Common mistake: saying 'The boy happy'. Practice question: Choose the correct word: 'They (is/are) happy'."
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "ورب ٹو بی (Verb To Be) کے لیے ہم 'am', 'is', اور 'are' استعمال کرتے ہیں۔ اسی طرح اردو میں ہم 'ہوں، ہے، ہیں' استعمال کرتے ہیں۔ انگریزی میں 'The boy is happy' کہنا لازمی ہے۔ عام غلطی: 'The boy happy' کہنا (is چھوڑ دینا)۔ مشق کے لیے سوال: درست لفظ منتخب کریں: 'They (is/are) happy'."
+                "Arabic" -> "يستخدم فعل الكينونة (Verb To Be) الكلمات 'am'، 'is'، و 'are' في زمن المضارع. وبالمثل في اللغة العربية، تعلمت الجملة الاسمية مثل 'الولد سعيد' بدون فعل مضارع ظاهر. في الإنجليزية، يجب أن نقول 'The boy is happy'. الخطأ الشائع: قول 'The boy happy'. سؤال للممارسة: اختر الكلمة الصحيحة: 'They (is/are) happy'."
+                else -> "The Verb To Be uses 'am', 'is', and 'are' in the present tense. Likewise in Arabic, you have learned nominal sentences (الجملة الاسمية) like 'الولد سعيد' without a present verb. In English, we must say 'The boy is happy'. Common mistake: saying 'The boy happy'. Practice question: Choose the correct word: 'They (is/are) happy'."
+            }
         }
 
         // Plural Nouns
         if (lowerMsg.contains("plural") || lowerMsg.contains("جمع") || lowerMsg.contains("plurals") || lowerMsg.contains("noun")) {
-            return "In English, most plural nouns simply add -s or -es. Likewise in Arabic, you have learned sound plurals like معلمون. Examples: book to books, car to cars, pen to pens. Arabic speakers sometimes confuse irregular plurals like child to children. Practice question: What is the plural of 'book'?"
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "انگریزی میں زیادہ تر پلورل (جمع) ناؤنز کے آخر میں -s یا -es کا اضافہ کیا جاتا ہے۔ جیسے کتاب سے کتب (book to books)۔ اردو کی طرح انگریزی میں بھی کچھ بے قاعدہ جمع ہوتے ہیں جیسے 'child' سے 'children'۔ مشق کے لیے سوال: 'book' کی جمع (plural) کیا ہے؟"
+                "Arabic" -> "في اللغة الإنجليزية، معظم الأسماء الجمع تضيف ببساطة -s أو -es. وبالمثل في اللغة العربية، تعلمت جمع السالم مثل معلمون. أمثلة: book إلى books، car إلى cars. سؤال للممارسة: ما هو جمع كلمة 'book'؟"
+                else -> "In English, most plural nouns simply add -s or -es. Likewise in Arabic, you have learned sound plurals like معلمون. Examples: book to books, car to cars, pen to pens. Arabic speakers sometimes confuse irregular plurals like child to children. Practice question: What is the plural of 'book'?"
+            }
         }
 
         // Adjectives
         if (lowerMsg.contains("adjective") || lowerMsg.contains("صفة") || lowerMsg.contains("نعت") || lowerMsg.contains("adjectives")) {
-            return "In English, adjectives come before the noun (a big house). Likewise in Arabic, you have learned that the adjective follows the noun (بيت كبير). Examples: a tall man (رجل طويل), a red car (سيارة حمراء), a new book (كتاب جديد). Common mistake: placing the adjective after the noun. Practice question: Translate 'كتاب جديد' to English."
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "انگریزی میں ایڈجیکٹو (صفت) ہمیشہ ناؤن (اسم) سے پہلے آتا ہے (جیسے a big house)۔ جبکہ اردو میں بھی صفت پہلے آتی ہے (بڑا گھر)۔ مثالیں: a tall man (لمبا آدمی)، a red car (سرخ گاڑی)۔ مشق کے لیے سوال: 'نیا اسکول' کا انگریزی میں ترجمہ کریں۔"
+                "Arabic" -> "في اللغة الإنجليزية، تأتي الصفات قبل الاسم (a big house). وبالمثل في اللغة العربية، تعلمت أن الصفة تتبع الموصوف (بيت كبير). أمثلة: a tall man (رجل طويل)، a red car (سيارة حمراء). الخطأ الشائع: وضع الصفة بعد الاسم. سؤال للممارسة: ترجم 'كتاب جديد' إلى الإنجليزية."
+                else -> "In English, adjectives come before the noun (a big house). Likewise in Arabic, you have learned that the adjective follows the noun (بيت كبير). Examples: a tall man (رجل طويل), a red car (سيارة حمراء), a new book (كتاب جديد). Common mistake: placing the adjective after the noun. Practice question: Translate 'كتاب جديد' to English."
+            }
         }
 
         // Present Continuous
         if (lowerMsg.contains("present continuous") || lowerMsg.contains("ing") || lowerMsg.contains("is reading") || lowerMsg.contains("present progressive")) {
-            return "Present Continuous uses 'am/is/are + verb-ing' for actions happening now. Likewise in Arabic, you use the present verb الفعل المضارع مثل 'أنا أقرأ الآن'. Examples: I am reading (أنا أقرأ), She is sleeping (هي تنام), They are eating (هم يأكلون). Practice question: How do you say 'I am learning English'?"
+            return when (selectedVoiceLanguage) {
+                "Urdu" -> "پریزنٹ کنٹینیوس (Present Continuous) میں 'am/is/are + verb-ing' استعمال ہوتا ہے، جو ان کاموں کے لیے ہے جو ابھی ہو رہے ہیں۔ جیسے: I am reading (میں پڑھ رہا ہوں)۔ مشق کے لیے سوال: آپ انگریزی میں 'میں انگریزی سیکھ رہا ہوں' کیسے کہیں گے؟"
+                "Arabic" -> "يستخدم زمن المضارع المستمر الصيغة 'am/is/are + verb-ing' للأفعال التي تحدث الآن. وبالمثل في اللغة العربية، تستخدم الفعل المضارع مثل 'أنا أقرأ الآن'. أمثلة: I am reading (أنا أقرأ)، She is sleeping (هي تنام). سؤال للممارسة: كيف تقول 'أنا أتعلم الإنجليزية'؟"
+                else -> "Present Continuous uses 'am/is/are + verb-ing' for actions happening now. Likewise in Arabic, you use the present verb الفعل المضارع مثل 'أنا أقرأ الآن'. Examples: I am reading (أنا أقرأ), She is sleeping (هي تنام), They are eating (هم يأكلون). Practice question: How do you say 'I am learning English'?"
+            }
         }
 
         // Correct student practice answer
@@ -1097,7 +1183,8 @@ object RetrofitClient {
         learnerProfileSummary: String? = null,
         isStudyModeOn: Boolean = false,
         learnerLevel: String = "Beginner",
-        imageCompressionPreset: String = "BALANCED"
+        imageCompressionPreset: String = "BALANCED",
+        sessionId: String? = null
     ): com.example.data.model.TutorResponseResult = withContext(Dispatchers.IO) {
         val lastUserMessage = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
         val (detectedInputLang, effectiveResponseLang) = LanguageDetector.resolveEffectiveResponseLanguage(language, lastUserMessage)
@@ -1105,11 +1192,21 @@ object RetrofitClient {
         val requestId = "req_" + java.util.UUID.randomUUID().toString().substring(0, 8)
         val apiKey = getApiKey()
         
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
-            throw Exception("Gemini is not connected. Add a valid GEMINI_API_KEY in the app’s secure environment settings, then redeploy.")
+        if (getApiKey().isEmpty() && !isUsingBackend()) {
+            throw Exception("Gemini service is not configured. Please enter your personal Gemini API Key under Settings, or configure a secure backend URL to use the app.")
         }
 
-        val profileContext = learnerProfileSummary ?: "Student profile: Level $learnerLevel."
+        val summaryPrefs = context.getSharedPreferences("lisan_summaries", android.content.Context.MODE_PRIVATE)
+        val conversationSummary = sessionId?.let { summaryPrefs.getString("summary_for_$it", null) }
+        
+        val baseProfileContext = learnerProfileSummary ?: "Student profile: Level $learnerLevel."
+        val profileContext = buildString {
+            append(baseProfileContext)
+            if (!conversationSummary.isNullOrBlank()) {
+                append("\n\n[CONVERSATION SUMMARY OF OLDER MESSAGES]\n")
+                append(conversationSummary)
+            }
+        }
         val systemPrompt = if (isStudyModeOn) {
             """
             You are the senior English teacher inside Lisan Grammar, teaching English grammar to Arabic/Urdu-speaking learners.
@@ -1286,20 +1383,41 @@ object RetrofitClient {
             """.trimIndent()
         }
 
-        val fullContents = listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = systemPrompt)))) + history
+        // Limit active conversation history to a sensible count and total character size
+        val maxMessageCount = 10
+        val maxCharacterCount = 8000
+        
+        val boundedHistory = mutableListOf<com.example.data.model.Content>()
+        var currentChars = 0
+        
+        // Traverse history backwards to keep the most recent messages
+        for (msg in history.reversed()) {
+            if (boundedHistory.size >= maxMessageCount) break
+            
+            val textLen = msg.parts.sumOf { it.text?.length ?: 0 }
+            if (currentChars + textLen > maxCharacterCount && boundedHistory.isNotEmpty()) {
+                break
+            }
+            boundedHistory.add(0, msg)
+            currentChars += textLen
+        }
+
+        val fullContents = listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = systemPrompt)))) + boundedHistory
         val modelName = MODEL_FLASH
         val endpointCalled = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
         
-        val requestContents = fullContents.map { content ->
+        val requestContents = fullContents.mapIndexed { index, content ->
             val mappedParts = mutableListOf<com.example.data.model.Part>()
             content.parts.forEach { part ->
                 if (!part.text.isNullOrEmpty()) {
                     mappedParts.add(com.example.data.model.Part(text = part.text))
                 }
             }
-            content.imageUri?.let { uriStr ->
+            // Only attach heavy inline image data for the current message turn (last item in list)
+            val isCurrentTurn = index == fullContents.lastIndex
+            if (isCurrentTurn && content.imageUri != null) {
                 try {
-                    val uri = android.net.Uri.parse(uriStr)
+                    val uri = android.net.Uri.parse(content.imageUri)
                     val presetEnum = try {
                         com.example.utils.ImageOptimizer.CompressionPreset.valueOf(imageCompressionPreset.uppercase())
                     } catch (e: Exception) {
@@ -1372,7 +1490,7 @@ object RetrofitClient {
         tutorReply: String
     ): List<String> = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
+        if ((apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") && !isUsingBackend()) {
             return@withContext emptyList<String>()
         }
         
@@ -1412,6 +1530,58 @@ object RetrofitClient {
             Log.e("RetrofitClient", "extractMemoryAndPreferences failed: ${e.message}")
         }
         emptyList()
+    }
+
+    suspend fun generateConversationSummary(
+        context: android.content.Context,
+        olderMessages: List<com.example.data.model.Content>,
+        existingSummary: String?
+    ): String = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (apiKey.isEmpty() && !isUsingBackend()) {
+            return@withContext ""
+        }
+        
+        val prompt = buildString {
+            append("You are an expert language learning assistant.\n")
+            append("Your job is to summarize the older part of a language learning conversation between a student and their tutor.\n")
+            append("Provide a concise summary highlighting only information useful for continuing the conversation, such as:\n")
+            append("- The main grammar topics or vocabulary being studied.\n")
+            append("- Particular questions or exercises that were discussed.\n")
+            append("- Key corrections or areas where the student had difficulty.\n")
+            append("- Any progress, preferences, or decisions made.\n\n")
+            
+            if (!existingSummary.isNullOrBlank()) {
+                append("Previous summary of earlier parts of the conversation:\n")
+                append("\"$existingSummary\"\n\n")
+            }
+            
+            append("Older dialogue messages to be summarized and integrated:\n")
+            olderMessages.forEach { msg ->
+                val roleName = if (msg.role == "user") "Student" else "Tutor"
+                val text = msg.parts.firstOrNull()?.text ?: ""
+                append("$roleName: $text\n")
+            }
+            append("\nRULES:\n")
+            append("1. Keep the summary concise (under 100 words).\n")
+            append("2. Focus purely on key learning concepts, corrections, and topic progress.\n")
+            append("3. Do NOT use markdown formatting, code blocks, or bullets. Just write a few plain, clear sentences in English.\n")
+        }
+
+        val request = GenerateContentRequest(
+            contents = listOf(
+                com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = prompt)))
+            ),
+            generationConfig = GenerationConfig(temperature = 0.3f)
+        )
+        
+        try {
+            val response = callWithModelFallback(apiKey, request, MODEL_FLASH)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+        } catch (e: Exception) {
+            Log.e(TAG, "generateConversationSummary failed: ${e.message}", e)
+            existingSummary ?: ""
+        }
     }
 
     private fun generateSmartLocalTutorResponse(

@@ -41,6 +41,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -108,7 +111,7 @@ fun TutorChatScreen(
     val proficiencyLevel by viewModel.proficiencyLevel.collectAsState()
     val dailyStreak by viewModel.dailyStreak.collectAsState()
     val completedTopics by viewModel.completedTopicIds.collectAsState()
-    val settings by viewModel.appSettings.collectAsState(initial = com.example.data.model.AppSettings())
+    val userSettings by viewModel.userSettings.collectAsState()
 
     val showApiKeyGuideModal by viewModel.showApiKeyGuideModal.collectAsState()
     if (showApiKeyGuideModal) {
@@ -119,7 +122,7 @@ fun TutorChatScreen(
         )
     }
 
-    var showChatDetails by remember { mutableStateOf(false) }
+    val showChatDetails by viewModel.isTutorChatActive.collectAsState()
     var showNameChangeDialog by remember { mutableStateOf(false) }
     var showLevelDialog by remember { mutableStateOf(false) }
     var showDailyGrammarInline by remember { mutableStateOf(false) }
@@ -132,6 +135,7 @@ fun TutorChatScreen(
         val examViewModel: com.example.ui.viewmodel.ExamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
         com.example.ui.components.ExamModeDialog(
             viewModel = examViewModel,
+            lisanViewModel = viewModel,
             onDismiss = { showExamModeDialog = false }
         )
     }
@@ -139,6 +143,12 @@ fun TutorChatScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (e: Exception) {
+                android.util.Log.w("TutorChatScreen", "Could not persist URI read permission: ${e.message}")
+            }
             selectedImageUri = uri
         }
     }
@@ -146,7 +156,37 @@ fun TutorChatScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            selectedImageUri = uri
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (e: Exception) {
+                android.util.Log.w("TutorChatScreen", "Could not persist URI read permission: ${e.message}")
+            }
+
+            val fileName = try {
+                var name: String? = null
+                if (uri.scheme == "content") {
+                    val cursor = context.contentResolver.query(uri, null, null, null, null)
+                    cursor?.use {
+                        if (it.moveToFirst()) {
+                            val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1) name = it.getString(nameIndex)
+                        }
+                    }
+                }
+                name ?: uri.path?.substringAfterLast('/') ?: "file"
+            } catch (e: Exception) {
+                "file"
+            }
+            val mimeType = context.contentResolver.getType(uri) ?: ""
+            val isDoc = mimeType.contains("pdf") || mimeType.contains("word") || mimeType.contains("presentation") || mimeType.contains("spreadsheet") || mimeType.contains("text") ||
+                    fileName.endsWith(".pdf", ignoreCase = true) || fileName.endsWith(".docx", ignoreCase = true) || fileName.endsWith(".pptx", ignoreCase = true) || fileName.endsWith(".xlsx", ignoreCase = true) || fileName.endsWith(".txt", ignoreCase = true)
+
+            if (isDoc) {
+                viewModel.processSelectedDocument(uri, fileName)
+            } else {
+                selectedImageUri = uri
+            }
         }
     }
     var showThinkAndExplainDialog by remember { mutableStateOf(false) }
@@ -171,18 +211,36 @@ fun TutorChatScreen(
             selectedImageUri = cameraPhotoUri
         }
     }
+
+    val cleanupTempCameraPhoto = {
+        try {
+            val file = java.io.File(context.cacheDir, "temp_camera_photo.jpg")
+            if (file.exists()) {
+                file.delete()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("TutorChatScreen", "Failed to delete temporary camera photo: ${e.message}")
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            cleanupTempCameraPhoto()
+        }
+    }
+
     var showTutorPreferences by remember { mutableStateOf(false) }
 
     var imageMetadata by remember(selectedImageUri) {
         mutableStateOf<com.example.utils.ImageOptimizer.ImageMetadata?>(null)
     }
-    var optimizedSizeKBs by remember(selectedImageUri, settings.imageCompressionPreset) {
+    var optimizedSizeKBs by remember(selectedImageUri, userSettings.imageCompressionPreset) {
         mutableStateOf<Long?>(null)
     }
-    var optimizedWidth by remember(selectedImageUri, settings.imageCompressionPreset) {
+    var optimizedWidth by remember(selectedImageUri, userSettings.imageCompressionPreset) {
         mutableStateOf<Int?>(null)
     }
-    var optimizedHeight by remember(selectedImageUri, settings.imageCompressionPreset) {
+    var optimizedHeight by remember(selectedImageUri, userSettings.imageCompressionPreset) {
         mutableStateOf<Int?>(null)
     }
 
@@ -192,12 +250,12 @@ fun TutorChatScreen(
         }
     }
 
-    LaunchedEffect(selectedImageUri, settings.imageCompressionPreset) {
+    LaunchedEffect(selectedImageUri, userSettings.imageCompressionPreset) {
         if (selectedImageUri != null) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
                     val presetEnum = try {
-                        com.example.utils.ImageOptimizer.CompressionPreset.valueOf(settings.imageCompressionPreset.uppercase())
+                        com.example.utils.ImageOptimizer.CompressionPreset.valueOf(userSettings.imageCompressionPreset.uppercase())
                     } catch (e: Exception) {
                         com.example.utils.ImageOptimizer.CompressionPreset.BALANCED
                     }
@@ -342,12 +400,12 @@ fun TutorChatScreen(
                         onClose = { localScope.launch { localDrawerState.close() } },
                         onStartNewChat = {
                             viewModel.clearChat()
-                            showChatDetails = true
+                            viewModel.setTutorChatActive(true)
                             localScope.launch { localDrawerState.close() }
                         },
                         onConversationSelected = { sessionId ->
                             viewModel.continueConversationSession(sessionId)
-                            showChatDetails = true
+                            viewModel.setTutorChatActive(true)
                             localScope.launch { localDrawerState.close() }
                         }
                     )
@@ -421,7 +479,7 @@ fun TutorChatScreen(
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Button(
-                                    onClick = { showChatDetails = true },
+                                    onClick = { viewModel.setTutorChatActive(true) },
                                     colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
                                     shape = RoundedCornerShape(12.dp),
                                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
@@ -447,7 +505,7 @@ fun TutorChatScreen(
                             icon = Icons.Default.Chat,
                             backgroundColor = EditorialContainer,
                             modifier = Modifier.weight(1f),
-                            onClick = { showChatDetails = true }
+                            onClick = { viewModel.setTutorChatActive(true) }
                         )
 
                         // Action 2: Daily Grammar
@@ -549,7 +607,7 @@ fun TutorChatScreen(
                                 modifier = Modifier
                                     .clickable {
                                         viewModel.setActiveTutorMode(modeTitle)
-                                        showChatDetails = true
+                                        viewModel.setTutorChatActive(true)
                                     }
                             ) {
                                 Row(
@@ -647,7 +705,7 @@ fun TutorChatScreen(
                             desc = "Learn regular habits, routines, and subject-verb agreement rules.",
                             onClick = {
                                 viewModel.setActiveTutorMode("Explain Grammar")
-                                showChatDetails = true
+                                viewModel.setTutorChatActive(true)
                                 viewModel.sendChatMessage("Explain Simple Present Tense simply in Arabic.")
                             }
                         )
@@ -657,7 +715,7 @@ fun TutorChatScreen(
                             desc = "Understand when to use singular or plural verbs with complex subjects.",
                             onClick = {
                                 viewModel.setActiveTutorMode("Explain Grammar")
-                                showChatDetails = true
+                                viewModel.setTutorChatActive(true)
                                 viewModel.sendChatMessage("Tell me the rules of Subject-Verb Agreement with comparisons.")
                             }
                         )
@@ -735,7 +793,9 @@ fun TutorChatScreen(
         } else {
             // ACTIVE CHAT STREAM VIEW
             val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
-    var showTutorPreferences by remember { mutableStateOf(false) }
+            val activeDocState by viewModel.activeDocument.collectAsState()
+            val docProcessingState by viewModel.documentProcessingState.collectAsState()
+            var showTutorPreferences by remember { mutableStateOf(false) }
 
             val hasUserSentMessage = chatHistory.any { it.role == "user" }
             val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -799,7 +859,7 @@ fun TutorChatScreen(
                                 .size(44.dp)
                                 .clickable {
                                     viewModel.saveCurrentSessionToHistory()
-                                    showChatDetails = false
+                                    viewModel.setTutorChatActive(false)
                                 }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -914,14 +974,31 @@ fun TutorChatScreen(
                     }
                 }
 
+                com.example.ui.components.DocumentProcessingStatusBanner(
+                    processingState = docProcessingState,
+                    onDismiss = { viewModel.resetDocumentProcessingState() },
+                    onAnalyzeDocument = { doc -> viewModel.setActiveDocument(doc) }
+                )
+
+                com.example.ui.components.ActiveDocumentHeaderCard(
+                    activeDocument = activeDocState,
+                    onClearActiveDocument = { viewModel.setActiveDocument(null) }
+                )
+
                 // MAIN MESSAGES CONTENT CONTAINER
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
+                    ChatBackgroundRenderer(
+                        theme = userSettings.chatTheme,
+                        bgUri = userSettings.chatBackgroundImageUri,
+                        isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+                    )
+
                     if (!hasUserSentMessage) {
                         Box(
                             modifier = Modifier
@@ -963,35 +1040,23 @@ fun TutorChatScreen(
                                 val textContent = message.parts.firstOrNull()?.text ?: ""
 
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
                                     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                                     verticalAlignment = Alignment.Top
                                 ) {
-                                    if (!isUser) {
-                                        Box(
-                                            modifier = Modifier
-                                                .padding(end = 8.dp, top = 4.dp)
-                                                .size(32.dp)
-                                                .clip(CircleShape)
-                                                .background(EditorialPrimary),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("LS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                        }
-                                    }
-
                                     Surface(
-                                        modifier = Modifier.weight(1f, fill = false),
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.92f),
                                         color = if (isUser) EditorialPrimary else EditorialContainer,
                                         shape = RoundedCornerShape(
-                                            topStart = 20.dp,
-                                            topEnd = 20.dp,
-                                            bottomStart = if (isUser) 20.dp else 4.dp,
-                                            bottomEnd = if (isUser) 4.dp else 20.dp
+                                            topStart = 16.dp,
+                                            topEnd = 16.dp,
+                                            bottomStart = if (isUser) 16.dp else 2.dp,
+                                            bottomEnd = if (isUser) 2.dp else 16.dp
                                         ),
                                         border = if (isUser) null else BorderStroke(1.dp, EditorialBorder)
                                     ) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1058,6 +1123,39 @@ fun TutorChatScreen(
                                                     contentScale = androidx.compose.ui.layout.ContentScale.Fit
                                                 )
                                                 Spacer(modifier = Modifier.height(4.dp))
+
+                                                // If there's an active error and this is the last user message, show a "Retry" button directly on the bubble
+                                                val isLastUserMsg = chatHistory.lastOrNull { it.role == "user" } == message
+                                                if (isLastUserMsg && chatError != null) {
+                                                    Button(
+                                                        onClick = { viewModel.retryLastChatMessage() },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        modifier = Modifier
+                                                            .align(Alignment.Start)
+                                                            .padding(vertical = 4.dp)
+                                                            .testTag("bubble_retry_button")
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Refresh,
+                                                                contentDescription = "Retry Icon",
+                                                                tint = EditorialPrimary,
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                            Text(
+                                                                text = "Retry (دوبارہ کوشش کریں)",
+                                                                color = EditorialPrimary,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                }
                                             }
 
                                             FormattedMessageContent(
@@ -1093,21 +1191,7 @@ fun TutorChatScreen(
                                         }
                                     }
 
-                                    if (isUser) {
-                                        val authState = viewModel.authState.value
-                                        val currentUser = when (authState) {
-                                            is com.example.data.model.AuthState.LoggedIn -> authState.user
-                                            is com.example.data.model.AuthState.Guest -> authState.user
-                                            else -> null
-                                        }
-                                        UserAvatar(
-                                            photoPath = currentUser?.profilePhotoPath,
-                                            displayName = currentUser?.displayName ?: "Learner",
-                                            size = 32.dp,
-                                            fontSize = 11.sp,
-                                            modifier = Modifier.padding(start = 8.dp, top = 4.dp)
-                                        )
-                                    }
+                                    // User avatar removed to maximize chat bubble width and reduce scrolling
                                 }
                             }
 
@@ -1160,11 +1244,7 @@ fun TutorChatScreen(
                     val coroutineScope = rememberCoroutineScope()
                     val isScrollToBottomVisible by remember {
                         derivedStateOf {
-                            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-                            if (totalChatItems <= 1) false
-                            else {
-                                lastVisibleItem == null || lastVisibleItem.index < totalChatItems - 1
-                            }
+                            listState.canScrollForward
                         }
                     }
 
@@ -1173,7 +1253,7 @@ fun TutorChatScreen(
                         onClick = {
                             coroutineScope.launch {
                                 if (totalChatItems > 0) {
-                                    listState.animateScrollToItem(totalChatItems - 1)
+                                    listState.animateScrollToItem(totalChatItems - 1, scrollOffset = 10000)
                                 }
                             }
                         },
@@ -1483,7 +1563,7 @@ fun TutorChatScreen(
                                             ) {
                                                 val presets = com.example.utils.ImageOptimizer.CompressionPreset.values()
                                                 presets.forEach { preset ->
-                                                    val isSelected = settings.imageCompressionPreset.equals(preset.name, ignoreCase = true)
+                                                    val isSelected = userSettings.imageCompressionPreset.equals(preset.name, ignoreCase = true)
                                                     Surface(
                                                         color = if (isSelected) EditorialAccentPurple else EditorialSurface,
                                                         contentColor = if (isSelected) Color.White else EditorialPrimary,
@@ -1533,7 +1613,7 @@ fun TutorChatScreen(
                                             shape = CircleShape,
                                             modifier = Modifier
                                                 .size(40.dp)
-                                                .clickable { showPlusMenu = true }
+                                                .clickable { showPlusMenu = !showPlusMenu }
                                                 .testTag("plus_menu_button")
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
@@ -1547,7 +1627,7 @@ fun TutorChatScreen(
                                         }
 
                                         DropdownMenu(
-                                            expanded = showPlusMenu, properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                                            expanded = showPlusMenu,
                                             onDismissRequest = { showPlusMenu = false },
                                             modifier = Modifier.background(EditorialSurface)
                                         ) {
@@ -1688,7 +1768,7 @@ fun TutorChatScreen(
                                                   },
                                                   onClick = {
                                                       showPlusMenu = false
-                                                      filePickerLauncher.launch("image/*")
+                                                      filePickerLauncher.launch("*/*")
                                                   },
                                                   modifier = Modifier.testTag("menu_option_files")
                                               )
@@ -1720,7 +1800,34 @@ fun TutorChatScreen(
                                                       showThinkAndExplainDialog = true
                                                   },
                                                   modifier = Modifier.testTag("menu_option_think_explain")
-                                             )
+                                              )
+
+                                              HorizontalDivider(color = EditorialBorder)
+
+                                              DropdownMenuItem(
+                                                  text = {
+                                                      Row(
+                                                          verticalAlignment = Alignment.CenterVertically,
+                                                          horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                      ) {
+                                                          Icon(
+                                                              imageVector = Icons.Default.Palette,
+                                                              contentDescription = null,
+                                                              tint = EditorialAccentPurple,
+                                                              modifier = Modifier.size(20.dp)
+                                                          )
+                                                          Text(
+                                                              text = "Create Image",
+                                                              fontWeight = FontWeight.Bold,
+                                                              color = EditorialPrimary
+                                                          )
+                                                      }
+                                                  },
+                                                  onClick = {
+                                                      showPlusMenu = false
+                                                  },
+                                                  modifier = Modifier.testTag("menu_option_create_image")
+                                              )
                                         }
                                     }
 
@@ -1981,18 +2088,15 @@ fun TutorChatScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    val presets = listOf("Young Voice", "Mature Voice")
+                                    val presets = listOf("Young Voice", "Mature Voice", "Gentle Voice")
                                     val displayPresets = mapOf(
                                         "Young Voice" to "Young • نو عمر",
-                                        "Mature Voice" to "Mature • بزرگ"
+                                        "Mature Voice" to "Mature • بزرگ",
+                                        "Gentle Voice" to "Gentle • نرم"
                                     )
                                     
                                     presets.forEach { preset ->
-                                        val isSelected = if (preset == "Young Voice") {
-                                            settings.selectedSpeaker.contains("Young", ignoreCase = true)
-                                        } else {
-                                            settings.selectedSpeaker.contains("Mature", ignoreCase = true)
-                                        }
+                                        val isSelected = userSettings.selectedSpeaker.contains(preset.substringBefore(" "), ignoreCase = true)
 
                                         Surface(
                                             color = if (isSelected) EditorialAccentPurple else EditorialContainer,
@@ -2037,7 +2141,7 @@ fun TutorChatScreen(
                                 ) {
                                     val presets = com.example.utils.ImageOptimizer.CompressionPreset.values()
                                     presets.forEach { preset ->
-                                        val isSelected = settings.imageCompressionPreset.equals(preset.name, ignoreCase = true)
+                                        val isSelected = userSettings.imageCompressionPreset.equals(preset.name, ignoreCase = true)
 
                                         Surface(
                                             color = if (isSelected) EditorialAccentPurple else EditorialContainer,
@@ -3225,7 +3329,7 @@ fun TutorChatSidebar(
                         val activeLanguage by viewModel.activeLanguage.collectAsState()
                         val isStudyModeOn by viewModel.isStudyModeOn.collectAsState()
                         val isPersonalizationEnabled by viewModel.isStudyPersonalizationEnabled.collectAsState()
-                        val appSettings by viewModel.appSettings.collectAsState()
+                        val userSettings by viewModel.userSettings.collectAsState()
 
                         // Response Language
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3285,18 +3389,15 @@ fun TutorChatSidebar(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                val presets = listOf("Young Voice", "Mature Voice")
+                                val presets = listOf("Young Voice", "Mature Voice", "Gentle Voice")
                                 val displayPresets = mapOf(
                                     "Young Voice" to "Young • نو عمر",
-                                    "Mature Voice" to "Mature • بزرگ"
+                                    "Mature Voice" to "Mature • بزرگ",
+                                    "Gentle Voice" to "Gentle • نرم"
                                 )
                                 
                                 presets.forEach { preset ->
-                                    val isSelected = if (preset == "Young Voice") {
-                                        appSettings.selectedSpeaker.contains("Young", ignoreCase = true)
-                                    } else {
-                                        appSettings.selectedSpeaker.contains("Mature", ignoreCase = true)
-                                    }
+                                    val isSelected = userSettings.selectedSpeaker.contains(preset.substringBefore(" "), ignoreCase = true)
 
                                     Surface(
                                         color = if (isSelected) colors.accentPurple else colors.pillBg,
@@ -3777,6 +3878,8 @@ fun TutorMessageControls(
     messageId: String,
     viewModel: com.example.ui.viewmodel.LisanViewModel
 ) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val ttsManager = viewModel.ttsManager
     val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
     val isSpeaking = currentlySpeaking == messageId
@@ -3797,6 +3900,24 @@ fun TutorMessageControls(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.weight(1f)
         ) {
+            // Copy Text
+            IconButton(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(text))
+                    Toast.makeText(context, "Copied to clipboard • کاپی ہو گیا", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier
+                    .size(28.dp)
+                    .testTag("copy_button_$messageId")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy text",
+                    tint = EditorialTextSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
             // Save / Favorite Bookmark
             IconButton(
                 onClick = {
@@ -3962,113 +4083,114 @@ private fun cleanMarkdownSymbols(text: String): String {
 
 @Composable
 fun FormattedMessageContent(text: String, isUser: Boolean) {
-    if (isUser) {
-        val isRtl = isUrduOrArabicText(text)
-        Text(
-            text = text,
-            fontSize = if (isRtl) 19.sp else 15.sp,
-            fontWeight = if (isRtl) FontWeight.Bold else FontWeight.Normal,
-            color = Color.White,
-            lineHeight = if (isRtl) 32.sp else 22.sp,
-            textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
-            style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr)
-        )
-        return
-    }
-
-    val cleanedText = cleanMarkdownSymbols(text)
-    val lines = cleanedText.split("\n")
-
-    val knownHeaders = setOf(
-        "English Explanation", "Urdu Explanation", "اردو وضاحت",
-        "When We Use It", "اردو میں استعمال", "Sentence Pattern",
-        "Examples", "Positive Examples", "Negative Examples", "Question Examples",
-        "Common Mistakes", "Arabic Grammar Connection", "Practice",
-        "Lesson Title", "Simple English Explanation"
-    )
-
-    class LineItem(
-        val text: String,
-        val isHeader: Boolean,
-        val isSpecialExample: Boolean,
-        val hasBeforeGap: Boolean
-    )
-
-    val lineItems = mutableListOf<LineItem>()
-    var pendingGap = false
-
-    for (rawLine in lines) {
-        val trimmed = rawLine.trim()
-        if (trimmed.isEmpty()) {
-            pendingGap = true
+    SelectionContainer {
+        if (isUser) {
+            val isRtl = isUrduOrArabicText(text)
+            Text(
+                text = text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Normal,
+                color = Color.White,
+                lineHeight = 26.sp,
+                textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+                style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr)
+            )
         } else {
-            val isHeader = knownHeaders.any { header ->
-                trimmed.equals(header, ignoreCase = true) || (trimmed.startsWith(header, ignoreCase = true) && trimmed.length < 35)
-            }
-            val isSpecialExample = trimmed.startsWith("Positive:") || trimmed.startsWith("Negative:") || trimmed.startsWith("Question:")
-            
-            lineItems.add(LineItem(trimmed, isHeader, isSpecialExample, pendingGap))
-            pendingGap = false
-        }
-    }
+            val lines = text.split("\n")
 
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        lineItems.forEachIndexed { index, item ->
-            val isRtl = isUrduOrArabicText(item.text)
-            
-            // Calculate precise padding:
-            // Heading-content and paragraphs have comfortable educational separations.
-            val topPadding = if (index == 0) {
-                0.dp
-            } else if (item.hasBeforeGap) {
-                if (item.isHeader) 8.dp else 4.dp
-            } else {
-                if (item.isHeader) 4.dp else 1.dp
-            }
+            class LineItem(
+                val text: String,
+                val isHeader: Boolean,
+                val isSpecialExample: Boolean,
+                val hasBeforeGap: Boolean
+            )
 
-            if (item.isHeader) {
-                Text(
-                    text = item.text,
-                    fontSize = if (isRtl) 21.sp else 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isRtl) EditorialAccentPurple else EditorialPrimary,
-                    textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
-                    style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = topPadding)
-                )
-            } else if (item.isSpecialExample) {
-                Surface(
-                    color = EditorialContainer,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = topPadding)
-                ) {
-                    Text(
-                        text = item.text,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = EditorialPrimary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
+            val lineItems = mutableListOf<LineItem>()
+            var pendingGap = false
+
+            for (rawLine in lines) {
+                val trimmedRaw = rawLine.trim()
+                if (trimmedRaw.isEmpty()) {
+                    pendingGap = true
+                } else {
+                    val isHeader = trimmedRaw.startsWith("#")
+                    val cleanLine = if (isHeader) {
+                        trimmedRaw.replace(Regex("^#+\\s*"), "").trim()
+                    } else {
+                        trimmedRaw
+                            .replace("**", "")
+                            .replace("`", "")
+                            .replace(">", "")
+                            .trim()
+                    }
+
+                    val isSpecialExample = cleanLine.startsWith("Positive:") || cleanLine.startsWith("Negative:") || cleanLine.startsWith("Question:")
+                    
+                    if (cleanLine.isNotEmpty()) {
+                        lineItems.add(LineItem(cleanLine, isHeader, isSpecialExample, pendingGap))
+                        pendingGap = false
+                    }
                 }
-            } else {
-                Text(
-                    text = item.text,
-                    fontSize = if (isRtl) 19.sp else 15.sp,
-                    fontWeight = if (isRtl) FontWeight.Bold else FontWeight.Normal,
-                    color = EditorialTextPrimary,
-                    lineHeight = if (isRtl) 32.sp else 22.sp,
-                    textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
-                    style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = topPadding)
-                )
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                lineItems.forEachIndexed { index, item ->
+                    val isRtl = isUrduOrArabicText(item.text)
+                    
+                    val topPadding = if (index == 0) {
+                        0.dp
+                    } else if (item.hasBeforeGap) {
+                        if (item.isHeader) 10.dp else 6.dp
+                    } else {
+                        if (item.isHeader) 6.dp else 2.dp
+                    }
+
+                    if (item.isHeader) {
+                        Text(
+                            text = item.text,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isRtl) EditorialAccentPurple else EditorialPrimary,
+                            lineHeight = 24.sp,
+                            textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+                            style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = topPadding)
+                        )
+                    } else if (item.isSpecialExample) {
+                        Surface(
+                            color = EditorialContainer,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = topPadding)
+                        ) {
+                            Text(
+                                text = item.text,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = EditorialPrimary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = item.text,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = EditorialTextPrimary,
+                            lineHeight = 26.sp,
+                            textAlign = if (isRtl) TextAlign.Right else TextAlign.Left,
+                            style = TextStyle(textDirection = if (isRtl) TextDirection.Rtl else TextDirection.Ltr),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = topPadding)
+                        )
+                    }
+                }
             }
         }
     }

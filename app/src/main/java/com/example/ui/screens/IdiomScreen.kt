@@ -17,6 +17,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -250,6 +255,8 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
     val currentlySpeakingId by viewModel.activeSpeakingId.collectAsState()
     val isPlaying = currentlySpeakingId == idiom.id
     val isLoading = false
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -258,23 +265,42 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         )
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = idiom.expression,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Row {
-                    IconButton(
-                        onClick = { viewModel.playIdiomAudio(idiom.id) },
-                        enabled = !isLoading
-                    ) {
+        SelectionContainer {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = idiom.expression,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Row {
+                        IconButton(onClick = {
+                            val fullIdiomText = """
+                                |${idiom.expression}
+                                |Meaning: ${idiom.simpleMeaning}
+                                |Urdu: ${idiom.urduMeaning}
+                                |Example: ${idiom.example}
+                            """.trimMargin()
+                            clipboardManager.setText(AnnotatedString(fullIdiomText))
+                            Toast.makeText(context, "Copied idiom to clipboard • کاپی ہو گیا", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy Idiom",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.playIdiomAudio(idiom.id) },
+                            enabled = !isLoading
+                        ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
@@ -378,10 +404,13 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
                 )
                 Text(
                     text = idiom.urduMeaning,
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.fillMaxWidth(),
-                    fontWeight = FontWeight.Medium
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Normal,
+                    lineHeight = 26.sp,
+                    textAlign = TextAlign.Right,
+                    style = TextStyle(textDirection = TextDirection.Rtl),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
@@ -439,4 +468,5 @@ fun IdiomCard(idiom: Idiom, viewModel: LisanViewModel) {
             }
         }
     }
+}
 }

@@ -79,6 +79,8 @@ object HashRouter {
             "#/pronunciation" -> 13
             "#/picture-vocabulary" -> 14
             "#/api-key-guide", "#/implement-api-key" -> 15
+            "#/chat-theme" -> 16
+            "#/create-image" -> 17
             else -> 0
         }
     }
@@ -104,7 +106,35 @@ object HashRouter {
             13 -> "#/pronunciation"
             14 -> "#/picture-vocabulary"
             15 -> "#/api-key-guide"
+            16 -> "#/chat-theme"
+            17 -> "#/create-image"
             else -> "#/lessons"
+        }
+    }
+
+    private var isStartupRouteInitialized = false
+
+    fun tabNameToRoute(tabName: String): String {
+        return when (tabName) {
+            "Learn" -> "#/lessons"
+            "Analyze" -> "#/analyzer"
+            "Tutor" -> "#/tutor"
+            "Idioms" -> "#/idioms"
+            "Library" -> "#/library"
+            else -> "#/lessons"
+        }
+    }
+
+    fun initializeStartupRoute(tabName: String) {
+        if (!isStartupRouteInitialized) {
+            isStartupRouteInitialized = true
+            val route = tabNameToRoute(tabName)
+            _currentRoute.value = route
+            if (history.isEmpty()) {
+                history.add(route)
+            } else {
+                history[0] = route
+            }
         }
     }
 }

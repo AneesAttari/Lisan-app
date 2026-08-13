@@ -62,10 +62,13 @@ android {
 
 // Dynamically write .env file from environment variables if present
 val envFile = file("${rootDir}/.env")
-val envKey = System.getenv("GEMINI_API_KEY") ?: ""
-if (envKey.isNotEmpty()) {
-  envFile.writeText("GEMINI_API_KEY=$envKey\n")
-}
+val backendUrl = System.getenv("BACKEND_URL") ?: "https://lisan-ai-backend.example.com"
+val backendSecret = System.getenv("BACKEND_API_SECRET") ?: "lisan_dev_secure_8a7d2f9e4b6c810d_prod_verified"
+
+val envContent = StringBuilder()
+envContent.append("BACKEND_URL=$backendUrl\n")
+envContent.append("BACKEND_API_SECRET=$backendSecret\n")
+envFile.writeText(envContent.toString())
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.

@@ -30,7 +30,7 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -79,6 +79,7 @@ import com.example.ui.theme.*
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.foundation.text.selection.SelectionContainer
 
 private fun countRtlChars(text: String): Int {
     var count = 0
@@ -269,141 +270,143 @@ fun EditorialMixedText(
     val primaryColor = EditorialTheme.colors.primary
     val accentColor = EditorialTheme.colors.accentPurple
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        text.split("\n").forEach { line ->
-            val trimmed = line.trim()
-            if (trimmed.isEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                return@forEach
-            }
+    SelectionContainer {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            text.split("\n").forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    return@forEach
+                }
 
-            // 1. Check for Headers
-            if (trimmed.startsWith("###")) {
-                val rawHeaderText = trimmed.removePrefix("###").trim()
-                val headerText = mapHeaderToIcon(rawHeaderText)
-                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
-                val hasRtl = isLineRtl(headerText)
-                
-                Text(
-                    text = annotated,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Serif,
-                    color = primaryColor,
-                    textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp)
-                )
-            } else if (trimmed.startsWith("##")) {
-                val rawHeaderText = trimmed.removePrefix("##").trim()
-                val headerText = mapHeaderToIcon(rawHeaderText)
-                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
-                val hasRtl = isLineRtl(headerText)
-                
-                Text(
-                    text = annotated,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Serif,
-                    color = primaryColor,
-                    textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)
-                )
-            } else if (trimmed.startsWith("#")) {
-                val rawHeaderText = trimmed.removePrefix("#").trim()
-                val headerText = mapHeaderToIcon(rawHeaderText)
-                val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
-                val hasRtl = isLineRtl(headerText)
-                
-                Text(
-                    text = annotated,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Serif,
-                    color = primaryColor,
-                    textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp)
-                )
-            }
-            // 2. Check for Bullet Points
-            else if (trimmed.startsWith("* ") || trimmed.startsWith("- ") || trimmed.startsWith("• ")) {
-                val bulletText = trimmed.substring(2).trim()
-                val annotated = parseMarkdownToAnnotatedString(bulletText, textColor = color, boldColor = accentColor)
-                val hasRtl = isLineRtl(bulletText)
-                val lineFontSize = if (hasRtl) (fontSize.value + 1.5f).sp else fontSize
-                val lineLineHeight = if (hasRtl) (lineHeight.value + 6f).sp else lineHeight
-                
-                if (hasRtl) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Text(
-                            text = annotated,
-                            fontSize = lineFontSize,
-                            lineHeight = lineLineHeight,
-                            color = color,
-                            fontFamily = fontFamily ?: FontFamily.Default,
-                            fontStyle = fontStyle,
-                            fontWeight = fontWeight ?: FontWeight.Normal,
-                            textAlign = TextAlign.Right,
-                            style = TextStyle(textDirection = TextDirection.Rtl),
-                            modifier = Modifier.weight(1f).padding(end = 6.dp)
-                        )
-                        Text(
-                            text = "•",
-                            fontSize = lineFontSize,
-                            fontWeight = FontWeight.Bold,
-                            color = accentColor,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Start
-                    ) {
-                        Text(
-                            text = "•",
-                            fontSize = lineFontSize,
-                            fontWeight = FontWeight.Bold,
-                            color = accentColor,
-                            modifier = Modifier.padding(top = 2.dp, end = 6.dp)
-                        )
-                        Text(
-                            text = annotated,
-                            fontSize = lineFontSize,
-                            lineHeight = lineLineHeight,
-                            color = color,
-                            fontFamily = fontFamily ?: FontFamily.Default,
-                            fontStyle = fontStyle,
-                            fontWeight = fontWeight ?: FontWeight.Normal,
-                            textAlign = TextAlign.Left,
-                            style = TextStyle(textDirection = TextDirection.Ltr),
-                            modifier = Modifier.weight(1f)
-                        )
+                // 1. Check for Headers
+                if (trimmed.startsWith("###")) {
+                    val rawHeaderText = trimmed.removePrefix("###").trim()
+                    val headerText = mapHeaderToIcon(rawHeaderText)
+                    val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
+                    val hasRtl = isLineRtl(headerText)
+                    
+                    Text(
+                        text = annotated,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Serif,
+                        color = primaryColor,
+                        textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp)
+                    )
+                } else if (trimmed.startsWith("##")) {
+                    val rawHeaderText = trimmed.removePrefix("##").trim()
+                    val headerText = mapHeaderToIcon(rawHeaderText)
+                    val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
+                    val hasRtl = isLineRtl(headerText)
+                    
+                    Text(
+                        text = annotated,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Serif,
+                        color = primaryColor,
+                        textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)
+                    )
+                } else if (trimmed.startsWith("#")) {
+                    val rawHeaderText = trimmed.removePrefix("#").trim()
+                    val headerText = mapHeaderToIcon(rawHeaderText)
+                    val annotated = parseMarkdownToAnnotatedString(headerText, textColor = primaryColor, boldColor = primaryColor)
+                    val hasRtl = isLineRtl(headerText)
+                    
+                    Text(
+                        text = annotated,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Serif,
+                        color = primaryColor,
+                        textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp)
+                    )
+                }
+                // 2. Check for Bullet Points
+                else if (trimmed.startsWith("* ") || trimmed.startsWith("- ") || trimmed.startsWith("• ")) {
+                    val bulletText = trimmed.substring(2).trim()
+                    val annotated = parseMarkdownToAnnotatedString(bulletText, textColor = color, boldColor = accentColor)
+                    val hasRtl = isLineRtl(bulletText)
+                    val lineFontSize = if (hasRtl) (fontSize.value + 1.5f).sp else fontSize
+                    val lineLineHeight = if (hasRtl) (lineHeight.value + 6f).sp else lineHeight
+                    
+                    if (hasRtl) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = annotated,
+                                fontSize = lineFontSize,
+                                lineHeight = lineLineHeight,
+                                color = color,
+                                fontFamily = fontFamily ?: FontFamily.Default,
+                                fontStyle = fontStyle,
+                                fontWeight = fontWeight ?: FontWeight.Normal,
+                                textAlign = TextAlign.Right,
+                                style = TextStyle(textDirection = TextDirection.Rtl),
+                                modifier = Modifier.weight(1f).padding(end = 6.dp)
+                            )
+                            Text(
+                                text = "•",
+                                fontSize = lineFontSize,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Start
+                        ) {
+                            Text(
+                                text = "•",
+                                fontSize = lineFontSize,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor,
+                                modifier = Modifier.padding(top = 2.dp, end = 6.dp)
+                            )
+                            Text(
+                                text = annotated,
+                                fontSize = lineFontSize,
+                                lineHeight = lineLineHeight,
+                                color = color,
+                                fontFamily = fontFamily ?: FontFamily.Default,
+                                fontStyle = fontStyle,
+                                fontWeight = fontWeight ?: FontWeight.Normal,
+                                textAlign = TextAlign.Left,
+                                style = TextStyle(textDirection = TextDirection.Ltr),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
-            }
-            // 3. Regular Paragraph
-            else {
-                val annotated = parseMarkdownToAnnotatedString(trimmed, textColor = color, boldColor = accentColor)
-                val hasRtl = isLineRtl(trimmed)
-                val textDir = if (hasRtl) TextDirection.Rtl else TextDirection.Ltr
-                val lineFontSize = if (hasRtl) (fontSize.value + 1.5f).sp else fontSize
-                val lineLineHeight = if (hasRtl) (lineHeight.value + 6f).sp else lineHeight
-                
-                Text(
-                    text = annotated,
-                    fontSize = lineFontSize,
-                    lineHeight = lineLineHeight,
-                    color = color,
-                    fontFamily = fontFamily ?: FontFamily.Default,
-                    fontStyle = fontStyle,
-                    fontWeight = fontWeight ?: FontWeight.Normal,
-                    textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
-                    style = TextStyle(textDirection = textDir),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // 3. Regular Paragraph
+                else {
+                    val annotated = parseMarkdownToAnnotatedString(trimmed, textColor = color, boldColor = accentColor)
+                    val hasRtl = isLineRtl(trimmed)
+                    val textDir = if (hasRtl) TextDirection.Rtl else TextDirection.Ltr
+                    val lineFontSize = if (hasRtl) (fontSize.value + 1.5f).sp else fontSize
+                    val lineLineHeight = if (hasRtl) (lineHeight.value + 6f).sp else lineHeight
+                    
+                    Text(
+                        text = annotated,
+                        fontSize = lineFontSize,
+                        lineHeight = lineLineHeight,
+                        color = color,
+                        fontFamily = fontFamily ?: FontFamily.Default,
+                        fontStyle = fontStyle,
+                        fontWeight = fontWeight ?: FontWeight.Normal,
+                        textAlign = if (hasRtl) TextAlign.Right else TextAlign.Left,
+                        style = TextStyle(textDirection = textDir),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
@@ -822,10 +825,10 @@ fun ScrollToBottomFAB(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = Icons.Default.KeyboardDoubleArrowDown,
+                    imageVector = Icons.Default.KeyboardArrowDown,
                     contentDescription = "Scroll to Bottom",
                     tint = EditorialTheme.colors.accentPurple,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }

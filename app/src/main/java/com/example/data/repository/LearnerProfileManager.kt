@@ -148,14 +148,16 @@ class LearnerProfileManager(context: Context) {
             mastered.remove(topic)
         }
 
-        // Useful Memories
+        // Useful Memories: Only store recurring difficulties or significant achievements
         val memories = current.usefulMemories.toMutableList()
-        val memoryText = if (isCorrect) {
-            "Student answered $topic question correctly ($type)."
-        } else {
-            "Student needs review on $topic (Answered '$userAnswer' instead of '$correctAnswer')."
+        if (!isCorrect) {
+            val topicMistakes = mistakes.find { it.topic.equals(topic, ignoreCase = true) }
+            if (topicMistakes != null && topicMistakes.frequency >= 3) {
+                addUniqueMemory(memories, "Student has recurring difficulty with $topic.")
+            }
+        } else if (newMastery >= 0.85f) {
+            addUniqueMemory(memories, "Student has mastered the grammar topic: $topic.")
         }
-        addUniqueMemory(memories, memoryText)
 
         // Recent Learning
         val recent = current.recentLearning.toMutableList()
@@ -192,12 +194,11 @@ class LearnerProfileManager(context: Context) {
         val memories = current.usefulMemories.toMutableList()
 
         if (userPrompt.contains("confused", ignoreCase = true) ||
-            userPrompt.contains("سمجھ نہیں آتا", ignoreCase = true) ||
+            userPrompt.contains("understand", ignoreCase = true) ||
+            userPrompt.contains("samjh nahi", ignoreCase = true) ||
             userPrompt.contains("فرق", ignoreCase = true) ||
             userPrompt.contains("difference", ignoreCase = true)) {
             addUniqueMemory(memories, "Student requested detailed clarification on $detectedTopic.")
-        } else {
-            addUniqueMemory(memories, "Student asked Tutor AI about $detectedTopic.")
         }
 
         // Explicit Heuristics Extractions
@@ -256,8 +257,6 @@ class LearnerProfileManager(context: Context) {
 
         val totalInteractions = current.totalInteractions + 1
         val topic = detectTopicFromText(sentence)
-        val memories = current.usefulMemories.toMutableList()
-        addUniqueMemory(memories, "Student analyzed sentence: '$sentence' ($topic).")
 
         val recent = current.recentLearning.toMutableList()
         recent.add(0, RecentLearningItem(
@@ -269,7 +268,6 @@ class LearnerProfileManager(context: Context) {
 
         saveProfile(current.copy(
             totalInteractions = totalInteractions,
-            usefulMemories = memories.take(25),
             recentLearning = recent
         ))
     }
@@ -281,7 +279,9 @@ class LearnerProfileManager(context: Context) {
         val totalInteractions = current.totalInteractions + 1
         val memories = current.usefulMemories.toMutableList()
         val status = if (isCompleted) "completed" else "opened"
-        addUniqueMemory(memories, "Student $status lesson: '$topicTitle'.")
+        if (isCompleted) {
+            addUniqueMemory(memories, "Student completed lesson: '$topicTitle'.")
+        }
 
         val updatedMastery = current.topicMastery.toMutableMap()
         if (isCompleted) {
@@ -310,7 +310,7 @@ class LearnerProfileManager(context: Context) {
         if (!current.isMemoryEnabled) return
 
         val memories = current.usefulMemories.toMutableList()
-        addUniqueMemory(memories, "Student bookmarked/saved $type: '$title'.")
+        addUniqueMemory(memories, "Student saved $type: '$title' to their favorites.")
 
         saveProfile(current.copy(
             usefulMemories = memories.take(25)
@@ -331,11 +331,6 @@ class LearnerProfileManager(context: Context) {
         val updatedMasteryMap = current.topicMastery.toMutableMap()
         updatedMasteryMap[topic] = newMastery
 
-        // Useful Memories
-        val memories = current.usefulMemories.toMutableList()
-        val outcome = if (isCorrect) "correctly" else "incorrectly"
-        addUniqueMemory(memories, "Student answered Lisan Daily Challenge on '$topic' $outcome.")
-
         // Recent Learning
         val recent = current.recentLearning.toMutableList()
         recent.add(0, RecentLearningItem(
@@ -353,7 +348,6 @@ class LearnerProfileManager(context: Context) {
             totalQuestionsAnswered = totalQuestions,
             correctAnswersCount = correctCount,
             topicMastery = updatedMasteryMap,
-            usefulMemories = memories.take(25),
             recentLearning = recent,
             learningLevel = evalLevel
         ))
