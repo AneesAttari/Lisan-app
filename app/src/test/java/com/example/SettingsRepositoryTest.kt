@@ -19,7 +19,7 @@ class SettingsRepositoryTest {
         assertEquals("Default", settings.fontSize)
         assertEquals(1.0f, settings.fontScale, 0.01f)
         assertTrue(settings.showArabicGrammarComparison)
-        assertTrue(settings.romanUrduAssistance)
+        assertFalse(settings.romanUrduAssistance)
         assertEquals("Learn", settings.defaultLearningTab)
         assertTrue(settings.dailyReminderEnabled)
         assertEquals(9, settings.reminderHour)

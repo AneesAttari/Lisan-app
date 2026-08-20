@@ -14,6 +14,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -35,13 +36,34 @@ fun GeneratingLightingGlow(
 
     // Gentle pulsing/breathing scale and alpha for the gradient orb
     val orbAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
+        initialValue = 0.5f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "orb_alpha"
+    )
+
+    val orbScale by infiniteTransition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "orb_scale"
+    )
+
+    // Subtle container surface alpha breathing
+    val surfaceAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "surface_alpha"
     )
 
     // Staggered bounce/fade for 3 dots
@@ -117,6 +139,7 @@ fun GeneratingLightingGlow(
         ),
         modifier = modifier
             .widthIn(max = 280.dp)
+            .alpha(surfaceAlpha)
             .testTag("generating_lighting_glow_container")
     ) {
         Column(
@@ -127,10 +150,11 @@ fun GeneratingLightingGlow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Small soft lavender/pale blue gradient orb
+                // Small soft lavender/pale blue gradient orb with breathing scale
                 Box(
                     modifier = Modifier
                         .size(16.dp)
+                        .graphicsLayer(scaleX = orbScale, scaleY = orbScale)
                         .alpha(orbAlpha)
                         .background(brush = orbBrush, shape = CircleShape)
                 )

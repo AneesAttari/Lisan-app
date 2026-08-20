@@ -16,7 +16,16 @@ data class Content(
     val role: String? = null,
     val parts: List<Part>,
     @kotlinx.serialization.Transient var debugMetadata: TutorDebugMetadata? = null,
-    @kotlinx.serialization.Transient val imageUri: String? = null
+    @kotlinx.serialization.Transient val imageUri: String? = null,
+    @kotlinx.serialization.Transient var generatedPdfUri: String? = null,
+    @kotlinx.serialization.Transient var generatedPdfPath: String? = null,
+    @kotlinx.serialization.Transient var generatedPdfTitle: String? = null,
+    @kotlinx.serialization.Transient var generatedPdfSubtitle: String? = null,
+    @kotlinx.serialization.Transient var generatedPdfPageCount: Int = 0,
+    @kotlinx.serialization.Transient var generatedPdfSizeBytes: Long = 0L,
+    @kotlinx.serialization.Transient var generatedImageBase64: String? = null,
+    @kotlinx.serialization.Transient var generatedImageMimeType: String? = "image/png",
+    @kotlinx.serialization.Transient var generatedImagePrompt: String? = null
 )
 
 @Serializable
@@ -46,8 +55,8 @@ data class InlineData(
 
 @Serializable
 data class ImageConfig(
-    val aspectRatio: String,
-    val imageSize: String
+    val aspectRatio: String? = "1:1",
+    val imageSize: String? = "1K"
 )
 
 @Serializable

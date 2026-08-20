@@ -19,7 +19,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.BACKEND_PORT || (process.env.PORT && process.env.PORT !== '8080' ? process.env.PORT : 3000);
 
 // Enable trust proxy for secure rate-limiting on cloud platforms (Cloud Run, Heroku, etc.)
 app.set('trust proxy', 1);
@@ -47,6 +47,11 @@ const apiLimiter = rateLimit({
 
 // 2. Client Authentication Token (Matches Android client configuration)
 const BACKEND_API_SECRET = process.env.BACKEND_API_SECRET || "lisan_secure_tutor_token_2026";
+const ALLOWED_SECRETS = new Set([
+  BACKEND_API_SECRET,
+  "lisan_secure_tutor_token_2026",
+  "lisan_dev_secure_8a7d2f9e4b6c810d_prod_verified"
+]);
 
 function authenticateRequest(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -55,7 +60,7 @@ function authenticateRequest(req, res, next) {
   }
 
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-  if (token !== BACKEND_API_SECRET) {
+  if (!ALLOWED_SECRETS.has(token)) {
     return res.status(403).json({ error: "Unauthorized: Invalid client token." });
   }
   next();

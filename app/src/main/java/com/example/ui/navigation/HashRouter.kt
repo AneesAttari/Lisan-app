@@ -11,11 +11,11 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object HashRouter {
     // Current active route path
-    private val _currentRoute = MutableStateFlow("#/lessons")
+    private val _currentRoute = MutableStateFlow("#/tutor")
     val currentRoute: StateFlow<String> = _currentRoute.asStateFlow()
 
     // Navigation history to allow back-navigation if needed
-    private val history = mutableListOf("#/lessons")
+    private val history = mutableListOf("#/tutor")
 
     /**
      * Navigates to a new hash route.
@@ -81,7 +81,7 @@ object HashRouter {
             "#/api-key-guide", "#/implement-api-key" -> 15
             "#/chat-theme" -> 16
             "#/create-image" -> 17
-            else -> 0
+            else -> 2
         }
     }
 
@@ -108,7 +108,7 @@ object HashRouter {
             15 -> "#/api-key-guide"
             16 -> "#/chat-theme"
             17 -> "#/create-image"
-            else -> "#/lessons"
+            else -> "#/tutor"
         }
     }
 
@@ -121,7 +121,7 @@ object HashRouter {
             "Tutor" -> "#/tutor"
             "Idioms" -> "#/idioms"
             "Library" -> "#/library"
-            else -> "#/lessons"
+            else -> "#/tutor"
         }
     }
 

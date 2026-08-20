@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -436,30 +437,34 @@ fun EditorialHeader(
     val iconTint = colors.primary
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .statusBarsPadding(),
         color = headerBg,
-        shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp),
+        shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
         border = BorderStroke(1.dp, borderStrokeColor)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = 24.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = subtitle.uppercase(),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.0.sp,
-                    color = subtitleColor,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
+                if (subtitle.isNotBlank() && !subtitle.contains("Grammar Guide", ignoreCase = true)) {
+                    Text(
+                        text = subtitle.uppercase(),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.0.sp,
+                        color = subtitleColor,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
                 Text(
                     text = title,
-                    fontSize = 28.sp,
+                    fontSize = 24.sp,
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic,
@@ -480,36 +485,6 @@ fun EditorialHeader(
                             displayName = userDisplayName ?: "Learner",
                             size = 32.dp,
                             fontSize = 11.sp
-                        )
-                    }
-                }
-                if (onToggleTheme != null) {
-                    IconButton(
-                        onClick = onToggleTheme,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "Toggle Theme",
-                            tint = iconTint,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-                if (!levelBadge.isNullOrBlank()) {
-                    Surface(
-                        color = levelBadgeBg,
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { onLevelClick?.invoke() }
-                    ) {
-                        Text(
-                            text = levelBadge,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = levelBadgeText,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -852,6 +827,37 @@ fun ScrollToBottomFAB(
         onClick = {
             coroutineScope.launch {
                 scrollState.animateScrollTo(scrollState.maxValue)
+            }
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun ScrollToBottomFAB(
+    lazyListState: androidx.compose.foundation.lazy.LazyListState,
+    modifier: Modifier = Modifier
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val isVisible by remember {
+        derivedStateOf {
+            val totalItems = lazyListState.layoutInfo.totalItemsCount
+            if (totalItems <= 0) false
+            else {
+                val lastVisibleItemIndex = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                lastVisibleItemIndex < totalItems - 1
+            }
+        }
+    }
+
+    ScrollToBottomFAB(
+        visible = isVisible,
+        onClick = {
+            coroutineScope.launch {
+                val totalItems = lazyListState.layoutInfo.totalItemsCount
+                if (totalItems > 0) {
+                    lazyListState.animateScrollToItem(totalItems - 1)
+                }
             }
         },
         modifier = modifier

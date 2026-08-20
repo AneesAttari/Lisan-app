@@ -142,13 +142,6 @@ fun LisanMainApp(
     pictureVocabularyViewModel: com.example.ui.viewmodel.PictureVocabularyViewModel,
     lisanJourneyViewModel: LisanJourneyViewModel
 ) {
-    var showSplashScreen by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1600)
-        showSplashScreen = false
-    }
-
     val currentRoute by HashRouter.currentRoute.collectAsState()
     val selectedTab = remember(currentRoute) { HashRouter.routeToTab(currentRoute) }
     val proficiencyLevel by viewModel.proficiencyLevel.collectAsState()
@@ -232,7 +225,11 @@ fun LisanMainApp(
         )
     }
 
-    BackHandler(enabled = selectedTab != 0 || drawerState.isOpen || showAuthDialog || showProfileDialog || showLevelDialog) {
+    val defaultTab = remember(userSettings.defaultLearningTab) {
+        HashRouter.routeToTab(HashRouter.tabNameToRoute(userSettings.defaultLearningTab))
+    }
+
+    BackHandler(enabled = selectedTab != defaultTab || drawerState.isOpen || showAuthDialog || showProfileDialog || showLevelDialog) {
         if (showAuthDialog) {
             showAuthDialog = false
         } else if (showProfileDialog) {
@@ -241,9 +238,9 @@ fun LisanMainApp(
             showLevelDialog = false
         } else if (drawerState.isOpen) {
             scope.launch { drawerState.close() }
-        } else if (selectedTab != 0) {
+        } else if (selectedTab != defaultTab) {
             if (!HashRouter.goBack()) {
-                HashRouter.navigate("#/lessons")
+                HashRouter.navigate(HashRouter.tabNameToRoute(userSettings.defaultLearningTab))
             }
         }
     }
@@ -482,7 +479,7 @@ fun LisanMainApp(
                     topBar = {
                         if (selectedTab != 2 || !isTutorChatActive) {
                             EditorialHeader(
-                                subtitle = "(English & Arabic Grammar Guide)",
+                                subtitle = "",
                                 title = tabTitles[selectedTab] ?: "Lisan Grammar",
                                 levelBadge = proficiencyLevel.labelEn,
                                 onLevelClick = { showLevelDialog = true },
@@ -513,10 +510,21 @@ fun LisanMainApp(
                         }
                     }
                 ) { innerPadding ->
+                    val isImeVisible = WindowInsets.isImeVisible
+                    val bottomPadding = if (isImeVisible) {
+                        WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+                    } else {
+                        innerPadding.calculateBottomPadding()
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(innerPadding)
+                            .padding(
+                                start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
+                                top = innerPadding.calculateTopPadding(),
+                                end = innerPadding.calculateEndPadding(LocalLayoutDirection.current),
+                                bottom = bottomPadding
+                            )
                     ) {
                         // HashRouterBar removed
                         Box(
@@ -547,22 +555,6 @@ fun LisanMainApp(
                     }
                 }
             }
-        }
-    }
-
-    if (showSplashScreen) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF1E0040)),
-            contentAlignment = Alignment.Center
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.lisan_ai_splash_screen_1786018639638),
-                contentDescription = "Lisan AI Splash Screen",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
         }
     }
 }

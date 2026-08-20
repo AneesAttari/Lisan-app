@@ -594,27 +594,9 @@ fun SettingsScreen(
         if (matchesQuery("profile", "learner", "name", "level", "language", "goal", "minutes", "urdu", "arabic")) {
             SettingsCategoryCard(
                 title = "1. Learner Profile & Goals",
-                subtitle = "Manage your display name, English proficiency level, and study goals.",
+                subtitle = "Manage your English proficiency level, native language, and study goals.",
                 icon = Icons.Default.Person
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showEditProfileDialog = true }
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Display Name", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = EditorialPrimary)
-                        Text(userSettings.displayName, fontSize = 12.sp, color = EditorialTheme.colors.textSecondary)
-                    }
-                    OutlinedButton(onClick = { showEditProfileDialog = true }, shape = RoundedCornerShape(8.dp)) {
-                        Text("Edit", fontSize = 12.sp)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
                 Text("English Proficiency Level", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),

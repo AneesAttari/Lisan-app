@@ -478,6 +478,70 @@ fun ImplementApiKeyScreen(viewModel: LisanViewModel) {
                         )
                     }
                 }
+
+                // Temporary Isolated Diagnostic Button: Test Gemini Connection
+                Button(
+                    onClick = {
+                        val keyPresent = inputKey.isNotBlank()
+                        val keyLen = inputKey.trim().length
+                        android.util.Log.d("LisanDiagnostic", "BROWSER_BYOK_KEY_PRESENT=$keyPresent")
+                        android.util.Log.d("LisanDiagnostic", "BROWSER_BYOK_KEY_LENGTH=$keyLen")
+                        android.util.Log.d("LisanDiagnostic", "BROWSER_BYOK_REQUEST_STARTED=true")
+                        android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_REQUEST_STARTED")
+
+                        if (!keyPresent) {
+                            testResultMsg = "❌ BROWSER_BYOK_KEY_PRESENT=false. Please enter a valid API key first."
+                            android.util.Log.e("LisanDiagnostic", "BROWSER_GEMINI_ERROR: API key is blank")
+                            return@Button
+                        }
+
+                        isTestingKey = true
+                        testResultMsg = "Testing Gemini Connection with 'Say hello.'..."
+                        coroutineScope.launch {
+                            try {
+                                val req = com.example.data.model.GenerateContentRequest(
+                                    contents = listOf(com.example.data.model.Content(parts = listOf(com.example.data.model.Part(text = "Say hello."))))
+                                )
+                                val response = com.example.data.remote.RetrofitClient.service.generateContent("gemini-3.5-flash", inputKey.trim(), req)
+                                android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_HTTP_STATUS=200 OK")
+                                android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_RESPONSE_RECEIVED")
+                                val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+                                android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_RESPONSE_TEXT_LENGTH=${text.length}")
+                                testResultMsg = "✅ BROWSER_GEMINI_HTTP_STATUS=200 OK\nResponse Length: ${text.length}\nResponse: $text"
+                                Toast.makeText(context, "✅ Connection Success! Response: $text", Toast.LENGTH_LONG).show()
+                            } catch (e: Exception) {
+                                val httpCode = if (e is retrofit2.HttpException) e.code() else 500
+                                android.util.Log.e("LisanDiagnostic", "BROWSER_GEMINI_HTTP_STATUS=$httpCode")
+                                android.util.Log.e("LisanDiagnostic", "BROWSER_GEMINI_ERROR: ${e.message}", e)
+                                testResultMsg = "❌ BROWSER_GEMINI_HTTP_STATUS=$httpCode\nBROWSER_GEMINI_ERROR: ${e.localizedMessage ?: e.message}"
+                                Toast.makeText(context, "❌ Connection Failed [HTTP $httpCode]", Toast.LENGTH_LONG).show()
+                            } finally {
+                                isTestingKey = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = !isTestingKey
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isTestingKey) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.NetworkCheck, contentDescription = null, tint = Color.White)
+                        }
+                        Text(
+                            text = if (isTestingKey) "Testing Connection..." else "Test Gemini Connection ('Say hello.')",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
             }
         }
 

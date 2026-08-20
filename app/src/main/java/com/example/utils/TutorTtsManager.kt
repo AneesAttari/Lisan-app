@@ -175,7 +175,13 @@ class TutorTtsManager(private val context: Context) {
     private var lastSpokenText: String? = null
 
     sealed class SpeechAction
-    data class SpeakChunk(val text: String, val languageTag: String, val pitchMod: Float) : SpeechAction()
+    data class SpeakChunk(
+        val text: String, 
+        val languageTag: String, 
+        val pitchMod: Float,
+        @Volatile var preparedFile: File? = null,
+        @Volatile var isPreparing: Boolean = false
+    ) : SpeechAction()
     data class PauseChunk(val durationMs: Long) : SpeechAction()
 
     fun setSpeechRate(rate: Float) {
@@ -303,6 +309,15 @@ class TutorTtsManager(private val context: Context) {
     }
 
     fun stop() {
+        // Clean up any prepared files to prevent disk usage build up
+        for (action in speechQueue) {
+            if (action is SpeakChunk) {
+                try {
+                    action.preparedFile?.delete()
+                } catch (_: Exception) {}
+                action.preparedFile = null
+            }
+        }
         speechQueue.clear()
         isPlayingQueue = false
         isPaused = false
@@ -323,6 +338,98 @@ class TutorTtsManager(private val context: Context) {
 
     private var currentRate: Float = 1.0f
 
+    private fun normalizeTextForTts(text: String): String {
+        // Remove emojis and other symbol/pictograph characters
+        val emojiRegex = Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+|[\\u2600-\\u27BF]")
+        val cleanFromEmojis = text.replace(emojiRegex, "")
+        
+        return cleanFromEmojis
+            .replace(":", " ")
+            .replace("؛", "،")
+            .replace(";", ",")
+            .replace("!", ".")
+            .replace("¡", ".")
+            .replace("-", " ")
+            .replace("—", " ")
+            .replace(Regex("[*#`|~^=+_\\\\/\\<\\>\\[\\]{}\\(\\)\"\'@$%&]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun preSynthesizeRemainingChunks() {
+        if (isCloudTtsDisabled) return
+        
+        // Loop through all actions currently in the speechQueue and pre-synthesize SpeakChunks
+        for (action in speechQueue) {
+            if (action is SpeakChunk && action.preparedFile == null && !action.isPreparing) {
+                val chunk = action
+                chunk.isPreparing = true
+                
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val voiceId = when (chunk.languageTag) {
+                            "ur" -> {
+                                val selected = _selectedVoiceIdUr.value ?: "ur-PK-Wavenet-B"
+                                if (isFemaleVoiceId(selected)) "ur-PK-Wavenet-B" else selected
+                            }
+                            "ar" -> {
+                                val selected = _selectedVoiceIdAr.value ?: "ar-SA-Standard-B"
+                                if (isFemaleVoiceId(selected)) "ar-SA-Standard-B" else selected
+                            }
+                            else -> {
+                                val selected = _selectedVoiceIdEn.value ?: "en-US-Standard-B"
+                                if (isFemaleVoiceId(selected)) "en-US-Standard-B" else selected
+                            }
+                        }
+                        
+                        if (voiceId != null) {
+                            val langCode = when (chunk.languageTag) {
+                                "ur" -> "ur-PK"
+                                "ar" -> "ar-SA"
+                                else -> "en-US"
+                            }
+
+                            val apiKey = CloudTtsClient.getApiKey()
+                            if (apiKey.isNotEmpty()) {
+                                val isUrduOrArabic = chunk.languageTag == "ur" || chunk.languageTag == "ar"
+                                val baseCloudPitch = if (isUrduOrArabic) {
+                                    0.5
+                                } else if (currentSpeakerPreset == "Young Voice") {
+                                    1.5
+                                } else {
+                                    -2.5
+                                }
+                                val cloudPitch = baseCloudPitch + ((chunk.pitchMod - 1.0) * 10.0)
+
+                                val request = SynthesizeRequest(
+                                    input = SynthesisInput(text = chunk.text),
+                                    voice = VoiceSelectionParams(languageCode = langCode, name = voiceId),
+                                    audioConfig = AudioConfig(
+                                        audioEncoding = "MP3",
+                                        speakingRate = currentRate.toDouble(),
+                                        pitch = cloudPitch
+                                    )
+                                )
+
+                                val response = CloudTtsClient.api.synthesizeText(apiKey, request)
+                                val decodedBytes = Base64.decode(response.audioContent, Base64.DEFAULT)
+                                val file = File.createTempFile("tts_chunk_", ".mp3", context.cacheDir)
+                                FileOutputStream(file).use { it.write(decodedBytes) }
+                                
+                                chunk.preparedFile = file
+                                Log.d("TutorTtsManager", "Pre-synthesized chunk successfully: ${chunk.text.take(20)}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("TutorTtsManager", "Pre-synthesis failed for chunk: ${chunk.text.take(20)}: ${e.message}")
+                    } finally {
+                        chunk.isPreparing = false
+                    }
+                }
+            }
+        }
+    }
+
     fun speak(text: String, id: String? = null, speed: Float? = null) {
         Log.d("TutorTtsManager", "speak called: text='$text', id=$id, rate=$speed")
         val rate = speed ?: _playbackSpeed.value
@@ -337,6 +444,7 @@ class TutorTtsManager(private val context: Context) {
         
         if (speechQueue.isNotEmpty()) {
             isPlayingQueue = true
+            preSynthesizeRemainingChunks()
             processNextChunk()
         } else {
             Log.d("TutorTtsManager", "speechQueue is empty, nothing to speak")
@@ -382,6 +490,26 @@ class TutorTtsManager(private val context: Context) {
             val chunk = action as SpeakChunk
 
             try {
+                // Pre-synthesis optimization check
+                var tempFile = chunk.preparedFile
+                
+                // If it is preparing, wait a brief moment for it to complete
+                var waitTime = 0
+                while (chunk.isPreparing && chunk.preparedFile == null && waitTime < 20) {
+                    kotlinx.coroutines.delay(100)
+                    waitTime++
+                }
+                
+                if (chunk.preparedFile != null) {
+                    tempFile = chunk.preparedFile
+                }
+
+                if (tempFile != null) {
+                    _ttsLoadingStatus.value = null
+                    playAudioFile(tempFile, chunk)
+                    return@launch
+                }
+
                 if (isCloudTtsDisabled) {
                     _ttsLoadingStatus.value = null
                     speakWithNativeTts(chunk)
@@ -456,7 +584,7 @@ class TutorTtsManager(private val context: Context) {
                     CloudTtsClient.api.synthesizeText(apiKey, request)
                 }
 
-                val tempFile = withContext(Dispatchers.IO) {
+                val resultFile = withContext(Dispatchers.IO) {
                     val decodedBytes = Base64.decode(response.audioContent, Base64.DEFAULT)
                     val file = File.createTempFile("tts_chunk_", ".mp3", context.cacheDir)
                     FileOutputStream(file).use { it.write(decodedBytes) }
@@ -464,7 +592,7 @@ class TutorTtsManager(private val context: Context) {
                 }
 
                 _ttsLoadingStatus.value = null
-                playAudioFile(tempFile, chunk)
+                playAudioFile(resultFile, chunk)
 
             } catch (e: retrofit2.HttpException) {
                 _ttsLoadingStatus.value = null
@@ -619,7 +747,7 @@ class TutorTtsManager(private val context: Context) {
         var currentPitchMod = 1.0f
         
         for (i in parts.indices) {
-            val partText = parts[i].trim()
+            val partText = normalizeTextForTts(parts[i])
             if (partText.isNotEmpty()) {
                 val langChunks = splitTextByLanguage(partText, currentPitchMod)
                 actions.addAll(langChunks)
@@ -651,62 +779,116 @@ class TutorTtsManager(private val context: Context) {
         return mergedActions
     }
 
-    private fun splitTextByLanguage(text: String, pitchMod: Float): List<SpeakChunk> {
-        val rawLines = text.split(Regex("(?<=[.?!])\\s+|\n+"))
+    internal fun segmentTextByScript(text: String): List<Pair<String, String>> {
+        val segments = mutableListOf<Pair<String, String>>()
+        if (text.isEmpty()) return segments
+        
+        var currentScript = "" // "latin", "arabic_script", or ""
+        val currentBuffer = java.lang.StringBuilder()
+        
+        for (i in 0 until text.length) {
+            val char = text[i]
+            val isLatin = char in 'A'..'Z' || char in 'a'..'z'
+            val isArabicScript = char in '\u0600'..'\u06FF' || 
+                                 char in '\u0750'..'\u077F' || 
+                                 char in '\u08A0'..'\u08FF' || 
+                                 char in '\uFB50'..'\uFDFF' || 
+                                 char in '\uFE70'..'\uFEFF'
+                                 
+            val charScript = when {
+                isLatin -> "latin"
+                isArabicScript -> "arabic_script"
+                else -> "neutral"
+            }
+            
+            if (charScript != "neutral") {
+                if (currentScript == "") {
+                    currentScript = charScript
+                } else if (currentScript != charScript) {
+                    val content = currentBuffer.toString()
+                    if (content.trim().isNotEmpty()) {
+                        segments.add(Pair(content, currentScript))
+                    }
+                    currentBuffer.setLength(0)
+                    currentScript = charScript
+                }
+            }
+            currentBuffer.append(char)
+        }
+        
+        if (currentBuffer.isNotEmpty()) {
+            val content = currentBuffer.toString()
+            if (content.trim().isNotEmpty()) {
+                segments.add(Pair(content, if (currentScript == "") "latin" else currentScript))
+            }
+        }
+        
+        return segments
+    }
+
+    internal fun detectArabicOrUrdu(text: String): String {
+        var urduScore = 0
+        var arabicScore = 0
+        
+        // Character-level heuristics
+        for (char in text) {
+            if (char in listOf('ٹ', 'ڈ', 'ڑ', 'ں', 'ے', 'پ', 'چ', 'ژ', 'گ', 'ھ', 'ۓ', '۔')) {
+                urduScore += 15
+            }
+            if (char in listOf('ة', 'ى', 'ً', 'ٍ', 'ٌ', 'َ', 'ُ', 'ِ', 'ْ', 'ّ')) {
+                arabicScore += 15
+            }
+        }
+        
+        // Word-level heuristics
+        val words = text.split(Regex("\\s+"))
+        val urduWords = setOf(
+            "ہے", "ہیں", "کا", "کی", "کے", "کو", "میں", "سے", "پر", "نہیں", "تھا", "تھے", "تھی", 
+            "یہ", "وہ", "آپ", "کر", "ہو", "اور", "اگر", "گیا", "گئی", "ہم", "تم", "ان", "اس", 
+            "جو", "کہ", "یا", "نے", "ہوں", "کریں", "گے", "گی", "تھا", "تھے", "تھی", "ہوں", "ہیں۔",
+            "کیسے", "کیوں", "کیا", "تفصیلی", "وضاحت", "گرامر", "مثال", "کتاب", "طلبہ", "طالب", "علم", "استاد"
+        )
+        val arabicWords = setOf(
+            "من", "في", "على", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك", "هو", "هي", "أنا", 
+            "نحن", "أنت", "أنتم", "هم", "كان", "كانت", "التي", "الذي", "إن", "أن", "لا", "ما", 
+            "لم", "لن", "قد", "كل", "بعض", "أو", "أم", "ثم", "بل", "لكن", "حتى", "سوف", "السلام", 
+            "عليكم", "رحمة", "الله", "وبركاته", "مرحبا", "بكم", "دروس", "قواعد", "اللغة", "العربية", 
+            "الإنجليزية", "الفعل", "الاسم", "الحرف", "جملة", "مبتدأ", "خبر", "فاعل", "مفعول", "طالب", "مستمر"
+        )
+        
+        for (word in words) {
+            val cleanWord = word.replace(Regex("[^\\u0600-\\u06FF]"), "")
+            if (urduWords.contains(cleanWord)) {
+                urduScore += 10
+            }
+            if (arabicWords.contains(cleanWord)) {
+                arabicScore += 10
+            }
+        }
+        
+        return when {
+            urduScore > arabicScore -> "ur"
+            arabicScore > urduScore -> "ar"
+            else -> {
+                val activeLang = getSelectedVoiceLanguage()
+                if (activeLang == "Arabic") "ar" else "ur"
+            }
+        }
+    }
+
+    internal fun splitTextByLanguage(text: String, pitchMod: Float): List<SpeakChunk> {
+        val segments = segmentTextByScript(text)
         val initialChunks = mutableListOf<SpeakChunk>()
         
-        for (line in rawLines) {
-            val trimmed = line.trim()
+        for (segment in segments) {
+            val trimmed = segment.first.trim()
             if (trimmed.isEmpty()) continue
             
-            var urduScore = 0
-            var arabicScore = 0
-            
-            // Check character level features
-            for (char in trimmed) {
-                if (char in listOf('ٹ', 'ڈ', 'ڑ', 'ں', 'ے', 'پ', 'چ', 'ژ', 'گ', 'ھ', 'ۓ', '۔')) {
-                    urduScore += 5
-                }
-                if (char in listOf('ة', 'ى', 'ً', 'ٍ', 'ٌ', 'َ', 'ُ', 'ِ', 'ْ', 'ّ')) {
-                    arabicScore += 5
-                }
-            }
-            
-            // Check word level features
-            val words = trimmed.split(Regex("\\s+"))
-            val urduWords = setOf(
-                "ہے", "ہیں", "کا", "کی", "کے", "کو", "میں", "سے", "پر", "نہیں", "تھا", "تھے", "تھی", 
-                "یہ", "وہ", "آپ", "کر", "ہو", "اور", "اگر", "گیا", "گئی", "ہم", "تم", "ان", "اس", 
-                "جو", "کہ", "یا", "تفصیلی", "وضاحت", "گرامر", "مثال", "کیسے", "کیوں", "کیا", "ہوں", "نے", "کتاب"
-            )
-            val arabicWords = setOf(
-                "من", "في", "على", "إلى", "عن", "مع", "هذا", "هذه", "ذلك", "تلك", "هو", "هي", "أنا", 
-                "نحن", "أنت", "أنتم", "هم", "كان", "كانت", "التي", "الذي", "إن", "أن", "لا", "ما", 
-                "لم", "لن", "قد", "كل", "بعض", "أو", "أم", "ثم", "بل", "لكن", "حتى", "سوف", "السلام", 
-                "عليكم", "رحمة", "الله", "وبركاته", "مرحبا", "بكم", "دروس", "قواعد", "اللغة", "العربية", 
-                "الإنجليزية", "الفعل", "الاسم", "الحرف", "جملة", "مبتدأ", "خبر", "فاعل", "مفعول"
-            )
-            
-            for (word in words) {
-                val cleanWord = word.replace(Regex("[^\\u0600-\\u06FF]"), "")
-                if (urduWords.contains(cleanWord)) {
-                    urduScore += 3
-                }
-                if (arabicWords.contains(cleanWord)) {
-                    arabicScore += 3
-                }
-            }
-            
-            val langTag = when {
-                urduScore > arabicScore -> "ur"
-                arabicScore > urduScore -> "ar"
-                trimmed.any { it in '\u0600'..'\u06FF' } -> {
-                    val activeLang = getSelectedVoiceLanguage()
-                    if (activeLang == "Arabic") "ar" else "ur"
-                }
+            val langTag = when (segment.second) {
+                "latin" -> "en"
+                "arabic_script" -> detectArabicOrUrdu(trimmed)
                 else -> "en"
             }
-            
             initialChunks.add(SpeakChunk(trimmed, langTag, pitchMod))
         }
 

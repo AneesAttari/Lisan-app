@@ -35,6 +35,9 @@ interface GeminiApiService {
 }
 
 interface BackendApiService {
+    @retrofit2.http.GET("health")
+    suspend fun checkHealth(): ResponseBody
+
     @POST("v1beta/models/{model}:generateContent")
     suspend fun generateContent(
         @Path("model") model: String,

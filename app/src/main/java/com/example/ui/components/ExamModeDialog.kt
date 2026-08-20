@@ -47,6 +47,17 @@ fun ExamModeDialog(
     val examError by viewModel.examError.collectAsState()
     val examResult by viewModel.examResult.collectAsState()
 
+    var showExportPdfDialog by remember { mutableStateOf(false) }
+
+    if (showExportPdfDialog) {
+        PdfCreatorDialog(
+            viewModel = lisanViewModel,
+            examViewModel = viewModel,
+            initialMode = PdfExportMode.EXAM,
+            onDismiss = { showExportPdfDialog = false }
+        )
+    }
+
     Dialog(
         onDismissRequest = {
             viewModel.clearExam()
@@ -73,6 +84,7 @@ fun ExamModeDialog(
                             examData = examData!!,
                             viewModel = viewModel,
                             lisanViewModel = lisanViewModel,
+                            onExportPdf = { showExportPdfDialog = true },
                             onPracticeWeakAreas = { weakTopics ->
                                 viewModel.startPracticeWeakAreas(weakTopics)
                             },
@@ -89,7 +101,9 @@ fun ExamModeDialog(
                     examData != null -> {
                         ActiveExamFlowView(
                             viewModel = viewModel,
+                            lisanViewModel = lisanViewModel,
                             examData = examData!!,
+                            onExportPdf = { showExportPdfDialog = true },
                             onClose = {
                                 viewModel.clearExam()
                                 onDismiss()
@@ -102,6 +116,7 @@ fun ExamModeDialog(
                             viewModel = viewModel,
                             isGenerating = isGenerating,
                             error = examError,
+                            onExportPdf = { showExportPdfDialog = true },
                             onClose = onDismiss
                         )
                     }
@@ -116,6 +131,7 @@ fun ExamSetupFlowView(
     viewModel: ExamViewModel,
     isGenerating: Boolean,
     error: String?,
+    onExportPdf: () -> Unit,
     onClose: () -> Unit
 ) {
     val config by viewModel.config.collectAsState()
@@ -721,6 +737,31 @@ fun ExamSetupFlowView(
             }
         }
 
+        // Step 5: Custom Instructions
+        Text(
+            text = "STEP 5: CUSTOM EXAM INSTRUCTIONS • کسٹم ہدایات (اختیاری)",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = EditorialAccentPurple,
+            letterSpacing = 1.sp
+        )
+        var localInstructions by remember(config.customInstructions) { mutableStateOf(config.customInstructions) }
+        OutlinedTextField(
+            value = localInstructions,
+            onValueChange = {
+                localInstructions = it
+                viewModel.setCustomInstructions(it)
+            },
+            placeholder = { Text("e.g. Focus heavily on Present Perfect tenses, include Urdu translation for all options...", fontSize = 11.sp) },
+            modifier = Modifier.fillMaxWidth().testTag("exam_setup_custom_instructions_input"),
+            minLines = 2,
+            maxLines = 4,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = EditorialAccentPurple,
+                unfocusedBorderColor = EditorialBorder
+            )
+        )
+
         if (error != null) {
             Surface(
                 color = MaterialTheme.colorScheme.errorContainer,
@@ -740,27 +781,46 @@ fun ExamSetupFlowView(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Button(
-            onClick = { viewModel.startExamWithConfig() },
-            enabled = !isGenerating && !config.isProcessingPdf,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .testTag("generate_exam_button"),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = EditorialAccentPurple,
-                contentColor = Color.White
-            ),
-            shape = RoundedCornerShape(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (isGenerating) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("انگریزی امتحان تیار ہو رہا ہے...", fontSize = 12.sp)
-            } else {
-                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("🚀 Generate English Exam (امتحان شروع کریں)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            OutlinedButton(
+                onClick = onExportPdf,
+                enabled = !isGenerating && !config.isProcessingPdf,
+                modifier = Modifier
+                    .weight(0.42f)
+                    .height(48.dp)
+                    .testTag("export_exam_pdf_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.PictureAsPdf, null, modifier = Modifier.size(18.dp), tint = EditorialAccentPurple)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("📄 Export PDF", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
+            }
+
+            Button(
+                onClick = { viewModel.startExamWithConfig() },
+                enabled = !isGenerating && !config.isProcessingPdf,
+                modifier = Modifier
+                    .weight(0.58f)
+                    .height(48.dp)
+                    .testTag("generate_exam_button"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = EditorialAccentPurple,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("تیار ہو رہا ہے...", fontSize = 11.sp)
+                } else {
+                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("🚀 Start Exam", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -769,7 +829,9 @@ fun ExamSetupFlowView(
 @Composable
 fun ActiveExamFlowView(
     viewModel: ExamViewModel,
+    lisanViewModel: LisanViewModel,
     examData: ExamData,
+    onExportPdf: () -> Unit,
     onClose: () -> Unit
 ) {
     val questions = examData.questions
@@ -841,11 +903,20 @@ fun ActiveExamFlowView(
                 }
             }
 
-            TextButton(
-                onClick = { viewModel.finishExam() },
-                modifier = Modifier.testTag("finish_exam_early_button")
-            ) {
-                Text("Finish Exam", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onExportPdf,
+                    modifier = Modifier.testTag("active_exam_export_pdf_button")
+                ) {
+                    Icon(Icons.Default.PictureAsPdf, contentDescription = "Export PDF", tint = EditorialAccentPurple)
+                }
+
+                TextButton(
+                    onClick = { viewModel.finishExam() },
+                    modifier = Modifier.testTag("finish_exam_early_button")
+                ) {
+                    Text("Finish Exam", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EditorialAccentPurple)
+                }
             }
         }
 
@@ -1101,13 +1172,34 @@ fun ActiveExamFlowView(
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.size(16.dp))
                 }
             } else {
-                Button(
-                    onClick = { viewModel.finishExam() },
-                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple, contentColor = Color.White),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("see_results_button")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("See Results 🎉", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (examData.shortQuestions.isNotEmpty() || examData.longQuestions.isNotEmpty()) {
+                        Button(
+                            onClick = {
+                                viewModel.transitionToChatExam(lisanViewModel)
+                                onClose()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple, contentColor = Color.White),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("transition_chat_exam_button")
+                        ) {
+                            Icon(Icons.Default.QuestionAnswer, null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Continue in Chat 💬", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Button(
+                        onClick = { viewModel.finishExam() },
+                        colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple.copy(alpha = 0.85f), contentColor = Color.White),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.testTag("see_results_button")
+                    ) {
+                        Text("See Results 🎉", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -1120,6 +1212,7 @@ fun ExamResultsView(
     examData: ExamData,
     viewModel: ExamViewModel,
     lisanViewModel: LisanViewModel,
+    onExportPdf: () -> Unit,
     onPracticeWeakAreas: (List<String>) -> Unit,
     onRetake: () -> Unit,
     onClose: () -> Unit
@@ -1227,51 +1320,7 @@ fun ExamResultsView(
 
                     Button(
                         onClick = {
-                            val examLanguage = config.language
-                            val sourceName = if (config.sourceType == ExamSourceType.BOOK_PDF) {
-                                config.uploadedPdfName ?: config.selectedBook?.title ?: "Uploaded Document"
-                            } else {
-                                "Previously Learned Material"
-                            }
-                            val promptBuilder = StringBuilder()
-                            if (examLanguage == "Urdu") {
-                                promptBuilder.append("LEARNER EXAM START NOTICE • امتحانی اطلاع:\n\n")
-                                promptBuilder.append("طالب علم نے اپنے امتحان کا ایم سی کیو (MCQ) حصہ مکمل کر لیا ہے!\n")
-                                promptBuilder.append("اب مندرجہ ذیل سوالات گفتگو کی صورت میں ایک ایک کر کے پوچھیں، ان کے جوابات کا جائزہ لیں، اور اردو میں تفصیلی تعلیمی فیڈ بیک فراہم کریں۔\n\n")
-                                promptBuilder.append("تفصیلات:\n")
-                                promptBuilder.append("- امتحان کی زبان: اردو رہنمائی (Urdu)\n")
-                                promptBuilder.append("- ماخذ: $sourceName\n\n")
-                            } else {
-                                promptBuilder.append("LEARNER EXAM START NOTICE:\n\n")
-                                promptBuilder.append("The learner has completed the MCQ section of their exam!\n")
-                                promptBuilder.append("Now, please conversationally administer the following Short & Long questions. Ask them one by one, evaluate the learner's replies, and provide educational feedback.\n\n")
-                                promptBuilder.append("Details:\n")
-                                promptBuilder.append("- Language: English\n")
-                                promptBuilder.append("- Source: $sourceName\n\n")
-                            }
-
-                            if (examData.shortQuestions.isNotEmpty()) {
-                                promptBuilder.append("SHORT QUESTIONS:\n")
-                                examData.shortQuestions.forEachIndexed { i, q ->
-                                    promptBuilder.append("${i+1}. $q\n")
-                                }
-                            }
-
-                            if (examData.longQuestions.isNotEmpty()) {
-                                promptBuilder.append("\nLONG QUESTIONS:\n")
-                                examData.longQuestions.forEachIndexed { i, q ->
-                                    promptBuilder.append("${i+1}. $q\n")
-                                }
-                            }
-
-                            if (examLanguage == "Urdu") {
-                                promptBuilder.append("\nبراہ کرم طالب علم سے پہلا سوال پوچھ کر امتحان کا آغاز کریں!")
-                            } else {
-                                promptBuilder.append("\nPlease ask the learner the first question to begin!")
-                            }
-
-                            lisanViewModel.injectSystemExamMessage(promptBuilder.toString())
-                            viewModel.clearExam()
+                            viewModel.transitionToChatExam(lisanViewModel)
                             onClose()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple, contentColor = Color.White),

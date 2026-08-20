@@ -22,12 +22,21 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.layout.width
+import com.example.ui.components.PdfCreatorDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +72,14 @@ fun SavedNotesScreen(
     val allIdioms = com.example.data.repository.IdiomRepository.idioms
     val savedIdioms = allIdioms.filter { savedIdiomIds.contains(it.id) }
     val context = LocalContext.current
+    var showPdfCreatorDialog by remember { mutableStateOf(false) }
+
+    if (showPdfCreatorDialog) {
+        PdfCreatorDialog(
+            viewModel = viewModel,
+            onDismiss = { showPdfCreatorDialog = false }
+        )
+    }
 
     SelectionContainer {
         Column(
@@ -77,13 +94,32 @@ fun SavedNotesScreen(
             ) {
                 // Grammar Notes Section
                 item {
-                    EditorialSectionTitle("Saved Grammar Notes & Lesson Summaries")
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Review pinned grammar rules and exported lesson notes offline.",
-                        fontSize = 12.sp,
-                        color = EditorialTextMuted
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            EditorialSectionTitle("Saved Grammar Notes & Lesson Summaries")
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Review pinned grammar rules and exported lesson notes offline.",
+                                fontSize = 12.sp,
+                                color = EditorialTextMuted
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { showPdfCreatorDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("saved_notes_open_pdf_creator")
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("PDF Creator", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 

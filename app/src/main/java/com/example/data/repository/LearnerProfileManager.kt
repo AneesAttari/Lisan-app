@@ -392,17 +392,67 @@ class LearnerProfileManager(context: Context) {
     }
 
     fun addManualMemory(memory: String) {
+        addGlobalMemory(memory)
+    }
+
+    fun addGlobalMemory(memoryText: String) {
+        if (!isMeaningfulMemory(memoryText)) return
         val current = _learnerProfile.value
-        val memories = current.usefulMemories.toMutableList()
-        addUniqueMemory(memories, memory)
-        saveProfile(current.copy(usefulMemories = memories.take(25)))
+        if (!current.isMemoryEnabled) return
+        val items = current.memoryItems.toMutableList()
+        items.removeAll { it.text.equals(memoryText, ignoreCase = true) }
+        items.add(0, com.example.data.model.LearnerMemoryItem(text = memoryText, category = "global", conversationId = null))
+        
+        val capped = capAndCurateMemories(items)
+        val useful = capped.map { it.text }.distinct()
+        saveProfile(current.copy(memoryItems = capped, usefulMemories = useful))
+    }
+
+    fun addConversationDerivedMemory(sessionId: String, memoryText: String) {
+        if (!isMeaningfulMemory(memoryText)) return
+        val current = _learnerProfile.value
+        if (!current.isMemoryEnabled) return
+        val items = current.memoryItems.toMutableList()
+        items.removeAll { it.text.equals(memoryText, ignoreCase = true) || (it.conversationId == sessionId && it.category == "conversation_derived") }
+        items.add(0, com.example.data.model.LearnerMemoryItem(text = memoryText, category = "conversation_derived", conversationId = sessionId))
+        
+        val capped = capAndCurateMemories(items)
+        val useful = capped.map { it.text }.distinct()
+        saveProfile(current.copy(memoryItems = capped, usefulMemories = useful))
+    }
+
+    fun deleteMemoriesForConversation(sessionId: String) {
+        val current = _learnerProfile.value
+        val items = current.memoryItems.filterNot { it.conversationId == sessionId }.toMutableList()
+        val useful = items.map { it.text }.distinct()
+        saveProfile(current.copy(memoryItems = items, usefulMemories = useful))
+        Log.d(TAG, "Deleted conversation-derived memories for session $sessionId. Remaining memories count: ${items.size}")
+    }
+
+    private fun isMeaningfulMemory(text: String): Boolean {
+        val cleaned = text.trim()
+        if (cleaned.length < 8) return false
+        val lower = cleaned.lowercase(Locale.getDefault())
+        val trivialPhrases = listOf(
+            "said hello", "asked what", "asked one particular",
+            "asked at", "asked a question", "said hi", "just chatting"
+        )
+        if (trivialPhrases.any { lower.contains(it) }) return false
+        return true
+    }
+
+    private fun capAndCurateMemories(items: List<com.example.data.model.LearnerMemoryItem>): List<com.example.data.model.LearnerMemoryItem> {
+        val globals = items.filter { it.category == "global" }.take(10)
+        val conversationDerived = items.filter { it.category == "conversation_derived" }.take(10)
+        return (globals + conversationDerived).sortedByDescending { it.timestamp }
     }
 
     fun removeMemory(memory: String) {
         val current = _learnerProfile.value
         val memories = current.usefulMemories.toMutableList()
         memories.remove(memory)
-        saveProfile(current.copy(usefulMemories = memories))
+        val items = current.memoryItems.filterNot { it.text == memory }
+        saveProfile(current.copy(usefulMemories = memories, memoryItems = items))
     }
 
     fun updateMemory(oldMemory: String, newMemory: String) {
@@ -411,7 +461,8 @@ class LearnerProfileManager(context: Context) {
         val index = memories.indexOf(oldMemory)
         if (index >= 0) {
             memories[index] = newMemory
-            saveProfile(current.copy(usefulMemories = memories))
+            val items = current.memoryItems.map { if (it.text == oldMemory) it.copy(text = newMemory) else it }
+            saveProfile(current.copy(usefulMemories = memories, memoryItems = items))
         }
     }
 

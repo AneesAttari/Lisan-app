@@ -10,6 +10,8 @@ import com.example.data.model.Part
 import com.example.data.model.ThinkingConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.putJsonObject
@@ -26,10 +28,23 @@ object RetrofitClient {
 
     const val MODEL_FLASH = "gemini-3.5-flash"
     const val MODEL_PRO = "gemini-3.1-pro-preview"
-    const val MODEL_FLASH_LITE = "gemini-3.5-flash"
+    const val MODEL_FLASH_LITE = "gemini-3.1-flash-lite-preview"
+
+    const val FEMALE_TUTOR_PERSONA_INSTRUCTION = """
+    [CRITICAL TUTOR IDENTITY & FEMALE PERSONA MANDATE]
+    - You are Lisan AI, a female English teacher and language tutor (خاتون ٹیچر / استانی).
+    - FEMININE URDU SELF-REFERENCE: When speaking or writing in Urdu, you MUST consistently use FEMININE grammatical self-reference (e.g., "میں آپ کو پڑھاؤں گی", "میں سکھاؤں گی", "میں سمجھاؤں گی", "میں بتاؤں گی", "میں کروں گی", "میں آپ کی ٹیچر/استانی ہوں").
+    - STRICT MASCULINE PROHIBITION IN URDU: NEVER use masculine self-reference verb endings like "پڑھاؤں گا", "سکھاؤں گا", "سمجھاؤں گا", "بتاؤں گا", "کروں گا", or "میں آپ کا استاد ہوں".
+    - ABSOLUTELY NO HINDI SCRIPT (देवनागरी / Devanagari): When communicating in Urdu, you MUST strictly use Urdu script (اردو نستعلیق). NEVER output Hindi script (Devanagari) under any circumstances.
+    - FAST LATENCY MANDATE: Respond immediately with maximum conciseness (1-2 short sentences). Do NOT overthink, do NOT over-explain, and do NOT produce internal reasoning or fluff. Speak directly, fast, and naturally.
+    - UNIVERSAL APPLICABILITY: This female persona, feminine Urdu self-reference, and Urdu script mandate applies strictly and consistently across all Tutor chat responses, streaming outputs, voice conversations, explanations, grammar lessons, quizzes, exam evaluations, corrections, error recoveries, and greetings.
+    """
 
     @Volatile
     private var customApiKey: String = ""
+
+    @Volatile
+    private var isBackendUnreachable: Boolean = false
 
     @Volatile
     private var PREVIOUS_USER_MESSAGE: String = ""
@@ -38,13 +53,14 @@ object RetrofitClient {
 
     fun setCustomApiKey(key: String) {
         customApiKey = key.trim()
+        isBackendUnreachable = false
         Log.d(TAG, "Custom API key updated. Length: ${customApiKey.length}")
     }
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
         .build()
 
     private val json = Json {
@@ -64,35 +80,145 @@ object RetrofitClient {
 
     val backendUrl: String
         get() = try {
-            BuildConfig.BACKEND_URL.takeIf { it.isNotBlank() && it != "https://lisan-ai-backend.example.com" } ?: ""
+            val configured = BuildConfig.BACKEND_URL.trim()
+            if (configured.isNotBlank() && (configured.startsWith("http://") || configured.startsWith("https://"))) {
+                configured
+            } else {
+                "http://10.0.2.2:3000/"
+            }
         } catch (e: Exception) {
-            ""
+            "http://10.0.2.2:3000/"
         }
 
     val backendSecret: String
         get() = try {
-            BuildConfig.BACKEND_API_SECRET.takeIf { it.isNotBlank() } ?: "lisan_secure_tutor_token_2026"
+            BuildConfig.BACKEND_API_SECRET.takeIf { it.isNotBlank() } ?: "lisan_dev_secure_8a7d2f9e4b6c810d_prod_verified"
         } catch (e: Exception) {
-            "lisan_secure_tutor_token_2026"
+            "lisan_dev_secure_8a7d2f9e4b6c810d_prod_verified"
         }
 
     fun isUsingBackend(): Boolean {
-        return customApiKey.isBlank() && backendUrl.isNotBlank()
+        return customApiKey.isBlank() && !isBackendUnreachable
     }
 
     fun getBackendAuthHeader(): String {
         return "Bearer $backendSecret"
     }
 
-    val backendService: BackendApiService by lazy {
-        val url = if (backendUrl.isNotBlank()) {
-            if (backendUrl.endsWith("/")) backendUrl else "$backendUrl/"
-        } else {
-            "https://lisan-ai-backend.example.com/"
+    @Volatile
+    private var isBackendReady: Boolean = false
+
+    @Volatile
+    private var isPreWarming: Boolean = false
+
+    fun triggerPreWarm(context: android.content.Context) {
+        if (!isUsingBackend() || isBackendReady) return
+        
+        synchronized(this) {
+            if (isPreWarming) return
+            isPreWarming = true
         }
+
+        // Run asynchronously
+        @kotlin.OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            Log.i(TAG, "Backend pre-warm/readiness ping initiated proactively.")
+            var attempt = 1
+            val maxAttempts = 15
+            var delayMs = 1000L
+
+            while (attempt <= maxAttempts && !isBackendReady) {
+                try {
+                    Log.d(TAG, "Proactive health-check attempt $attempt to $backendUrl")
+                    val response = backendService.checkHealth()
+                    val bodyString = response.string()
+                    if (bodyString.contains("healthy") || bodyString.contains("status")) {
+                        isBackendReady = true
+                        isBackendUnreachable = false
+                        isPreWarming = false
+                        Log.i(TAG, "Backend is ready and healthy! (took $attempt attempts).")
+                        break
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Backend not ready yet on attempt $attempt: ${e.message}")
+                }
+                attempt++
+                if (attempt <= maxAttempts) {
+                    kotlinx.coroutines.delay(delayMs)
+                    delayMs = (delayMs * 1.5).toLong().coerceAtMost(5000L) // backoff
+                }
+            }
+            if (!isBackendReady) {
+                Log.w(TAG, "Backend failed to become ready after $maxAttempts proactive attempts.")
+                isPreWarming = false
+            }
+        }
+    }
+
+    suspend fun ensureBackendReady(): Boolean = withContext(Dispatchers.IO) {
+        if (!isUsingBackend() || isBackendReady) return@withContext true
+
+        Log.i(TAG, "Tutor request initiated. Ensuring backend readiness before proceeding...")
+        var attempt = 1
+        val maxAttempts = 10
+        var delayMs = 500L
+
+        while (attempt <= maxAttempts) {
+            if (isBackendReady) return@withContext true
+            try {
+                Log.d(TAG, "On-demand health-check check before request, attempt $attempt to $backendUrl")
+                val response = backendService.checkHealth()
+                val bodyString = response.string()
+                if (bodyString.contains("healthy") || bodyString.contains("status")) {
+                    isBackendReady = true
+                    isBackendUnreachable = false
+                    Log.i(TAG, "Backend is confirmed ready during active wait on attempt $attempt.")
+                    return@withContext true
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "On-demand health-check check failed on attempt $attempt: ${e.message}")
+            }
+            attempt++
+            if (attempt <= maxAttempts && !isBackendReady) {
+                kotlinx.coroutines.delay(delayMs)
+                delayMs = (delayMs * 1.5).toLong().coerceAtMost(3000L)
+            }
+        }
+        
+        Log.w(TAG, "On-demand readiness check failed. Proceeding anyway or falling back.")
+        return@withContext isBackendReady
+    }
+
+    private val backendOkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val originalRequest = chain.request()
+            try {
+                val response = chain.proceed(originalRequest)
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Backend HTTP ${response.code}: ${response.message} for ${originalRequest.url}")
+                }
+                response
+            } catch (e: java.io.IOException) {
+                if (!originalRequest.url.toString().contains("/health")) {
+                    isBackendUnreachable = true
+                    Log.w(TAG, "Backend host unreachable at ${originalRequest.url.host}: ${e.message}. Switching to smart local engine.")
+                } else {
+                    Log.w(TAG, "Backend health check failed: ${e.message}")
+                }
+                throw e
+            }
+        }
+        .build()
+
+    val backendService: BackendApiService by lazy {
+        val rawUrl = backendUrl
+        val url = if (rawUrl.endsWith("/")) rawUrl else "$rawUrl/"
         val retrofit = Retrofit.Builder()
             .baseUrl(url)
-            .client(okHttpClient)
+            .client(backendOkHttpClient)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
         retrofit.create(BackendApiService::class.java)
@@ -102,11 +228,20 @@ object RetrofitClient {
         return customApiKey
     }
 
-    private fun getApiKey(): String {
+    fun getApiKey(): String {
         if (customApiKey.isNotBlank()) {
+            Log.d(TAG, "BYOK_KEY_FOUND: Custom user API key present (length: ${customApiKey.length})")
             return customApiKey
         }
-        return ""
+        return try {
+            val key = BuildConfig.GEMINI_API_KEY.trim()
+            val valid = key.isNotBlank() && key != "null" && key != "YOUR_SERVER_SIDE_GEMINI_API_KEY" && key != "DEFAULT_KEY"
+            Log.d(TAG, "BYOK_KEY_FOUND: BuildConfig API key valid: $valid")
+            if (valid) key else ""
+        } catch (e: Exception) {
+            Log.e(TAG, "BYOK_KEY_FOUND error: ${e.message}")
+            ""
+        }
     }
 
     private fun cleanJsonString(raw: String): String {
@@ -139,6 +274,15 @@ object RetrofitClient {
         return block()
     }
 
+    suspend fun executeGenerateContent(
+        model: String,
+        userApiKey: String? = null,
+        request: GenerateContentRequest
+    ): com.example.data.model.GenerateContentResponse {
+        val key = userApiKey?.takeIf { it.isNotBlank() } ?: getApiKey()
+        return callWithModelFallback(key, request, model)
+    }
+
     private suspend fun callWithModelFallback(
         apiKey: String,
         request: GenerateContentRequest,
@@ -146,51 +290,53 @@ object RetrofitClient {
     ): com.example.data.model.GenerateContentResponse {
         val candidateModels = listOf(
             preferredModel,
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite"
-        ).distinct()
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
+        ).filter { it.isNotBlank() }.distinct()
 
-        val useBackend = isUsingBackend()
         var lastException: Exception? = null
 
-        // First pass: try v1beta for candidate models
         for (model in candidateModels) {
-            try {
-                return runWithRetry {
-                    if (useBackend) {
-                        backendService.generateContent(model, getBackendAuthHeader(), request)
-                    } else {
-                        service.generateContent(model, apiKey, request)
-                    }
-                }
-            } catch (e: Exception) {
-                lastException = e
-                val code = (e as? retrofit2.HttpException)?.code() ?: 0
-                if (code == 401 || code == 403) {
-                    throw e
-                }
-                // For 429 (quota exceeded), 500, 503, continue to next fallback model
-            }
-        }
-
-        if (!useBackend) {
-            // Second pass: try v1 endpoint for candidate models
-            for (model in candidateModels) {
+            // Step 1: Attempt local/secure backend if available and not previously marked unreachable
+            if (isUsingBackend()) {
                 try {
-                    return runWithRetry {
-                        service.generateContentV1(model, apiKey, request)
-                    }
+                    Log.d(TAG, "Attempting backend proxy call for model $model")
+                    return backendService.generateContent(model, getBackendAuthHeader(), request)
                 } catch (e: Exception) {
                     lastException = e
                     val code = (e as? retrofit2.HttpException)?.code() ?: 0
                     if (code == 401 || code == 403) {
+                        Log.e(TAG, "Backend returned auth failure (HTTP $code)")
                         throw e
                     }
+                    Log.w(TAG, "Backend call failed for model $model (code $code: ${e.message}). Marking backend unreachable and falling back to direct API.")
+                    if (e is java.io.IOException || e is java.net.ConnectException || e is java.net.SocketTimeoutException || e is java.net.UnknownHostException || code == 404 || code >= 500) {
+                        isBackendUnreachable = true
+                    }
+                }
+            }
+
+            // Step 2: Fall back directly to Gemini API using available key
+            val effectiveApiKey = apiKey.ifBlank { getApiKey() }
+            if (effectiveApiKey.isNotBlank()) {
+                try {
+                    val maskedKey = if (effectiveApiKey.length > 8) "${effectiveApiKey.take(4)}...${effectiveApiKey.takeLast(4)}" else "KEY_SET"
+                    Log.d(TAG, "Attempting direct Gemini API call for model $model with key $maskedKey")
+                    return service.generateContent(model, effectiveApiKey, request)
+                } catch (e: Exception) {
+                    lastException = e
+                    val code = (e as? retrofit2.HttpException)?.code() ?: 0
+                    if (code == 401 || code == 403) {
+                        Log.e(TAG, "Direct Gemini API auth/permission failure (HTTP $code)")
+                        throw e
+                    }
+                    Log.w(TAG, "Direct Gemini API call failed for model $model (HTTP $code): ${e.message}")
                 }
             }
         }
 
-        throw lastException ?: Exception("All model fallbacks failed")
+        throw lastException ?: Exception("All model fallbacks failed. Please check network connection or API key settings.")
     }
 
     suspend fun generateBilingualLesson(
@@ -205,11 +351,14 @@ object RetrofitClient {
         }
 
         val prompt = """
-            You are Lisan Grammar, an expert English teacher for Urdu-speaking learners who know Arabic grammar.
+            $FEMALE_TUTOR_PERSONA_INSTRUCTION
+
+            You are Lisan Grammar, an expert female English teacher for Urdu-speaking learners who know Arabic grammar.
             Generate a JSON lesson for: "$topicEn" ($topicUr) at level $level.
             
             CRITICAL LANGUAGE MANDATE:
             Write ALL explanations, rule details (ruleUrdu), similarities, differences, common mistakes, and notes in clear, natural URDU (اردو) for Urdu native speakers.
+            ABSOLUTELY NO HINDI SCRIPT (देवनागरी / Devanagari): Write strictly in Urdu script. Use feminine self-reference if referring to the teacher persona.
             
             STRUCTURE:
             1. topicTitleEn (English title, e.g. "Verb 'To Be'")
@@ -286,13 +435,31 @@ object RetrofitClient {
             return@withContext generateLocalVoiceTutorResponse(history, userName, selectedVoiceLanguage)
         }
         val languageInstruction = when (selectedVoiceLanguage) {
-            "Urdu" -> "You are a specialized Urdu-to-English grammar voice tutor. Explain English grammar rules, terms, and comparisons in clear, fluent Urdu (پاکستانی اردو). Give example sentences in English and translate them to Urdu. Keep responses very short (1-2 sentences in English, then 1 simple sentence in Urdu translation) so that Text-To-Speech is pleasant."
-            "Arabic" -> "You are a specialized Arabic-to-English grammar voice tutor. Explain English grammar rules, terms, and comparisons in clear, fluent Arabic (اللغة العربية الفصحى). Give example sentences in English and translate them to Arabic. Keep responses very short (1-2 sentences in English, then 1 simple sentence in Arabic translation) so that Text-To-Speech is pleasant."
-            else -> "You are an English grammar voice tutor speaking only in simple, clear English."
+            "Urdu" -> """
+            CRITICAL URDU SCRIPT MANDATE:
+            - You MUST speak and respond in clear, fluent Urdu script (پاکستانی اردو / نستعلیق).
+            - ABSOLUTELY NEVER USE ROMAN URDU (e.g. NEVER write 'Aap kaise hain', 'Yeh sentence sahi hai'). All Urdu text MUST be written in real Urdu script (e.g. 'آپ کیسے ہیں؟', 'یہ جملہ بالکل درست ہے').
+            - Explain English grammar rules, terms, and comparisons in clear, fluent Urdu script. Give example sentences in English and translate them to Urdu script. Keep responses very short (1-2 sentences in English, then 1 simple sentence in Urdu script) so that Text-To-Speech is pleasant.
+            """.trimIndent()
+
+            "Arabic" -> """
+            CRITICAL ARABIC SCRIPT MANDATE:
+            - You MUST speak and respond in clear, fluent Modern Standard Arabic script (اللغة العربية الفصحى).
+            - ABSOLUTELY NEVER USE URDU WORDS OR URDU SCRIPT (do NOT use 'آپ', 'یہ', 'کیسے', etc.). All non-English text MUST be written in genuine Arabic script (e.g. 'كيف حالك؟', 'هذه الجملة صحيحة').
+            - Explain English grammar rules, terms, and comparisons in clear, fluent Arabic script. Give example sentences in English and translate them to Arabic script. Keep responses very short (1-2 sentences in English, then 1 simple sentence in Arabic script) so that Text-To-Speech is pleasant.
+            """.trimIndent()
+
+            else -> """
+            CRITICAL ENGLISH MANDATE:
+            - You MUST speak and respond strictly in simple, clear, natural English.
+            - Do not use Urdu or Arabic unless directly translating an English example sentence.
+            """.trimIndent()
         }
         val sysPrompt = if (isStudyModeOn) {
             """
-            You are the senior English teacher inside Lisan Voice Tutor. You teach English grammar to Arabic and Urdu speaking learners.
+            $FEMALE_TUTOR_PERSONA_INSTRUCTION
+
+            You are the senior female English teacher inside Lisan Voice Tutor. You teach English grammar to Arabic and Urdu speaking learners.
             Learner: $userName
 
             [STUDY MODE ACTIVE]
@@ -300,6 +467,23 @@ object RetrofitClient {
 
             LANGUAGE DIRECTIVE:
             $languageInstruction
+
+            CRITICAL EXERCISE INTEGRITY MANDATE:
+            - When giving the learner a question, exercise, translation task, sentence-production task, or "try it yourself" activity, NEVER reveal the target answer before the learner responds.
+            - If the learner's explanation/request language is Urdu, and you ask them to produce an English sentence, DO NOT write the target English sentence first and then translate it into Urdu.
+              * WRONG: "How would you say 'I am a student' in English?" / "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں؟" (This reveals the target sentence and defeats the exercise).
+              * CORRECT: "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں، English میں؟"
+            - Present ONLY the prompt/question in the learner's explanation language (Urdu or Arabic). Do NOT include the target English sentence anywhere in the question.
+            - After asking the question, STOP and WAIT for the learner's response. Do NOT provide the answer, translation, correct sentence, or an answer disguised as a hint.
+            - Do NOT accidentally reveal the answer through:
+              * an English translation
+              * a bilingual version of the target sentence
+              * an example containing the target sentence
+              * a "hint" that directly gives the sentence
+              * an explanation that contains the expected answer
+            - Once the learner responds, evaluate their answer normally. Correct it, explain the mistake, provide the correct English sentence when appropriate, and continue the lesson.
+            - This rule applies dynamically to ALL exercises, not just one particular sentence.
+            - The purpose is to make the learner actively produce the English answer rather than simply copy or translate an answer that the tutor has already revealed.
 
             VOICE CONVERSATION GUIDELINES:
             1. Speak like a demanding but respectful and encouraging teacher. Prioritize active English practice over casual chatting.
@@ -318,10 +502,29 @@ object RetrofitClient {
             """.trimIndent()
         } else {
             """
-            You are Lisan Voice Tutor, a warm, friendly, natural human English tutor speaking with $userName.
+            $FEMALE_TUTOR_PERSONA_INSTRUCTION
+
+            You are Lisan Voice Tutor, a warm, friendly, natural human female English tutor speaking with $userName.
             
             LANGUAGE DIRECTIVE:
             $languageInstruction
+
+            CRITICAL EXERCISE INTEGRITY MANDATE:
+            - When giving the learner a question, exercise, translation task, sentence-production task, or "try it yourself" activity, NEVER reveal the target answer before the learner responds.
+            - If the learner's explanation/request language is Urdu, and you ask them to produce an English sentence, DO NOT write the target English sentence first and then translate it into Urdu.
+              * WRONG: "How would you say 'I am a student' in English?" / "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں؟" (This reveals the target sentence and defeats the exercise).
+              * CORRECT: "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں، English میں؟"
+            - Present ONLY the prompt/question in the learner's explanation language (Urdu or Arabic). Do NOT include the target English sentence anywhere in the question.
+            - After asking the question, STOP and WAIT for the learner's response. Do NOT provide the answer, translation, correct sentence, or an answer disguised as a hint.
+            - Do NOT accidentally reveal the answer through:
+              * an English translation
+              * a bilingual version of the target sentence
+              * an example containing the target sentence
+              * a "hint" that directly gives the sentence
+              * an explanation that contains the expected answer
+            - Once the learner responds, evaluate their answer normally. Correct it, explain the mistake, provide the correct English sentence when appropriate, and continue the lesson.
+            - This rule applies dynamically to ALL exercises, not just one particular sentence.
+            - The purpose is to make the learner actively produce the English answer rather than simply copy or translate an answer that the tutor has already revealed.
 
             VOICE CONVERSATION GUIDELINES:
             1. Speak like a real, empathetic, friendly human teacher. Be conversational, smooth, and express emotions naturally.
@@ -352,7 +555,7 @@ object RetrofitClient {
             response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 ?: generateLocalVoiceTutorResponse(history, userName, selectedVoiceLanguage)
         } catch (e: Exception) {
-            Log.e(TAG, "getVoiceTutorResponse error: ${e.message}, falling back to smart local voice responder")
+            Log.i(TAG, "getVoiceTutorResponse offline fallback: ${e.message}")
             generateLocalVoiceTutorResponse(history, userName, selectedVoiceLanguage)
         }
     }
@@ -376,7 +579,7 @@ object RetrofitClient {
         // Greetings
         if (lowerMsg in listOf("hi", "hello", "hey", "assalam", "سلام", "asalam", "asalamu", "ayyo") || lowerMsg.startsWith("hi ") || lowerMsg.startsWith("hello ")) {
             return when (selectedVoiceLanguage) {
-                "Urdu" -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں خوش آمدید! میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گا۔ آج ہم کون سا موضوع پڑھیں؟ سبجیکٹ پروناؤنز، ورب ٹو بی، ناؤنز، یا ایڈجیکٹوز؟"
+                "Urdu" -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں خوش آمدید! میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گی۔ آج ہم کون سا موضوع پڑھیں؟ سبجیکٹ پروناؤنز، ورب ٹو بی، ناؤنز، یا ایڈجیکٹوز؟"
                 "Arabic" -> "السلام عليكم ورحمة الله وبركاته\nأهلاً بك في لسان قواعد اللغة! سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية. ما هو الموضوع الذي يجب أن ندرسه اليوم؟ ضمائر الفاعل، فعل الكينونة، الأسماء، أو الصفات؟"
                 else -> "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar! I will help you learn English grammar by comparing it with Arabic grammar. What topic should we study today? Subject Pronouns, Verb To Be, Nouns, or Adjectives?"
             }
@@ -396,7 +599,7 @@ object RetrofitClient {
             return when (selectedVoiceLanguage) {
                 "Urdu" -> "آئیے سبجیکٹ پروناؤنز سیکھیں! انگریزی میں ہم I, You, He, She, It, We اور They جیسے پروناؤنز استعمال کرتے ہیں۔ اسی طرح اردو میں، آپ نے 'میں، تم، وہ، ہم' جیسے ضمیر سیکھے ہیں۔ مثال کے طور پر، 'He is a student' کا مطلب ہے 'وہ ایک طالب علم ہے'۔ انگریزی میں ضمیر لکھنا لازمی ہوتا ہے۔ مشق کے لیے سوال: آپ انگریزی میں 'وہ ایک استانی ہے' کیسے کہیں گے؟"
                 "Arabic" -> "دعنا نتعلم ضمائر الفاعل! في اللغة الإنجليزية، نستخدم ضمائر مثل I, You, He, She, It, We, و They. وبالمثل في اللغة العربية، تعلمت ضمائر منفصلة مثل أنا، أنت، هو، وهي. على سبيل المثال، 'He is a student' تقابل 'هو طالب'. يميل متحدثو العربية أحيناً إلى حذف الضمير، ولكن في الإنجليزية ضمير الفاعل مطلوب دائماً. سؤال للممارسة: كيف تقول 'هي معلمة' بالإنجليزية؟"
-                else -> "Let's learn Subject Pronouns! In English, we use pronouns like I, You, He, She, It, We, and They. Likewise in Arabic, you have learned separate pronouns like أنا، أنت، هو، وهي. For example, 'He is a student' corresponds to 'هو طالب'. Arabic speakers sometimes drop the pronoun, but in English the subject pronoun is required. Practice question: How do you say 'She is a teacher' in English?"
+                else -> "Let's learn Subject Pronouns! In English, we use pronouns like I, You, He, She, It, We, and They. Likewise in Arabic, you have learned separate pronouns like أنا، أنت، هو، وهي. For example, 'He is a student' corresponds to 'هو طالب'. Arabic speakers sometimes drop the pronoun, but in English the subject pronoun is required. Practice question: Translate \"هي معلمة\" to English."
             }
         }
 
@@ -432,7 +635,7 @@ object RetrofitClient {
             return when (selectedVoiceLanguage) {
                 "Urdu" -> "پریزنٹ کنٹینیوس (Present Continuous) میں 'am/is/are + verb-ing' استعمال ہوتا ہے، جو ان کاموں کے لیے ہے جو ابھی ہو رہے ہیں۔ جیسے: I am reading (میں پڑھ رہا ہوں)۔ مشق کے لیے سوال: آپ انگریزی میں 'میں انگریزی سیکھ رہا ہوں' کیسے کہیں گے؟"
                 "Arabic" -> "يستخدم زمن المضارع المستمر الصيغة 'am/is/are + verb-ing' للأفعال التي تحدث الآن. وبالمثل في اللغة العربية، تستخدم الفعل المضارع مثل 'أنا أقرأ الآن'. أمثلة: I am reading (أنا أقرأ)، She is sleeping (هي تنام). سؤال للممارسة: كيف تقول 'أنا أتعلم الإنجليزية'؟"
-                else -> "Present Continuous uses 'am/is/are + verb-ing' for actions happening now. Likewise in Arabic, you use the present verb الفعل المضارع مثل 'أنا أقرأ الآن'. Examples: I am reading (أنا أقرأ), She is sleeping (هي تنام), They are eating (هم يأكلون). Practice question: How do you say 'I am learning English'?"
+                else -> "Present Continuous uses 'am/is/are + verb-ing' for actions happening now. Likewise in Arabic, you use the present verb الفعل المضارع مثل 'أنا أقرأ الآن'. Examples: I am reading (أنا أقرأ), She is sleeping (هي تنام), They are eating (هم يأكلون). Practice question: Translate \"أنا أتعلم الإنجليزية\" to English."
             }
         }
 
@@ -447,7 +650,7 @@ object RetrofitClient {
 
     suspend fun analyzeDeepGrammar(inputSentence: String, level: String): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isNotEmpty()) {
+        if (apiKey.isNotEmpty() || isUsingBackend()) {
             try {
                 val prompt = """
                     You are an expert English-Arabic-Urdu Linguistic and Grammar Analyzer API.
@@ -1093,7 +1296,7 @@ object RetrofitClient {
 
     suspend fun searchIdiomAndRealWorldUsage(query: String): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isNotEmpty()) {
+        if (apiKey.isNotEmpty() || isUsingBackend()) {
             try {
                 val prompt = """
                     Explain the English idiom: "$query" for an Urdu speaker.
@@ -1118,7 +1321,7 @@ object RetrofitClient {
 
     suspend fun checkPracticeAnswer(question: String, userAnswer: String, ruleContext: String): String = withContext(Dispatchers.IO) {
         val apiKey = getApiKey()
-        if (apiKey.isNotEmpty()) {
+        if (apiKey.isNotEmpty() || isUsingBackend()) {
             try {
                 val prompt = "Check this answer for an Arabic/Urdu learner: Q: \"$question\", A: \"$userAnswer\". Context: $ruleContext. Provide feedback in simple English and natural Urdu. Evaluate if the answer is correct or not. Explain why simply. Then include an Arabic comparison starting exactly with 'Likewise in Arabic, you have learned...' (or 'جیسے آپ نے عربی میں سیکھا ہے...') explaining the grammar similarities or differences."
                 val request = GenerateContentRequest(contents = listOf(Content(parts = listOf(Part(text = prompt)))))
@@ -1187,7 +1390,9 @@ object RetrofitClient {
         sessionId: String? = null
     ): com.example.data.model.TutorResponseResult = withContext(Dispatchers.IO) {
         val lastUserMessage = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
-        val (detectedInputLang, effectiveResponseLang) = LanguageDetector.resolveEffectiveResponseLanguage(language, lastUserMessage)
+        val activeIntent = LanguageDetector.resolveActiveInstructionIntent(history, language)
+        val activeDirective = activeIntent.toSystemPromptDirective()
+        val effectiveResponseLang = if (activeIntent.requestedLanguage == "Custom") activeIntent.customLanguageName ?: "English" else activeIntent.requestedLanguage
 
         val requestId = "req_" + java.util.UUID.randomUUID().toString().substring(0, 8)
         val apiKey = getApiKey()
@@ -1209,10 +1414,14 @@ object RetrofitClient {
         }
         val systemPrompt = if (isStudyModeOn) {
             """
-            You are the senior English teacher inside Lisan Grammar, teaching English grammar to Arabic/Urdu-speaking learners.
+            $FEMALE_TUTOR_PERSONA_INSTRUCTION
+
+            You are the senior female English teacher inside Lisan Grammar, teaching English grammar to Arabic/Urdu-speaking learners.
             Learner: $userName
             Selected Proficiency Level: $learnerLevel
             Response Language: $effectiveResponseLang
+
+            $activeDirective
 
             [STUDY MODE ACTIVE]
             Your role is to be a structured, strict-but-supportive, demanding, and highly focused teacher.
@@ -1267,7 +1476,23 @@ object RetrofitClient {
                - Give the corrected version.
                - Ask the learner to write a fresh sentence using the correction or retry the question.
             4. ACTIVE COGNITION: Ask the learner to complete a fill-in-the-blank, translate a short sentence, or form a custom sentence using the grammar rule before you give them the full explanation.
-            5. COMPARATIVE SCAFFOLDING & STRUCTURE:
+            5. CRITICAL EXERCISE INTEGRITY MANDATE:
+               - When giving the learner a question, exercise, translation task, sentence-production task, or "try it yourself" activity, NEVER reveal the target answer before the learner responds.
+               - If the learner's explanation/request language is Urdu, and you ask them to produce an English sentence, DO NOT write the target English sentence first and then translate it into Urdu.
+                 * WRONG: "How would you say 'I am a student' in English?" / "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں؟" (This reveals the target sentence and defeats the exercise).
+                 * CORRECT: "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں، English میں؟"
+               - Present ONLY the prompt/question in the learner's explanation language (Urdu or Arabic). Do NOT include the target English sentence anywhere in the question.
+               - After asking the question, STOP and WAIT for the learner's response. Do NOT provide the answer, translation, correct sentence, or an answer disguised as a hint.
+               - Do NOT accidentally reveal the answer through:
+                 * an English translation
+                 * a bilingual version of the target sentence
+                 * an example containing the target sentence
+                 * a "hint" that directly gives the sentence
+                 * an explanation that contains the expected answer
+               - Once the learner responds, evaluate their answer normally. Correct it, explain the mistake, provide the correct English sentence when appropriate, and continue the lesson.
+               - This rule applies dynamically to ALL exercises, not just one particular sentence.
+               - The purpose is to make the learner actively produce the English answer rather than simply copy or translate an answer that the tutor has already revealed.
+            6. COMPARATIVE SCAFFOLDING & STRUCTURE:
                For every grammar lesson or explanation:
                - Explain the English rule in simple English (under '💡 Explanation' or '📚 Lesson').
                - Say exactly: "Likewise in Arabic, you have learned…" (or "كذلك في اللغة العربية، قد تعلمتم...")
@@ -1303,13 +1528,18 @@ object RetrofitClient {
             - Keep responses clear, professional, and visually structured.
             - DO NOT MIX ENGLISH AND ARABIC/URDU WITHIN ONE SENTENCE OR LINE. Separate English and Arabic/Urdu into clearly labeled, distinct sections or paragraphs.
             - NO MARKDOWN SYMBOLS IN LEARNER MESSAGES: Do NOT use raw asterisks (*), markdown headers (###), bold tags (**), blockquotes (>), or hashtags. Use clean, plain text section titles, simple numbers (1., 2.), and clean line breaks.
+            - HIGH-PRIORITY REAL-TIME INSTRUCTION OVERRIDE: If a [CRITICAL ACTIVE USER INSTRUCTION] is provided above restricting the output language (e.g. Strict Urdu Only, Strict English Only, Strict Arabic Only), that instruction OVERRIDES default comparative template rules. Do NOT include English text or English headings if Strict Urdu Only is commanded; do NOT include Urdu/Arabic text if Strict English Only is commanded.
             """.trimIndent()
         } else {
             val studyModeStatusStr = "MODE: QUICK HELP (فوری مدد). Goal: Provide FAST, SHORT, and DIRECT answers. Minimal explanation."
             """
-            You are the teacher inside Lisan Grammar. You teach English grammar to Arabic-speaking learners in a friendly, simple, and respectful way.
+            $FEMALE_TUTOR_PERSONA_INSTRUCTION
+
+            You are the female teacher inside Lisan Grammar. You teach English grammar to Arabic/Urdu-speaking learners in a friendly, simple, and respectful way.
             Learner: $userName
             Response Language: $effectiveResponseLang
+
+            $activeDirective
 
             Profile Context: $profileContext
             $studyModeStatusStr
@@ -1360,8 +1590,24 @@ object RetrofitClient {
             4. Explain the similarities and differences clearly.
             5. Give at least three English examples with Arabic translations (under '📝 Example').
             6. Point out common mistakes Arabic speakers may make (under '⚠️ Important' or '📌 Remember').
-            7. Give one short practice question (under '🤔 Try It Yourself').
-            8. Wait for the learner’s answer and correct it kindly.
+            7. CRITICAL EXERCISE INTEGRITY MANDATE:
+               - When giving the learner a question, exercise, translation task, sentence-production task, or "try it yourself" activity, NEVER reveal the target answer before the learner responds.
+               - If the learner's explanation/request language is Urdu, and you ask them to produce an English sentence, DO NOT write the target English sentence first and then translate it into Urdu.
+                 * WRONG: "How would you say 'I am a student' in English?" / "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں؟" (This reveals the target sentence and defeats the exercise).
+                 * CORRECT: "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں، English میں؟"
+               - Present ONLY the prompt/question in the learner's explanation language (Urdu or Arabic). Do NOT include the target English sentence anywhere in the question.
+               - After asking the question, STOP and WAIT for the learner's response. Do NOT provide the answer, translation, correct sentence, or an answer disguised as a hint.
+               - Do NOT accidentally reveal the answer through:
+                 * an English translation
+                 * a bilingual version of the target sentence
+                 * an example containing the target sentence
+                 * a "hint" that directly gives the sentence
+                 * an explanation that contains the expected answer
+               - Once the learner responds, evaluate their answer normally. Correct it, explain the mistake, provide the correct English sentence when appropriate, and continue the lesson.
+               - This rule applies dynamically to ALL exercises, not just one particular sentence.
+               - The purpose is to make the learner actively produce the English answer rather than simply copy or translate an answer that the tutor has already revealed.
+            8. Give one short practice question (under '🤔 Try It Yourself').
+            9. Wait for the learner’s answer and correct it kindly.
 
             LANGUAGE & TONE RULES:
             - Use Modern Standard Arabic (العربية الفصحى) for Arabic explanations and translations.
@@ -1380,6 +1626,8 @@ object RetrofitClient {
                - Do NOT use raw asterisks (*), markdown headers (###), bold tags (**), bold formatting (**), blockquotes (>), or hashtags.
                - Use clean, plain text section titles, simple numbers (1., 2.), and clean line breaks.
                - Do NOT show internal reasoning or thinking process.
+
+            3. HIGH-PRIORITY REAL-TIME INSTRUCTION OVERRIDE: If a [CRITICAL ACTIVE USER INSTRUCTION] is provided above restricting the output language (e.g. Strict Urdu Only, Strict English Only, Strict Arabic Only), that instruction OVERRIDES default comparative template rules. Do NOT include English text or English headings if Strict Urdu Only is commanded; do NOT include Urdu/Arabic text if Strict English Only is commanded.
             """.trimIndent()
         }
 
@@ -1404,7 +1652,9 @@ object RetrofitClient {
 
         val fullContents = listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = systemPrompt)))) + boundedHistory
         val modelName = MODEL_FLASH
-        val endpointCalled = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+        val useBackend = isUsingBackend()
+        val endpointCalled = if (useBackend) "$backendUrl/v1beta/models/$modelName:generateContent" else "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+        Log.i(TAG, "Tutor non-streaming request URL: $endpointCalled (using secure backend: $useBackend)")
         
         val requestContents = fullContents.mapIndexed { index, content ->
             val mappedParts = mutableListOf<com.example.data.model.Part>()
@@ -1446,10 +1696,14 @@ object RetrofitClient {
             contents = requestContents,
             generationConfig = GenerationConfig(temperature = 0.5f)
         )
+        Log.d(TAG, "BYOK_REQUEST_CREATED: model=$modelName, contentsCount=${requestContents.size}")
         
         try {
+            Log.d(TAG, "BYOK_REQUEST_STARTED: endpoint=$endpointCalled")
             val response = callWithModelFallback(apiKey, request, modelName)
+            Log.d(TAG, "BYOK_HTTP_STATUS: 200 OK")
             val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: throw Exception("Gemini returned an empty response")
+            Log.d(TAG, "BYOK_RESPONSE_PARSED: text length=${text.length}")
             
             PREVIOUS_USER_MESSAGE = lastUserMessage
             PREVIOUS_ASSISTANT_RESPONSE = text
@@ -1468,20 +1722,367 @@ object RetrofitClient {
 
             com.example.data.model.TutorResponseResult(responseText = text, debugMetadata = debugMetadata)
         } catch (e: Exception) {
-            Log.e(TAG, "getTutorResponse error: ${e.message}, falling back to smart local tutor response")
-            val fallbackText = generateSmartLocalTutorResponse(history, mode, language, userName, learnerProfileSummary)
+            val code = if (e is retrofit2.HttpException) e.code() else 500
+            Log.e(TAG, "BYOK_HTTP_STATUS: Error code $code, BYOK_REQUEST_ERROR: ${e.message}", e)
+            throw e
+        }
+    }
+
+    /**
+     * NOTE: Streaming SSE is preserved for utilities and future enhancements, but disabled as the primary
+     * Tutor chat transport because of chunk buffering and state propagation reliability issues in the Chrome/Wasm runtime.
+     */
+    suspend fun getTutorResponseStream(
+        context: android.content.Context,
+        history: List<com.example.data.model.Content>,
+        mode: String,
+        language: String,
+        userName: String,
+        learnerProfileSummary: String? = null,
+        isStudyModeOn: Boolean = false,
+        learnerLevel: String = "Beginner",
+        imageCompressionPreset: String = "BALANCED",
+        sessionId: String? = null,
+        onChunkReceived: suspend (String) -> Unit
+    ): com.example.data.model.TutorResponseResult = withContext(Dispatchers.IO) {
+        val lastUserMessage = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
+        val activeIntent = LanguageDetector.resolveActiveInstructionIntent(history, language)
+        val activeDirective = activeIntent.toSystemPromptDirective()
+        val effectiveResponseLang = if (activeIntent.requestedLanguage == "Custom") activeIntent.customLanguageName ?: "English" else activeIntent.requestedLanguage
+
+        val requestId = "req_" + java.util.UUID.randomUUID().toString().substring(0, 8)
+        val apiKey = getApiKey()
+        val useBackend = isUsingBackend()
+
+        if (apiKey.isEmpty() && !useBackend) {
+            throw Exception("Gemini service is not configured. Please enter your personal Gemini API Key under Settings, or configure a secure backend URL to use the app.")
+        }
+
+        val summaryPrefs = context.getSharedPreferences("lisan_summaries", android.content.Context.MODE_PRIVATE)
+        val conversationSummary = sessionId?.let { summaryPrefs.getString("summary_for_$it", null) }
+        
+        val baseProfileContext = learnerProfileSummary ?: "Student profile: Level $learnerLevel."
+        val profileContext = buildString {
+            append(baseProfileContext)
+            if (!conversationSummary.isNullOrBlank()) {
+                append("\n\n[CONVERSATION SUMMARY OF OLDER MESSAGES]\n")
+                append(conversationSummary)
+            }
+        }
+        val systemPrompt = if (isStudyModeOn) {
+            """
+            $FEMALE_TUTOR_PERSONA_INSTRUCTION
+
+            You are the senior female English teacher inside Lisan Grammar, teaching English grammar to Arabic/Urdu-speaking learners.
+            Learner: $userName
+            Selected Proficiency Level: $learnerLevel
+            Response Language: $effectiveResponseLang
+
+            $activeDirective
+
+            [STUDY MODE ACTIVE]
+            Your role is to be a structured, strict-but-supportive, demanding, and highly focused teacher.
+            ADAPT YOUR EXPLANATIONS TO THE LEARNER'S PROFICIENCY LEVEL ($learnerLevel). For Beginner: simple vocabulary and short examples. For Intermediate/Advanced: deeper rules, idiomatic expressions, and nuance.
+
+            CONVERSATION START PROTOCOL:
+            At the beginning of every new conversation, greet the learner with exactly:
+            السلام عليكم ورحمة الله وبركاته
+            Then say exactly:
+            Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar.
+
+            EMOJI AND ICON SYSTEM RULES:
+            You must intelligently use appropriate emojis when they genuinely improve understanding or make the response feel friendly.
+            - Do NOT randomly or excessively add emojis to every sentence.
+            - Emojis should function as visual labels, indicators, encouragement, or section markers.
+            - Whenever an emoji is used as a section marker, pair it with clear text (Emoji + Text pairing).
+
+            TEACHING PROTOCOLS:
+            1. PRIORITIZE ACTIVE LEARNING: Direct the student's focus to grammatical principles and guide them to reason through explanations.
+            2. TEACH ONE CONCEPT AT A TIME: Focus on quality over quantity.
+            3. ERROR DIAGNOSIS & RECOVERY: Identify errors gently, explain why in simple terms, and ask the learner to try again.
+            4. COMPARATIVE SCAFFOLDING & STRUCTURE: Compare English rules with Arabic or Urdu grammar.
+            5. CRITICAL EXERCISE INTEGRITY MANDATE:
+               - When giving the learner a question, exercise, translation task, sentence-production task, or "try it yourself" activity, NEVER reveal the target answer before the learner responds.
+               - If the learner's explanation/request language is Urdu, and you ask them to produce an English sentence, DO NOT write the target English sentence first and then translate it into Urdu.
+                 * WRONG: "How would you say 'I am a student' in English?" / "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں؟" (This reveals the target sentence and defeats the exercise).
+                 * CORRECT: "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں، English میں؟"
+               - Present ONLY the prompt/question in the learner's explanation language (Urdu or Arabic). Do NOT include the target English sentence anywhere in the question.
+               - After asking the question, STOP and WAIT for the learner's response. Do NOT provide the answer, translation, correct sentence, or an answer disguised as a hint.
+               - Do NOT accidentally reveal the answer through:
+                 * an English translation
+                 * a bilingual version of the target sentence
+                 * an example containing the target sentence
+                 * a "hint" that directly gives the sentence
+                 * an explanation that contains the expected answer
+               - Once the learner responds, evaluate their answer normally. Correct it, explain the mistake, provide the correct English sentence when appropriate, and continue the lesson.
+               - This rule applies dynamically to ALL exercises, not just one particular sentence.
+               - The purpose is to make the learner actively produce the English answer rather than simply copy or translate an answer that the tutor has already revealed.
+
+            CRITICAL FOLLOW-UP INSTRUCTIONS & CONVERSATIONAL CONTEXT RULES:
+            1. MAINTAIN TOPIC CONTINUITY: Always maintain the ongoing grammar topic or subject from the preceding conversation history.
+            2. RECOGNIZE FOLLOW-UP INSTRUCTIONS & META-COMMANDS:
+               Learners frequently send short follow-up instructions or requests regarding the previous answer/topic. Examples of follow-up instructions include:
+               - Language/Translation: "Urdu mein samjhao", "English mein samjhao", "Arabic mein samjhao", "Translate this", "Urdu mein", "English mein"
+               - Simplification/Detail: "Simple words mein samjhao", "Aur simple karo", "Make it easier", "Short mein batao", "Detail mein samjhao", "Phir se samjhao", "Isko explain karo"
+               - Examples/Expansion: "Examples do", "Aur examples do", "Give me more examples", "What does this mean?"
+               - Practice/Quiz: "Ab is ka quiz lo", "Quiz me", "Test my understanding"
+            3. HOW TO RESPOND TO FOLLOW-UP INSTRUCTIONS:
+               - NEVER treat a follow-up instruction or meta-command as a new subject to define or explain. For example, if the previous topic was "Present Perfect Tense" and the user says "Urdu mein samjhao", you MUST re-explain Present Perfect Tense in Urdu. Do NOT explain what the phrase "Urdu mein samjhao" means!
+               - Inspect the preceding conversation history to determine what "this", "it", "that", "again", "more examples", "Urdu mein", "English mein", "quiz" refer to.
+               - Execute the requested instruction (translate, simplify, provide more examples, or quiz) directly on the PREVIOUS topic/concept discussed in the conversation.
+
+            4. HIGH-PRIORITY REAL-TIME INSTRUCTION OVERRIDE: If a [CRITICAL ACTIVE USER INSTRUCTION] is provided above restricting the output language (e.g. Strict Urdu Only, Strict English Only, Strict Arabic Only), that instruction OVERRIDES default comparative template rules. Do NOT include English text or English headings if Strict Urdu Only is commanded; do NOT include Urdu/Arabic text if Strict English Only is commanded.
+
+            Learner Study Context: $profileContext
+            """.trimIndent()
+        } else {
+            """
+            You are Lisan AI, an expert English language tutor specializing in teaching English grammar to Urdu and Arabic native speakers.
+            Learner: $userName
+            Selected Proficiency Level: $learnerLevel
+            Response Language: $effectiveResponseLang
+
+            $activeDirective
+
+            EMOJI AND ICON SYSTEM RULES:
+            Use appropriate emojis intelligently when they improve understanding.
+
+            TEACHING APPROACH:
+            1. Provide clear, supportive explanations.
+            2. Contrast English rules with Arabic or Urdu grammar equivalents where helpful.
+            3. Encourage the learner with active practice.
+            4. CRITICAL EXERCISE INTEGRITY MANDATE:
+               - When giving the learner a question, exercise, translation task, sentence-production task, or "try it yourself" activity, NEVER reveal the target answer before the learner responds.
+               - If the learner's explanation/request language is Urdu, and you ask them to produce an English sentence, DO NOT write the target English sentence first and then translate it into Urdu.
+                 * WRONG: "How would you say 'I am a student' in English?" / "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں؟" (This reveals the target sentence and defeats the exercise).
+                 * CORRECT: "آپ یہ کیسے کہیں گے کہ میں ایک طالب علم ہوں، English میں؟"
+               - Present ONLY the prompt/question in the learner's explanation language (Urdu or Arabic). Do NOT include the target English sentence anywhere in the question.
+               - After asking the question, STOP and WAIT for the learner's response. Do NOT provide the answer, translation, correct sentence, or an answer disguised as a hint.
+               - Do NOT accidentally reveal the answer through:
+                 * an English translation
+                 * a bilingual version of the target sentence
+                 * an example containing the target sentence
+                 * a "hint" that directly gives the sentence
+                 * an explanation that contains the expected answer
+               - Once the learner responds, evaluate their answer normally. Correct it, explain the mistake, provide the correct English sentence when appropriate, and continue the lesson.
+               - This rule applies dynamically to ALL exercises, not just one particular sentence.
+               - The purpose is to make the learner actively produce the English answer rather than simply copy or translate an answer that the tutor has already revealed.
+
+            CRITICAL FOLLOW-UP INSTRUCTIONS & CONVERSATIONAL CONTEXT RULES:
+            1. MAINTAIN TOPIC CONTINUITY: Always maintain the ongoing grammar topic or subject from the preceding conversation history.
+            2. RECOGNIZE FOLLOW-UP INSTRUCTIONS & META-COMMANDS:
+               Learners frequently send short follow-up instructions or requests regarding the previous answer/topic. Examples of follow-up instructions include:
+               - Language/Translation: "Urdu mein samjhao", "English mein samjhao", "Arabic mein samjhao", "Translate this", "Urdu mein", "English mein"
+               - Simplification/Detail: "Simple words mein samjhao", "Aur simple karo", "Make it easier", "Short mein batao", "Detail mein samjhao", "Phir se samjhao", "Isko explain karo"
+               - Examples/Expansion: "Examples do", "Aur examples do", "Give me more examples", "What does this mean?"
+               - Practice/Quiz: "Ab is ka quiz lo", "Quiz me", "Test my understanding"
+            3. HOW TO RESPOND TO FOLLOW-UP INSTRUCTIONS:
+               - NEVER treat a follow-up instruction or meta-command as a new subject to define or explain. For example, if the previous topic was "Present Perfect Tense" and the user says "Urdu mein samjhao", you MUST re-explain Present Perfect Tense in Urdu. Do NOT explain what the phrase "Urdu mein samjhao" means!
+               - Inspect the preceding conversation history to determine what "this", "it", "that", "again", "more examples", "Urdu mein", "English mein", "quiz" refer to.
+               - Execute the requested instruction (translate, simplify, provide more examples, or quiz) directly on the PREVIOUS topic/concept discussed in the conversation.
+
+            4. HIGH-PRIORITY REAL-TIME INSTRUCTION OVERRIDE: If a [CRITICAL ACTIVE USER INSTRUCTION] is provided above restricting the output language (e.g. Strict Urdu Only, Strict English Only, Strict Arabic Only), that instruction OVERRIDES default comparative template rules. Do NOT include English text or English headings if Strict Urdu Only is commanded; do NOT include Urdu/Arabic text if Strict English Only is commanded.
+
+            Learner Context: $profileContext
+            """.trimIndent()
+        }
+
+        val maxMessageCount = 20
+        val maxCharacterCount = 16000
+        
+        val boundedHistory = mutableListOf<com.example.data.model.Content>()
+        var currentChars = 0
+        
+        for (msg in history.reversed()) {
+            if (boundedHistory.size >= maxMessageCount) break
+            val textLen = msg.parts.sumOf { it.text?.length ?: 0 }
+            if (currentChars + textLen > maxCharacterCount && boundedHistory.isNotEmpty()) break
+            boundedHistory.add(0, msg)
+            currentChars += textLen
+        }
+
+        val sysInstructionContent = com.example.data.model.Content(
+            role = "system",
+            parts = listOf(com.example.data.model.Part(text = systemPrompt))
+        )
+
+        val fullContents = if (boundedHistory.isNotEmpty()) boundedHistory else listOf(com.example.data.model.Content(role = "user", parts = listOf(com.example.data.model.Part(text = "Hello"))))
+        val modelName = MODEL_FLASH
+        val endpointCalled = if (useBackend) "$backendUrl/v1beta/models/$modelName:streamGenerateContent" else "https://generativelanguage.googleapis.com/v1beta/models/$modelName:streamGenerateContent"
+        Log.i(TAG, "Tutor streaming request URL: $endpointCalled (using secure backend: $useBackend)")
+        
+        val requestContents = fullContents.mapIndexed { index, content ->
+            val mappedParts = mutableListOf<com.example.data.model.Part>()
+            content.parts.forEach { part ->
+                if (!part.text.isNullOrEmpty()) {
+                    mappedParts.add(com.example.data.model.Part(text = part.text))
+                }
+            }
+            val isCurrentTurn = index == fullContents.lastIndex
+            if (isCurrentTurn && content.imageUri != null) {
+                try {
+                    val uri = android.net.Uri.parse(content.imageUri)
+                    val presetEnum = try {
+                        com.example.utils.ImageOptimizer.CompressionPreset.valueOf(imageCompressionPreset.uppercase())
+                    } catch (e: Exception) {
+                        com.example.utils.ImageOptimizer.CompressionPreset.BALANCED
+                    }
+                    val optResult = com.example.utils.ImageOptimizer.optimizeImage(context, uri, presetEnum)
+                    if (optResult != null) {
+                        mappedParts.add(com.example.data.model.Part(
+                            inlineData = com.example.data.model.InlineData(
+                                mimeType = optResult.mimeType,
+                                data = optResult.base64Data
+                            )
+                        ))
+                    }
+                } catch (e: Exception) {
+                    Log.e("RetrofitClient", "Failed to optimize image: ${e.message}", e)
+                }
+            }
+            com.example.data.model.Content(role = content.role, parts = mappedParts)
+        }
+
+        val request = GenerateContentRequest(
+            contents = requestContents,
+            systemInstruction = sysInstructionContent,
+            generationConfig = GenerationConfig(temperature = 0.5f)
+        )
+        Log.d(TAG, "BYOK_REQUEST_CREATED: model=$modelName, contentsCount=${requestContents.size}")
+        Log.i("TutorDiag", "[3] Backend ready and confirmed: useBackend=$useBackend")
+
+        val fullResponseText = StringBuilder()
+
+        try {
+            val maxRetries = 3
+            var currentAttempt = 0
+            var responseBody: okhttp3.ResponseBody? = null
+
+            while (currentAttempt < maxRetries) {
+                currentAttempt++
+                kotlinx.coroutines.yield()
+                val currentlyUsingBackend = isUsingBackend()
+                try {
+                    Log.d(TAG, "BYOK_REQUEST_STARTED: attempt=$currentAttempt, useBackend=$currentlyUsingBackend")
+                    Log.i("TutorDiag", "[4] Gemini request started: endpoint=$endpointCalled")
+                    responseBody = if (currentlyUsingBackend) {
+                        backendService.generateContentStream(modelName, getBackendAuthHeader(), request)
+                    } else {
+                        service.generateContentStream(modelName, apiKey.ifBlank { getApiKey() }, request)
+                    }
+                    Log.d(TAG, "BYOK_HTTP_STATUS: 200 OK")
+                    Log.d(TAG, "BYOK_RESPONSE_RECEIVED")
+                    break
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+
+                    val code = if (e is retrofit2.HttpException) e.code() else 500
+                    if (currentlyUsingBackend && (e is java.io.IOException || e is java.net.ConnectException || e is java.net.SocketTimeoutException || e is java.net.UnknownHostException || code == 404 || code >= 500)) {
+                        isBackendUnreachable = true
+                    }
+                    Log.e(TAG, "BYOK_HTTP_STATUS: Error code $code on attempt $currentAttempt: ${e.message}")
+
+                    val effectiveKey = apiKey.ifBlank { getApiKey() }
+                    if (isBackendUnreachable && effectiveKey.isNotBlank()) {
+                        for (fallbackModel in listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")) {
+                            try {
+                                val maskedKey = if (effectiveKey.length > 8) "${effectiveKey.take(4)}...${effectiveKey.takeLast(4)}" else "KEY_SET"
+                                Log.d(TAG, "Attempting immediate stream fallback to direct Gemini API ($fallbackModel) with key $maskedKey...")
+                                responseBody = service.generateContentStream(fallbackModel, effectiveKey, request)
+                                Log.d(TAG, "BYOK_HTTP_STATUS: 200 OK (stream direct fallback succeeded with $fallbackModel)")
+                                break
+                            } catch (fallbackEx: Exception) {
+                                if (fallbackEx is kotlinx.coroutines.CancellationException) throw fallbackEx
+                                Log.e(TAG, "Direct Gemini API stream fallback ($fallbackModel) failed: ${fallbackEx.message}")
+                            }
+                        }
+                        if (responseBody != null) break
+                    }
+
+                    val isAuthError = when (e) {
+                        is retrofit2.HttpException -> e.code() == 401 || e.code() == 403
+                        else -> {
+                            val msg = e.message?.lowercase() ?: ""
+                            msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")
+                        }
+                    }
+                    val isRateLimit = when (e) {
+                        is retrofit2.HttpException -> e.code() == 429
+                        else -> {
+                            val msg = e.message?.lowercase() ?: ""
+                            msg.contains("429") || msg.contains("quota") || msg.contains("rate limit")
+                        }
+                    }
+
+                    val isTransient = (e is java.io.IOException || e is java.net.SocketTimeoutException || e is java.net.UnknownHostException) && !isAuthError && !isRateLimit
+
+                    if (isTransient && currentAttempt < maxRetries) {
+                        Log.w(TAG, "Transient network error on attempt $currentAttempt for tutor stream: ${e.message}. Retrying in ${currentAttempt * 1000}ms...")
+                        kotlinx.coroutines.delay(currentAttempt * 1000L)
+                    } else {
+                        throw e
+                    }
+                }
+            }
+
+            Log.d(TAG, "BYOK_STREAM_STARTED")
+            val reader = responseBody!!.byteStream().bufferedReader()
+            var line = reader.readLine()
+            var isFirstChunk = true
+            while (line != null) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith("data:")) {
+                    val jsonPart = trimmed.substring(5).trim()
+                    if (jsonPart.isNotBlank() && jsonPart != "[DONE]") {
+                        try {
+                            val chunkResponse = json.decodeFromString<com.example.data.model.GenerateContentResponse>(jsonPart)
+                            val textChunk = chunkResponse.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                            if (!textChunk.isNullOrEmpty()) {
+                                fullResponseText.append(textChunk)
+                                Log.d(TAG, "BYOK_PARSED_TEXT_LENGTH=${textChunk.length}")
+                                Log.d(TAG, "BYOK_PARSED_TEXT_PREVIEW=${textChunk.take(50)}")
+                                Log.d(TAG, "BYOK_STREAM_CHUNK_RECEIVED: length=${textChunk.length}")
+                                if (isFirstChunk) {
+                                    isFirstChunk = false
+                                    Log.i("TutorDiag", "[5] First Gemini chunk received: length=${textChunk.length}")
+                                    Log.i("TutorDiag", "[6] First chunk delivered to Android")
+                                }
+                                onChunkReceived(textChunk)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error parsing stream chunk: ${e.message}")
+                        }
+                    }
+                }
+                line = reader.readLine()
+            }
+
+            val finalStr = fullResponseText.toString()
+            if (finalStr.isBlank()) {
+                throw Exception("Stream completed with empty response")
+            }
+            Log.d(TAG, "BYOK_RESPONSE_PARSED: finalStr length=${finalStr.length}")
+
+            PREVIOUS_USER_MESSAGE = lastUserMessage
+            PREVIOUS_ASSISTANT_RESPONSE = finalStr
+
             val debugMetadata = com.example.data.model.TutorDebugMetadata(
                 requestId = requestId,
                 submittedMessage = lastUserMessage,
-                provider = "Lisan Smart Fallback",
-                modelName = "offline-smart-engine",
+                provider = if (useBackend) "Lisan Backend Proxy" else "Gemini (BYOK)",
+                modelName = modelName,
                 endpointCalled = endpointCalled,
-                httpStatus = "200 OK (Fallback)",
-                source = "local-smart-fallback",
-                responseId = "fallback-" + java.util.UUID.randomUUID().toString().take(12),
-                errorMessage = e.message
+                httpStatus = "200 OK (Stream)",
+                source = if (useBackend) "backend-stream" else "gemini-stream",
+                responseId = "res-" + java.util.UUID.randomUUID().toString().take(12),
+                errorMessage = null
             )
-            com.example.data.model.TutorResponseResult(responseText = fallbackText, debugMetadata = debugMetadata)
+
+            com.example.data.model.TutorResponseResult(responseText = finalStr, debugMetadata = debugMetadata)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "BYOK_REQUEST_ERROR: ${e.message}", e)
+            throw e
         }
     }
 
@@ -1532,6 +2133,35 @@ object RetrofitClient {
         emptyList()
     }
 
+    suspend fun summarizeChatSession(messages: List<Content>): String = withContext(Dispatchers.IO) {
+        val apiKey = getApiKey()
+        if (apiKey.isEmpty() && !isUsingBackend()) {
+            return@withContext "Student practiced English grammar and conversation topics."
+        }
+        val transcript = messages.joinToString("\n") { "${it.role}: ${it.parts.firstOrNull()?.text ?: ""}" }
+        val prompt = """
+            Summarize the following chat session between a student and an English-Arabic-Urdu grammar tutor into ONE concise, single-sentence memory fact about the student's learning progress, questions asked, or topics discussed (e.g. "Student practiced Present Continuous tense and asked about pronoun usage"). Keep it brief and return ONLY the single summary sentence without quotes.
+            
+            Chat Transcript:
+            $transcript
+        """.trimIndent()
+
+        val request = GenerateContentRequest(
+            contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+            generationConfig = GenerationConfig(temperature = 0.3f)
+        )
+        try {
+            val response = callWithModelFallback(apiKey, request, MODEL_FLASH)
+            val summary = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
+            if (!summary.isNullOrBlank()) {
+                return@withContext summary.removeSurrounding("\"")
+            }
+        } catch (e: Exception) {
+            Log.i(TAG, "summarizeChatSession offline fallback: ${e.message}")
+        }
+        return@withContext "Student studied English grammar and practiced conversational sentences."
+    }
+
     suspend fun generateConversationSummary(
         context: android.content.Context,
         olderMessages: List<com.example.data.model.Content>,
@@ -1566,6 +2196,7 @@ object RetrofitClient {
             append("1. Keep the summary concise (under 100 words).\n")
             append("2. Focus purely on key learning concepts, corrections, and topic progress.\n")
             append("3. Do NOT use markdown formatting, code blocks, or bullets. Just write a few plain, clear sentences in English.\n")
+            append("4. Always refer to the Tutor as a female teacher (she/her/خاتون ٹیچر) if mentioning the Tutor's identity or actions.\n")
         }
 
         val request = GenerateContentRequest(
@@ -1592,21 +2223,39 @@ object RetrofitClient {
         learnerProfileSummary: String?
     ): String {
         val lastUserMsg = history.lastOrNull { it.role == "user" }?.parts?.firstOrNull()?.text ?: ""
-        val (_, effectiveLang) = LanguageDetector.resolveEffectiveResponseLanguage(selectedLanguageMode, lastUserMsg)
+        val activeIntent = LanguageDetector.resolveActiveInstructionIntent(history, selectedLanguageMode)
+        val effectiveLang = if (activeIntent.requestedLanguage == "Custom") activeIntent.customLanguageName ?: "English" else activeIntent.requestedLanguage
         val lowerMsg = lastUserMsg.lowercase(java.util.Locale.ROOT)
 
+        val followUpKeywords = listOf(
+            "urdu mein", "english mein", "arabic mein", "simple words", "examples do", "aur example",
+            "short mein", "detail mein", "phir se", "explain karo", "translate",
+            "make it easier", "give me more", "what does this mean", "quiz", "samjhao"
+        )
+        val isFollowUpInstruction = followUpKeywords.any { lowerMsg.contains(it) }
+        val targetUserMsg = if (isFollowUpInstruction) {
+            val previousUserTurns = history.filter { it.role == "user" }.dropLast(1)
+            previousUserTurns.lastOrNull { turn ->
+                val txt = turn.parts.firstOrNull()?.text?.lowercase(java.util.Locale.ROOT) ?: ""
+                !followUpKeywords.any { kw -> txt.contains(kw) }
+            }?.parts?.firstOrNull()?.text ?: lastUserMsg
+        } else {
+            lastUserMsg
+        }
+        val lowerTopicMsg = targetUserMsg.lowercase(java.util.Locale.ROOT)
+
         // 1. Casual Greeting
-        if (lowerMsg in listOf("hi", "hello", "hey", "hola", "assalam", "aoa", "سلام") || lowerMsg.startsWith("hi ") || lowerMsg.startsWith("hello ")) {
+        if (!isFollowUpInstruction && (lowerMsg in listOf("hi", "hello", "hey", "hola", "assalam", "aoa", "سلام") || lowerMsg.startsWith("hi ") || lowerMsg.startsWith("hello "))) {
             return when (effectiveLang) {
-                "Urdu" -> "السلام علیکم ورحمة الله وبركاته $userName! لیسان AI ٹیوٹر میں خوش آمدید۔ میں آج آپ کی انگریزی میں کیا مدد کر سکتا ہوں؟"
+                "Urdu" -> "السلام علیکم ورحمة الله وبركاته $userName! لیسان AI ٹیوٹر میں خوش آمدید۔ میں آج آپ کی انگریزی میں کیا مدد کر سکتی ہوں؟"
                 "Arabic" -> "السلام عليكم ورحمة الله وبركاته $userName! مرحباً بك في معلم لسان الذكي. كيف يمكنني مساعدتك اليوم؟"
                 else -> "Hello $userName! Welcome to Lisan AI Tutor. How can I help you with your English today?"
             }
         }
 
         // 2. Feedback / Misunderstanding / "I didn't ask for this"
-        if (lowerMsg.contains("didn't ask") || lowerMsg.contains("did not ask") || lowerMsg.contains("wrong") ||
-            lowerMsg.contains("stop giving") || lowerMsg.contains("misunderstood") || lowerMsg.contains("سمجھ نہیں") || lowerMsg.contains("غلط")) {
+        if (!isFollowUpInstruction && (lowerMsg.contains("didn't ask") || lowerMsg.contains("did not ask") || lowerMsg.contains("wrong") ||
+            lowerMsg.contains("stop giving") || lowerMsg.contains("misunderstood") || lowerMsg.contains("سمجھ نہیں") || lowerMsg.contains("غلط"))) {
             return when (effectiveLang) {
                 "Urdu" -> "معذرت، میں آپ کا سوال درست طور پر نہیں سمجھ سکا۔ براہ کرم بتائیں کہ آپ کس چیز میں مدد چاہتے ہیں یا اپنا سوال دوبارہ لکھیں۔"
                 "Arabic" -> "أعتذر عن عدم الفهم! يرجى توضيح ما تحتاج المساعدة فيه وسأقوم بإجابتك فوراً."
@@ -1615,7 +2264,7 @@ object RetrofitClient {
         }
 
         // 3. Has vs Have
-        if ((lowerMsg.contains("has") && lowerMsg.contains("have")) || lowerMsg.contains("difference between has and have")) {
+        if ((lowerTopicMsg.contains("has") && lowerTopicMsg.contains("have")) || lowerTopicMsg.contains("difference between has and have")) {
             return """
 Has vs Have Usage
 
@@ -1656,7 +2305,7 @@ He has a new book.
         }
 
         // 4. In / On / At (Prepositions)
-        if (lowerMsg.contains("in on at") || lowerMsg.contains("preposition")) {
+        if (lowerTopicMsg.contains("in on at") || lowerTopicMsg.contains("preposition")) {
             return """
 Prepositions: In, On, At
 
@@ -1686,7 +2335,7 @@ Examples
         }
 
         // 5. Present Perfect Tense
-        if (lowerMsg.contains("present perfect")) {
+        if (lowerTopicMsg.contains("present perfect")) {
             return """
 Present Perfect Tense
 
@@ -1802,11 +2451,39 @@ Reply with your answers, and I will check them.
             }
         }
 
-        // 8. General fallback
+        // 8. General dynamic response referencing user's input
+        val shortUserPrompt = if (lastUserMsg.length > 60) lastUserMsg.take(57) + "..." else lastUserMsg
         return when (effectiveLang) {
-            "Urdu" -> "انگریزی گرامر میں ہر جملہ بنیادی طور پر فاعل (Subject) اور فعل (Verb) کی مطابقت پر منحصر ہوتا ہے۔ مزید تفصیل کے لیے اپنا سوال واضح کریں۔"
-            "Arabic" -> "في قواعد اللغة الإنجليزية، تعتمد الجملة على التوافق بين الفاعل والفعل. يرجى توضيح سؤالك لمزيد من الإيضاح."
-            else -> "In English grammar, clear structure depends on proper subject-verb agreement. Feel free to ask any specific question!"
+            "Urdu" -> """
+                **توجہ برائے سوال:** "$shortUserPrompt"
+                
+                انگریزی گرامر میں، جملے کی ساخت فاعل (Subject) اور فعل (Verb) کی مطابقت پر مبنی ہوتی ہے۔
+                
+                • **گرامر کی وضاحت:** "$shortUserPrompt" میں فاعل اور وقت (Tense) کا درست ہونا ضروری ہے۔
+                • **عربی موازنہ:** عربی میں الجملة الاسمية یا الجملة الفعلية کے اصول انگریزی کے اس ساخت سے مشابہ ہیں۔
+                
+                اگر آپ اس کی مزید تفصیل یا سوال پوچھنا چاہتے ہیں تو اپنی مثال درج کریں۔
+            """.trimIndent()
+
+            "Arabic" -> """
+                **إجابة حول:** "$shortUserPrompt"
+                
+                في قواعد اللغة الإنجليزية، تعتمد صحة الجملة على التوافق بين الفاعل والفعل (Subject-Verb Agreement).
+                
+                • **ملاحظة:** بالنسبة لـ "$shortUserPrompt"، تأكد من استخدام الزمن والفعل المناسبين.
+                • **مقارنة مع العربية:** الجملة الاسمية والجملة الفعلية تشابه هذا الهيكل القواعدي.
+            """.trimIndent()
+
+            else -> """
+                **Regarding your prompt:** "$shortUserPrompt"
+                
+                In English grammar, clear structure depends on proper subject-verb agreement and correct tense usage.
+                
+                • **Grammar Note:** For "$shortUserPrompt", ensure the subject matches the corresponding verb form.
+                • **Arabic Parallel:** Similar to how nominal (جملة اسمية) or verbal (جملة فعلية) sentences operate in Arabic, English requires a defined subject and predicate.
+                
+                Feel free to share a specific example sentence for a detailed step-by-step breakdown!
+            """.trimIndent()
         }
     }
 }

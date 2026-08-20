@@ -5,27 +5,32 @@ import com.example.data.model.ArabicEquivalentType
 import com.example.data.model.Idiom
 import com.example.data.model.IdiomCategory
 import com.example.data.model.IdiomLevel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 
 object IdiomRepository {
-    private var _idioms: List<Idiom> = emptyList()
+    private val _idiomsState = MutableStateFlow<List<Idiom>>(emptyList())
+    val idiomsFlow: StateFlow<List<Idiom>> = _idiomsState.asStateFlow()
     
     val idioms: List<Idiom>
-        get() = _idioms
+        get() = _idiomsState.value
 
     fun initialize(context: Context) {
-        if (_idioms.isNotEmpty()) return
+        if (_idiomsState.value.isNotEmpty()) return
         try {
             val jsonString = context.assets.open("idioms.json").bufferedReader().use { it.readText() }
             val jsonDecoder = Json { 
                 ignoreUnknownKeys = true
                 coerceInputValues = true
             }
-            _idioms = jsonDecoder.decodeFromString<List<Idiom>>(jsonString)
+            val list = jsonDecoder.decodeFromString<List<Idiom>>(jsonString)
+            _idiomsState.value = list
         } catch (e: Exception) {
             e.printStackTrace()
             // Robust fallback to ensure the app never crashes
-            _idioms = listOf(
+            _idiomsState.value = listOf(
                 Idiom(
                     id = "break_the_ice",
                     expression = "Break the ice",

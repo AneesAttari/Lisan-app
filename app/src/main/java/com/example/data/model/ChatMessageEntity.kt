@@ -9,5 +9,7 @@ data class ChatMessageEntity(
     val role: String,
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val imageUri: String? = null
+    val imageUri: String? = null,
+    val generatedImageBase64: String? = null,
+    val generatedImagePrompt: String? = null
 )

@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import android.net.Uri
 import com.example.ui.components.UserAvatar
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import android.Manifest
 import android.content.Intent
@@ -25,6 +27,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.BorderStroke
@@ -115,11 +118,35 @@ fun TutorChatScreen(
 
     val showApiKeyGuideModal by viewModel.showApiKeyGuideModal.collectAsState()
     if (showApiKeyGuideModal) {
-        com.example.ui.components.ApiKeyGuideDialog(
-            onDismiss = { viewModel.setShowApiKeyGuideModal(false) },
-            onSaveKey = { key -> viewModel.setUserApiKey(key) },
-            isCustomKeyExceeded = viewModel.hasCustomUserApiKey()
-        )
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { viewModel.setShowApiKeyGuideModal(false) },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    com.example.ui.screens.ImplementApiKeyScreen(viewModel = viewModel)
+                    
+                    IconButton(
+                        onClick = { viewModel.setShowApiKeyGuideModal(false) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(16.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 
     val showChatDetails by viewModel.isTutorChatActive.collectAsState()
@@ -129,7 +156,15 @@ fun TutorChatScreen(
     var showPlusMenu by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showExamModeDialog by remember { mutableStateOf(false) }
+    var showPdfCreatorDialog by remember { mutableStateOf(false) }
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    if (showPdfCreatorDialog) {
+        com.example.ui.components.PdfCreatorDialog(
+            viewModel = viewModel,
+            onDismiss = { showPdfCreatorDialog = false }
+        )
+    }
 
     if (showExamModeDialog) {
         val examViewModel: com.example.ui.viewmodel.ExamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -278,6 +313,7 @@ fun TutorChatScreen(
 
     
     var inputText by remember { mutableStateOf("") }
+    var isCreateImageMode by remember { mutableStateOf(false) }
     val chatInputState by viewModel.chatInputState.collectAsState()
     LaunchedEffect(chatInputState) {
         if (chatInputState.isNotEmpty()) {
@@ -291,11 +327,24 @@ fun TutorChatScreen(
     var isSttProcessing by remember { mutableStateOf(false) }
     var sttErrorMessage by remember { mutableStateOf<String?>(null) }
     var activeSpeechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    var preSpeechText by remember { mutableStateOf("") }
+
+    fun appendSpeechToExistingText(prefix: String, speech: String): String {
+        if (prefix.isBlank()) return speech
+        if (speech.isBlank()) return prefix
+        return if (prefix.endsWith(" ") || speech.startsWith(" ")) {
+            "$prefix$speech"
+        } else {
+            "$prefix $speech"
+        }
+    }
+
     val selectedVoiceLanguage by viewModel.activeVoiceLanguage.collectAsState()
     val sttLanguage = when (selectedVoiceLanguage) {
         VoiceInputLanguage.URDU -> "ur-PK"
         VoiceInputLanguage.ENGLISH -> "en-US"
         VoiceInputLanguage.ARABIC -> "ar-SA"
+        VoiceInputLanguage.AUTO -> "auto"
         else -> "en-US"
     }
 
@@ -311,12 +360,17 @@ fun TutorChatScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
+            preSpeechText = inputText
             startSttListening(
                 context = context,
                 language = sttLanguage,
-                onPartial = { inputText = it },
+                onPartial = {},
                 onFinal = { text ->
-                    inputText = text
+                    val processed = com.example.utils.SpeechTextProcessor.processTranscribedText(
+                        rawText = text,
+                        targetLanguage = userSettings.selectedVoiceLanguage
+                    )
+                    inputText = appendSpeechToExistingText(preSpeechText, processed)
                     isSttListening = false
                     isSttProcessing = false
                 },
@@ -340,8 +394,8 @@ fun TutorChatScreen(
         viewModel.ttsManager.speak(text, id)
     }
 
-    LaunchedEffect(chatHistory.size) {
-        if (chatHistory.isNotEmpty()) {
+    LaunchedEffect(chatHistory.size, showChatDetails) {
+        if (showChatDetails && chatHistory.isNotEmpty()) {
             listState.animateScrollToItem(chatHistory.size - 1)
         }
     }
@@ -384,11 +438,17 @@ fun TutorChatScreen(
         localScope.launch { localDrawerState.close() }
     }
 
+    BackHandler(enabled = showChatDetails && !localDrawerState.isOpen) {
+        viewModel.saveCurrentSessionToHistory()
+        viewModel.setTutorChatActive(false)
+    }
+
     val colors = EditorialTheme.colors
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         ModalNavigationDrawer(
             drawerState = localDrawerState,
+            gesturesEnabled = showChatDetails,
             drawerContent = {
                 ModalDrawerSheet(
                     modifier = Modifier.width(340.dp),
@@ -410,9 +470,9 @@ fun TutorChatScreen(
                         }
                     )
                 }
-            },
-            content = {
-                Box(modifier = modifier.fillMaxSize()) {
+            }
+        ) {
+            Box(modifier = modifier.fillMaxSize()) {
         if (!showChatDetails) {
             // LEARNING HUB PAGE
             Column(
@@ -813,13 +873,7 @@ fun TutorChatScreen(
             val lastMsgText = chatHistory.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
 
             LaunchedEffect(Unit) {
-                // Initial greeting if chat history is empty
-                if (chatHistory.isEmpty()) {
-                    kotlinx.coroutines.delay(1000) // Small delay to allow TTS setup
-                    val greeting = "السلام عليكم ورحمة الله وبركاته. Welcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
-                    viewModel.sendChatMessage(greeting)
-                    speakText(greeting, "greeting_id")
-                }
+                // Initial welcome message handled locally by ViewModel without extra network delay
             }
 
             LaunchedEffect(totalChatItems, lastMsgText, isImeVisible) {
@@ -838,7 +892,6 @@ fun TutorChatScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(EditorialBackground)
-                    .imePadding()
             ) {
                 // PREMIUM HEADER BAR
                 Row(
@@ -1162,7 +1215,25 @@ fun TutorChatScreen(
                                                 text = displayableText,
                                                 isUser = isUser
                                             )
-                                            
+
+                                            message.generatedImageBase64?.let { base64Data ->
+                                                Spacer(modifier = Modifier.height(10.dp))
+                                                GeneratedImageBubbleCard(
+                                                    base64Data = base64Data,
+                                                    prompt = message.generatedImagePrompt ?: "Generated Image"
+                                                )
+                                            }
+
+                                            message.generatedPdfUri?.let { pdfUriStr ->
+                                                Spacer(modifier = Modifier.height(10.dp))
+                                                PdfDocumentBubbleCard(
+                                                    title = message.generatedPdfTitle ?: "Lisan Study Document",
+                                                    pdfUri = Uri.parse(pdfUriStr),
+                                                    onOpen = { uri -> com.example.utils.PdfCreatorHelper.openPdf(context, uri) },
+                                                    onShare = { uri -> com.example.utils.PdfCreatorHelper.sharePdf(context, uri, message.generatedPdfTitle ?: "Lisan Study Guide") }
+                                                )
+                                            }
+
                                             if (!isUser) {
                                                 if (containsKeyGuideAction) {
                                                     Spacer(modifier = Modifier.height(8.dp))
@@ -1218,7 +1289,7 @@ fun TutorChatScreen(
                                     ) {
                                         Column(modifier = Modifier.padding(16.dp)) {
                                             Text(
-                                                text = "Sorry, I couldn’t reach your Tutor right now. Please try again.",
+                                                text = chatError ?: "Sorry, I couldn’t reach your Tutor right now. Please try again.",
                                                 color = Color(0xFFB91C1C),
                                                 fontSize = 14.sp,
                                                 lineHeight = 20.sp,
@@ -1295,7 +1366,6 @@ fun TutorChatScreen(
                     border = BorderStroke(1.dp, EditorialBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.ime)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         sttErrorMessage?.let { errMsg ->
@@ -1327,147 +1397,12 @@ fun TutorChatScreen(
                             }
                         }
 
-                        if (isSttListening) {
-                            Surface(
-                                color = Color(0xFF0F172A),
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, Color(0xFFF97316)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                        ) {
-                                            Surface(
-                                                color = Color(0xFFEF4444).copy(alpha = 0.2f),
-                                                shape = CircleShape,
-                                                border = BorderStroke(1.dp, Color(0xFFEF4444))
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.size(32.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Mic,
-                                                        contentDescription = "Recording",
-                                                        tint = Color(0xFFF87171),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            Column {
-                                                Text(
-                                                    text = "Listening… / بولیں، میں سن رہا ہوں",
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White
-                                                )
-                                                Text(
-                                                    text = "Speak clearly in English or Arabic",
-                                                    fontSize = 11.sp,
-                                                    color = Color(0xFF94A3B8)
-                                                )
-                                            }
-                                        }
-
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    try { activeSpeechRecognizer?.cancel() } catch(e: Exception){}
-                                                    try { activeSpeechRecognizer?.destroy() } catch(e: Exception){}
-                                                    activeSpeechRecognizer = null
-                                                    isSttListening = false
-                                                    isSttProcessing = false
-                                                },
-                                                shape = RoundedCornerShape(12.dp),
-                                                border = BorderStroke(1.dp, Color(0xFF475569)),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                            ) {
-                                                Text("Cancel", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
-                                            }
-
-                                            Button(
-                                                onClick = {
-                                                    isSttListening = false
-                                                    isSttProcessing = true
-                                                    try {
-                                                        activeSpeechRecognizer?.stopListening()
-                                                    } catch(e: Exception) {
-                                                        isSttProcessing = false
-                                                    }
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                                                shape = RoundedCornerShape(12.dp),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    Icon(Icons.Default.Stop, contentDescription = "Done", tint = Color.White, modifier = Modifier.size(14.dp))
-                                                    Text("Done", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (inputText.isNotBlank()) {
-                                        Surface(
-                                            color = Color(0xFF1E293B),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Text(
-                                                text = inputText,
-                                                fontSize = 13.sp,
-                                                color = Color(0xFF818CF8),
-                                                modifier = Modifier.padding(10.dp),
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        } else if (isSttProcessing) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = EditorialAccentPurple,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Processing voice… / آپ کی آواز کو سمجھا جا رہا ہے…",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EditorialPrimary
-                                )
-                            }
-                        } else {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(EditorialBackground)
-                            ) {
-                                // Image Preview and Optimization Details
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(EditorialBackground)
+                        ) {
+                            // Image Preview and Optimization Details
                                 selectedImageUri?.let { uri ->
                                     Row(
                                         modifier = Modifier
@@ -1590,6 +1525,132 @@ fun TutorChatScreen(
                                                                 fontSize = 8.sp,
                                                                 color = if (isSelected) Color.White.copy(alpha = 0.8f) else EditorialTextMuted,
                                                                 maxLines = 1
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Create Image Mode Indicator with 'X' cancel button
+                                 AnimatedVisibility(
+                                    visible = isCreateImageMode,
+                                    enter = fadeIn(),
+                                    exit = fadeOut()
+                                ) {
+                                    Surface(
+                                        color = Color(0xFFF3E8FF),
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.5f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            .testTag("create_image_mode_indicator")
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Palette,
+                                                        contentDescription = null,
+                                                        tint = EditorialAccentPurple,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Text(
+                                                        text = "Create Realistic Image",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = EditorialAccentPurple
+                                                    )
+                                                    Text(
+                                                        text = "• تصویری خاکہ",
+                                                        fontSize = 11.sp,
+                                                        color = EditorialTextSecondary
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = { isCreateImageMode = false },
+                                                    modifier = Modifier
+                                                        .size(24.dp)
+                                                        .testTag("cancel_create_image_mode")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Cancel Create Image",
+                                                        tint = EditorialTextSecondary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            val currentStyle by viewModel.selectedImageStyle.collectAsStateWithLifecycle()
+                                            val currentRatio by viewModel.selectedImageAspectRatio.collectAsStateWithLifecycle()
+
+                                            // Style selector chips
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text("Style:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextSecondary)
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .horizontalScroll(rememberScrollState()),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    com.example.utils.ImageGeneratorHelper.ImageStyle.values().forEach { style ->
+                                                        val isSelected = currentStyle == style
+                                                        Surface(
+                                                            color = if (isSelected) EditorialAccentPurple else EditorialSurface,
+                                                            contentColor = if (isSelected) Color.White else EditorialPrimary,
+                                                            shape = RoundedCornerShape(12.dp),
+                                                            border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                                                            modifier = Modifier.clickable { viewModel.setImageStyle(style) }
+                                                        ) {
+                                                            Text(
+                                                                text = style.label,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Aspect ratio selector chips
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text("Aspect Ratio:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextSecondary)
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    com.example.utils.ImageGeneratorHelper.ImageAspectRatio.values().forEach { ratio ->
+                                                        val isSelected = currentRatio == ratio
+                                                        Surface(
+                                                            color = if (isSelected) EditorialAccentPurple else EditorialSurface,
+                                                            contentColor = if (isSelected) Color.White else EditorialPrimary,
+                                                            shape = RoundedCornerShape(12.dp),
+                                                            border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .clickable { viewModel.setImageAspectRatio(ratio) }
+                                                        ) {
+                                                            Text(
+                                                                text = ratio.label,
+                                                                fontSize = 10.sp,
+                                                                textAlign = TextAlign.Center,
+                                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                                modifier = Modifier.padding(vertical = 4.dp)
                                                             )
                                                         }
                                                     }
@@ -1804,6 +1865,35 @@ fun TutorChatScreen(
 
                                               HorizontalDivider(color = EditorialBorder)
 
+                                              // 6. PDF Creator Option
+                                              DropdownMenuItem(
+                                                  text = {
+                                                      Row(
+                                                          verticalAlignment = Alignment.CenterVertically,
+                                                          horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                      ) {
+                                                          Icon(
+                                                              imageVector = Icons.Default.PictureAsPdf,
+                                                              contentDescription = "PDF Creator",
+                                                              tint = EditorialAccentPurple,
+                                                              modifier = Modifier.size(20.dp)
+                                                          )
+                                                          Text(
+                                                              text = "PDF Creator",
+                                                              fontWeight = FontWeight.Bold,
+                                                              color = EditorialPrimary
+                                                          )
+                                                      }
+                                                  },
+                                                  onClick = {
+                                                      showPlusMenu = false
+                                                      showPdfCreatorDialog = true
+                                                  },
+                                                  modifier = Modifier.testTag("menu_option_pdf_creator")
+                                              )
+
+                                              HorizontalDivider(color = EditorialBorder)
+
                                               DropdownMenuItem(
                                                   text = {
                                                       Row(
@@ -1825,6 +1915,7 @@ fun TutorChatScreen(
                                                   },
                                                   onClick = {
                                                       showPlusMenu = false
+                                                      isCreateImageMode = true
                                                   },
                                                   modifier = Modifier.testTag("menu_option_create_image")
                                               )
@@ -1866,6 +1957,7 @@ fun TutorChatScreen(
                                                         text = bidiIsolate(placeholderText),
                                                         color = EditorialTextMuted,
                                                         fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Normal,
                                                         style = TextStyle(textDirection = TextDirection.ContentOrRtl)
                                                     )
                                                 },
@@ -1888,9 +1980,14 @@ fun TutorChatScreen(
                                                 keyboardActions = KeyboardActions(
                                                     onSend = {
                                                         if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading && isNetworkAvailable) {
-                                                            viewModel.sendChatMessage(inputText, selectedImageUri?.toString())
+                                                            viewModel.sendChatMessage(
+                                                                message = inputText,
+                                                                imageUri = selectedImageUri?.toString(),
+                                                                isCreateImage = isCreateImageMode
+                                                            )
                                                             inputText = ""
                                                             selectedImageUri = null
+                                                            isCreateImageMode = false
                                                         }
                                                     }
                                                 )
@@ -1898,10 +1995,14 @@ fun TutorChatScreen(
                                         }
                                     }
 
-                                    // Microphone Button [ 🎤 ]
+                                    // Microphone Button [ 🎤 ] (Turns blue when active speech recognition is listening)
                                     Surface(
-                                        color = EditorialContainer,
+                                        color = if (isSttListening) EditorialAccentPurple else EditorialContainer,
                                         shape = CircleShape,
+                                        border = BorderStroke(
+                                            width = if (isSttListening) 2.dp else 1.dp,
+                                            color = if (isSttListening) EditorialAccentPurple else EditorialBorder
+                                        ),
                                         modifier = Modifier
                                             .size(40.dp)
                                             .clickable {
@@ -1914,13 +2015,14 @@ fun TutorChatScreen(
                                                     isSttListening = false
                                                     isSttProcessing = false
                                                 } else {
+                                                    preSpeechText = inputText
                                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                                                         startSttListening(
                                                             context = context,
                                                             language = sttLanguage,
-                                                            onPartial = { inputText = it },
+                                                            onPartial = {},
                                                             onFinal = { text ->
-                                                                inputText = text
+                                                                inputText = appendSpeechToExistingText(preSpeechText, text)
                                                                 isSttListening = false
                                                                 isSttProcessing = false
                                                             },
@@ -1936,6 +2038,7 @@ fun TutorChatScreen(
                                                             onRecognizerCreated = { activeSpeechRecognizer = it }
                                                         )
                                                     } else {
+                                                     preSpeechText = inputText
                                                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                                     }
                                                 }
@@ -1943,12 +2046,20 @@ fun TutorChatScreen(
                                             .testTag("mic_stt_button")
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.Mic,
-                                                contentDescription = "Speech to text",
-                                                tint = EditorialPrimary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
+                                            if (isSttProcessing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(18.dp),
+                                                    color = if (isSttListening) Color.White else EditorialAccentPurple,
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.Mic,
+                                                    contentDescription = if (isSttListening) "Stop speech recognition" else "Start speech to text",
+                                                    tint = if (isSttListening) Color.White else EditorialAccentPurple,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
                                         }
                                     }
 
@@ -1981,9 +2092,14 @@ fun TutorChatScreen(
                                                 .size(40.dp)
                                                 .clickable(enabled = isSendEnabled) {
                                                     if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading && isNetworkAvailable) {
-                                                        viewModel.sendChatMessage(inputText, selectedImageUri?.toString())
+                                                        viewModel.sendChatMessage(
+                                                            message = inputText,
+                                                            imageUri = selectedImageUri?.toString(),
+                                                            isCreateImage = isCreateImageMode
+                                                        )
                                                         inputText = ""
                                                         selectedImageUri = null
+                                                        isCreateImageMode = false
                                                     }
                                                 }
                                                 .testTag("send_button")
@@ -2011,7 +2127,6 @@ fun TutorChatScreen(
                         }
                     }
                 }
-            }
 
             // Tutor Preferences Dialog
             if (showTutorPreferences) {
@@ -2088,36 +2203,45 @@ fun TutorChatScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    val presets = listOf("Young Voice", "Mature Voice", "Gentle Voice")
-                                    val displayPresets = mapOf(
-                                        "Young Voice" to "Young • نو عمر",
-                                        "Mature Voice" to "Mature • بزرگ",
-                                        "Gentle Voice" to "Gentle • نرم"
+                                    val voiceOptions = listOf(
+                                        Triple("Young Voice", "Young", "نو عمر"),
+                                        Triple("Mature Voice", "Mature", "بزرگ"),
+                                        Triple("Gentle Voice", "Gentle", "نرم")
                                     )
                                     
-                                    presets.forEach { preset ->
-                                        val isSelected = userSettings.selectedSpeaker.contains(preset.substringBefore(" "), ignoreCase = true)
+                                    voiceOptions.forEach { (presetKey, titleEn, titleUr) ->
+                                        val isSelected = userSettings.selectedSpeaker.contains(presetKey.substringBefore(" "), ignoreCase = true)
 
                                         Surface(
                                             color = if (isSelected) EditorialAccentPurple else EditorialContainer,
                                             contentColor = if (isSelected) Color.White else EditorialPrimary,
-                                            shape = CircleShape,
+                                            shape = RoundedCornerShape(10.dp),
                                             border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .clickable { 
-                                                    viewModel.updateAppSettings { it.copy(selectedSpeaker = preset) }
-                                                    viewModel.ttsManager.applySpeakerPreset(preset)
+                                                    viewModel.updateAppSettings { it.copy(selectedSpeaker = presetKey) }
+                                                    viewModel.ttsManager.applySpeakerPreset(presetKey)
                                                 }
                                         ) {
-                                            Box(
-                                                contentAlignment = Alignment.Center,
-                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
                                             ) {
                                                 Text(
-                                                    text = displayPresets[preset] ?: preset,
+                                                    text = titleEn,
                                                     fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = titleUr,
+                                                    fontSize = 9.sp,
+                                                    maxLines = 1,
+                                                    textAlign = TextAlign.Center,
+                                                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else EditorialTextMuted
                                                 )
                                             }
                                         }
@@ -2146,7 +2270,7 @@ fun TutorChatScreen(
                                         Surface(
                                             color = if (isSelected) EditorialAccentPurple else EditorialContainer,
                                             contentColor = if (isSelected) Color.White else EditorialPrimary,
-                                            shape = CircleShape,
+                                            shape = RoundedCornerShape(10.dp),
                                             border = BorderStroke(1.dp, if (isSelected) EditorialAccentPurple else EditorialBorder),
                                             modifier = Modifier
                                                 .weight(1f)
@@ -2154,14 +2278,24 @@ fun TutorChatScreen(
                                                     viewModel.updateAppSettings { it.copy(imageCompressionPreset = preset.name) }
                                                 }
                                         ) {
-                                            Box(
-                                                contentAlignment = Alignment.Center,
-                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
                                             ) {
                                                 Text(
-                                                    text = "${preset.displayNameEn} • ${preset.displayNameAr}",
+                                                    text = preset.displayNameEn,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                Text(
+                                                    text = preset.displayNameAr,
                                                     fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold
+                                                    maxLines = 1,
+                                                    textAlign = TextAlign.Center,
+                                                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else EditorialTextMuted
                                                 )
                                             }
                                         }
@@ -2780,10 +2914,9 @@ fun TutorChatScreen(
                 onDismissRequest = { showVoiceTutor = false }
             )
         }
-                    }
-            }
-        )
     }
+}
+}
 }
 
 @Composable
@@ -3762,10 +3895,26 @@ private fun startSttListening(
         onRecognizerCreated(recognizer)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+            
+            if (language == "auto" || language.isEmpty()) {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                putExtra(RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES, arrayListOf("en-US", "ur-PK", "ar-SA"))
+                putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    putExtra("android.speech.extra.EXTRA_ENABLE_LANGUAGE_DETECTION", true)
+                    putExtra("android.speech.extra.EXTRA_ENABLE_LANGUAGE_SWITCH", "balanced")
+                    putExtra("android.speech.extra.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
+                }
+            } else {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+            }
+            
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
         }
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) { onStarted() }
@@ -4008,6 +4157,8 @@ fun TutorMessageControls(
                     modifier = Modifier.size(16.dp)
                 )
             }
+
+
         }
     }
 }
@@ -4394,3 +4545,428 @@ fun TutorAudioControls(
         }
     }
 }
+
+private fun savePdfToDownloads(context: android.content.Context, pdfUri: Uri, title: String) {
+    try {
+        val resolver = context.contentResolver
+        val inputStream = resolver.openInputStream(pdfUri)
+        if (inputStream == null) {
+            android.widget.Toast.makeText(context, "Error reading file", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val bytes = inputStream.readBytes()
+        inputStream.close()
+
+        val cleanTitle = title.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val filename = "Lisan_AI_${cleanTitle}_${System.currentTimeMillis()}.pdf"
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/LisanAI")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri).use { outputStream ->
+                    if (outputStream != null) {
+                        outputStream.write(bytes)
+                        android.widget.Toast.makeText(context, "✅ Saved to Downloads/LisanAI!", android.widget.Toast.LENGTH_LONG).show()
+                        return
+                    }
+                }
+            }
+        } else {
+            val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            val appDir = java.io.File(downloadsDir, "LisanAI").apply { mkdirs() }
+            val file = java.io.File(appDir, filename)
+            java.io.FileOutputStream(file).use { outputStream ->
+                outputStream.write(bytes)
+            }
+            android.widget.Toast.makeText(context, "✅ Saved to Downloads/LisanAI!", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, "Failed to save PDF: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+fun PdfDocumentBubbleCard(
+    title: String,
+    pdfUri: Uri,
+    onOpen: (Uri) -> Unit,
+    onShare: (Uri) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cardShape = RoundedCornerShape(14.dp)
+    Surface(
+        shape = cardShape,
+        color = Color(0xFFFEF2F2),
+        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("chat_pdf_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFFDC2626),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.PictureAsPdf,
+                            contentDescription = "PDF Document",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF991B1B)
+                    )
+                    Text(
+                        text = "PDF Document Ready • دستاویز تیار ہے",
+                        fontSize = 10.5.sp,
+                        color = Color(0xFFB91C1C)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { onOpen(pdfUri) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("pdf_card_open_button")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Visibility,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Open • دیکھیں",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = { onShare(pdfUri) },
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFFDC2626)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("pdf_card_share_button")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Share • شیئر",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFDC2626)
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        savePdfToDownloads(context, pdfUri, title)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .border(1.dp, Color(0xFFDC2626), RoundedCornerShape(8.dp))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Save PDF to Downloads",
+                        tint = Color(0xFFDC2626),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun saveImageToGallery(context: android.content.Context, base64Str: String, promptName: String) {
+    try {
+        val bytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
+        val filename = "Lisan_AI_${System.currentTimeMillis()}.png"
+        
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/LisanAI")
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri).use { outputStream ->
+                    if (outputStream != null) {
+                        outputStream.write(bytes)
+                        android.widget.Toast.makeText(context, "✅ Image saved to Gallery!", android.widget.Toast.LENGTH_LONG).show()
+                        return
+                    }
+                }
+            }
+        } else {
+            val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+            val appDir = java.io.File(picturesDir, "LisanAI").apply { mkdirs() }
+            val file = java.io.File(appDir, filename)
+            java.io.FileOutputStream(file).use { outputStream ->
+                outputStream.write(bytes)
+            }
+            // Scan file to make it show up in gallery
+            val mediaScanIntent = android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+            mediaScanIntent.data = android.net.Uri.fromFile(file)
+            context.sendBroadcast(mediaScanIntent)
+            android.widget.Toast.makeText(context, "✅ Image saved to Gallery!", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, "Failed to save image: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+fun GeneratedImageBubbleCard(
+    base64Data: String,
+    prompt: String,
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var showFullscreenViewer by remember { mutableStateOf(false) }
+
+    val imageBitmap = remember(base64Data) {
+        try {
+            val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            bitmap?.asImageBitmap()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFFFAF5FF),
+        border = BorderStroke(1.dp, Color(0xFFE9D5FF)),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("chat_generated_image_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Palette,
+                        contentDescription = null,
+                        tint = EditorialAccentPurple,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Generated Image • تصویری خاکہ",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EditorialAccentPurple
+                    )
+                }
+
+                if (imageBitmap != null) {
+                    IconButton(
+                        onClick = {
+                            saveImageToGallery(context, base64Data, prompt)
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Download Image",
+                            tint = EditorialAccentPurple,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            if (imageBitmap != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showFullscreenViewer = true }
+                ) {
+                    Image(
+                        bitmap = imageBitmap,
+                        contentDescription = prompt,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                            .border(1.dp, Color(0xFFD8B4FE), RoundedCornerShape(10.dp)),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+
+                    // Click to enlarge indicator badge
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ZoomIn,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = "Tap to view • بڑا کریں",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Unable to render generated image.",
+                    fontSize = 12.sp,
+                    color = Color.Red
+                )
+            }
+        }
+    }
+
+    // Fullscreen Dialog Viewer
+    if (showFullscreenViewer && imageBitmap != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showFullscreenViewer = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true
+            )
+        ) {
+            Surface(
+                color = Color.Black,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Central Image
+                    Image(
+                        bitmap = imageBitmap,
+                        contentDescription = prompt,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                            .align(Alignment.Center),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+
+                    // Top Custom Action Bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = { showFullscreenViewer = false }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Text(
+                            text = if (prompt.length > 30) prompt.take(27) + "..." else prompt,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                        )
+
+                        IconButton(
+                            onClick = {
+                                saveImageToGallery(context, base64Data, prompt)
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Save to Gallery",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -52,7 +52,8 @@ data class ExamSetupConfig(
     val longCount: Int = 10, // 10, 20, 30
     val difficulty: String = "Intermediate",
     val timeLimitMinutes: Int = 10,
-    val learnedTopicsSummary: String = ""
+    val learnedTopicsSummary: String = "",
+    val customInstructions: String = ""
 )
 
 @Serializable
@@ -206,29 +207,35 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
     fun scanLearnedHistory() {
         viewModelScope.launch {
             try {
-                val recentMessages = db.chatMessageDao().getAllMessagesList().takeLast(30)
+                val recentMessages = db.chatMessageDao().getAllMessagesList().takeLast(40)
                 val topicProgresses = db.topicProgressDao().getAllTopicProgress()
+                val savedNotes = try { db.savedNoteDao().getAllNotes().firstOrNull() ?: emptyList() } catch (e: Exception) { emptyList() }
                 
                 val chatTopics = recentMessages
                     .map { it.text }
                     .filter { it.length > 10 }
-                    .take(8)
+                    .take(12)
                     .joinToString("; ") { it.take(80) }
 
                 val completedTopicsList = topicProgresses
-                    .filter { it.overallMastery > 30 || it.masteredCount > 0 }
-                    .map { it.topicId }
+                    .filter { it.overallMastery > 20 || it.masteredCount > 0 }
+                    .map { "${it.topicId} (${it.overallMastery}% mastery)" }
                     .joinToString(", ")
+
+                val noteTitles = savedNotes.take(5).joinToString(", ") { it.titleEn }
 
                 val summary = buildString {
                     if (completedTopicsList.isNotBlank()) {
                         append("Mastered English Topics: ").append(completedTopicsList).append(". ")
                     }
+                    if (noteTitles.isNotBlank()) {
+                        append("Learner Notes Topics: ").append(noteTitles).append(". ")
+                    }
                     if (chatTopics.isNotBlank()) {
-                        append("Recent English Learning Discussions: ").append(chatTopics.take(300)).append(".")
+                        append("Recent English Learning Discussions: ").append(chatTopics.take(400)).append(".")
                     }
                     if (isBlank()) {
-                        append("Learner has completed introductory English sessions on Present Tense, basic sentence structure, Urdu-to-English translation, and daily vocabulary.")
+                        append("Learner has completed introductory English sessions on Present & Past Tenses, sentence structure, Urdu-to-English translation, and daily vocabulary.")
                     }
                 }
 
@@ -279,6 +286,10 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setTimeLimit(minutes: Int) {
         _config.value = _config.value.copy(timeLimitMinutes = minutes)
+    }
+
+    fun setCustomInstructions(instructions: String) {
+        _config.value = _config.value.copy(customInstructions = instructions)
     }
 
     fun processUploadedPdf(context: Context, uri: android.net.Uri) {
@@ -422,27 +433,70 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 val is50Percent = config.mcqPercentage == "50%"
-                val mcqCount = 25
-                val shortCount = if (is50Percent) config.shortCount else 0
-                val longCount = if (is50Percent) config.longCount else 0
+                val mcqCount = if (is50Percent) 15 else 25
+                val shortCount = if (is50Percent) (config.shortCount / 4).coerceAtLeast(4).coerceAtMost(10) else 0
+                val longCount = if (is50Percent) (config.longCount / 3).coerceAtLeast(2).coerceAtMost(6) else 0
 
                 val groundingMaterial = if (config.sourceType == ExamSourceType.BOOK_PDF) {
-                    if (config.processedDocumentId != null) {
-                        val doc = db.documentDao().getDocumentById(config.processedDocumentId)
-                        if (doc != null) {
-                            val chunks = db.documentDao().getChunksForDocument(doc.documentId)
-                            val excerpts = if (chunks.isNotEmpty()) {
-                                chunks.take(8).joinToString("\n---\n") { "Chunk #${it.chunkIndex + 1}:\n${it.text}" }
+                    val targetDocId = config.processedDocumentId ?: config.selectedBook?.id
+                    val matchedDoc = if (targetDocId != null) {
+                        db.documentDao().getDocumentById(targetDocId)
+                    } else null
+
+                    val libraryDoc = if (matchedDoc == null && targetDocId != null) {
+                        try { db.libraryDao().getAllItems().firstOrNull()?.firstOrNull { it.id == targetDocId } } catch (e: Exception) { null }
+                    } else null
+
+                    if (matchedDoc != null) {
+                        val chunks = db.documentDao().getChunksForDocument(matchedDoc.documentId)
+                        val sampledText = if (chunks.isNotEmpty()) {
+                            if (chunks.size <= 25) {
+                                chunks.joinToString("\n\n") { "--- Section #${it.chunkIndex + 1} (Page ${it.pageNumber ?: "?"}) ---\n${it.text}" }
                             } else {
-                                doc.extractedText.take(3000)
+                                val step = (chunks.size / 25).coerceAtLeast(1)
+                                val selectedChunks = mutableListOf<com.example.data.model.DocumentChunkEntity>()
+                                for (i in chunks.indices step step) {
+                                    selectedChunks.add(chunks[i])
+                                    if (selectedChunks.size >= 25) break
+                                }
+                                selectedChunks.joinToString("\n\n") { "--- Section #${it.chunkIndex + 1} (Page ${it.pageNumber ?: "?"}) ---\n${it.text}" }
                             }
-                            "UPLOADED PDF GROUNDING SOURCE: '${doc.fileName}' (${doc.pageCount} pages, ${doc.wordCount} words).\n\nDOCUMENT CONTENT EXCERPTS:\n$excerpts"
                         } else {
-                            "No uploaded document found. Fallback to default book."
+                            val fullText = matchedDoc.extractedText
+                            if (fullText.length > 30000) {
+                                val segmentLen = 6000
+                                val p1 = fullText.take(segmentLen)
+                                val p2 = fullText.substring((fullText.length * 0.25).toInt(), ((fullText.length * 0.25) + segmentLen).toInt().coerceAtMost(fullText.length))
+                                val p3 = fullText.substring((fullText.length * 0.50).toInt(), ((fullText.length * 0.50) + segmentLen).toInt().coerceAtMost(fullText.length))
+                                val p4 = fullText.substring((fullText.length * 0.75).toInt(), ((fullText.length * 0.75) + segmentLen).toInt().coerceAtMost(fullText.length))
+                                val p5 = fullText.takeLast(segmentLen)
+                                "--- START OF BOOK ---\n$p1\n\n--- 25% MARK ---\n$p2\n\n--- MIDDLE OF BOOK ---\n$p3\n\n--- 75% MARK ---\n$p4\n\n--- END OF BOOK ---\n$p5"
+                            } else {
+                                fullText
+                            }
                         }
+
+                        """
+                        ACTUAL UPLOADED BOOK / DOCUMENT CONTENT:
+                        Document Name: '${matchedDoc.fileName}' (${matchedDoc.pageCount} pages, ${matchedDoc.wordCount} words)
+                        
+                        SOURCE TEXT FROM WHOLE BOOK (SAMPLED FROM BEGINNING, MIDDLE, AND END SECTIONS):
+                        $sampledText
+                        
+                        MANDATE: Every single question (MCQs, Short Questions, and Long Questions) MUST be strictly based on and grounded in the grammar, vocabulary, rules, and concepts present in this uploaded text above. Distribute questions evenly across the beginning, middle, and later chapters.
+                        """.trimIndent()
+                    } else if (libraryDoc != null) {
+                        """
+                        SAVED LIBRARY BOOK CONTENT:
+                        Title: '${libraryDoc.title}' (${libraryDoc.category ?: "Grammar"})
+                        Text / Excerpt:
+                        ${libraryDoc.preview ?: libraryDoc.title}
+                        
+                        MANDATE: Generate exam questions strictly testing the concepts and rules in this saved book material.
+                        """.trimIndent()
                     } else {
                         val book = config.selectedBook
-                        "BOOK SOURCE: '${book?.title}' by ${book?.author}.\nSelected Chapter: ${config.selectedChapter}.\nBook Overview: ${book?.description}.\nSample Excerpt: ${book?.sampleExcerpt}"
+                        "BOOK SOURCE: '${book?.title}' by ${book?.author}.\nSelected Chapter: ${config.selectedChapter}.\nBook Overview: ${book?.description}.\nSample Content & Excerpt: ${book?.sampleExcerpt}"
                     }
                 } else {
                     "LEARNER HISTORY SOURCE CONTEXT: ${config.learnedTopicsSummary}"
@@ -465,7 +519,9 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val prompt = """
-                    You are an expert English language examination system for URDU-speaking learners.
+                    ${RetrofitClient.FEMALE_TUTOR_PERSONA_INSTRUCTION}
+
+                    You are an expert female English language examination system for URDU-speaking learners.
                     Generate a personalized, highly accurate English exam strictly grounded in the following source material.
                     
                     $languagePrompt
@@ -479,6 +535,7 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                     - Generate EXACTLY $longCount conversational Long Questions in the "longQuestions" array.
                     - Difficulty Level: ${config.difficulty}
                     - Source Title: $sourceTitle
+                    ${if (config.customInstructions.isNotBlank()) "ADDITIONAL LEARNER INSTRUCTIONS: ${config.customInstructions}" else ""}
                     $topicConstraint
                     
                     STRICT RULES:
@@ -500,19 +557,7 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                     generationConfig = genConfig
                 )
 
-                val response = if (useBackend) {
-                    RetrofitClient.backendService.generateContent(
-                        model = "gemini-3.5-flash",
-                        authHeader = RetrofitClient.getBackendAuthHeader(),
-                        request = request
-                    )
-                } else {
-                    RetrofitClient.service.generateContent(
-                        model = "gemini-3.5-flash",
-                        apiKey = userKey,
-                        request = request
-                    )
-                }
+                val response = RetrofitClient.executeGenerateContent("gemini-3.5-flash", userKey, request)
 
                 val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (responseText != null) {
@@ -550,7 +595,12 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 Log.e("ExamViewModel", "Error generating exam", e)
-                _examError.value = "Generation error: ${e.message ?: "Unknown error"}"
+                val msg = e.message ?: ""
+                if (msg.contains("503") || (e is retrofit2.HttpException && e.code() == 503)) {
+                    _examError.value = "Lisan Exam service is temporarily unavailable due to high server demand (HTTP 503). Please retry in a moment, or consider adding your own Gemini API Key under Settings to bypass shared limits."
+                } else {
+                    _examError.value = "Generation error: ${e.message ?: "Unknown error"}"
+                }
             } finally {
                 _isGeneratingExam.value = false
             }
@@ -618,7 +668,9 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                 val useBackend = RetrofitClient.isUsingBackend()
 
                 val prompt = """
-                    You are an expert English teacher for Urdu-speaking students grading a short answer question.
+                    ${RetrofitClient.FEMALE_TUTOR_PERSONA_INSTRUCTION}
+
+                    You are an expert female English teacher for Urdu-speaking students grading a short answer question.
                     
                     QUESTION: ${question.questionText}
                     MODEL ANSWER: ${question.modelAnswer}
@@ -631,7 +683,7 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                     {
                       "scorePercentage": <integer 0 to 100>,
                       "isCorrect": <boolean, true if score >= 70>,
-                      "feedback": "<2-3 sentences in URDU (اردو) explaining what was correct, any mistakes, and the correct English form with clear Urdu explanation>"
+                      "feedback": "<2-3 sentences in URDU (اردو - نستعلیق) using feminine self-reference explaining what was correct, any mistakes, and the correct English form with clear Urdu explanation. NEVER output Hindi script (Devanagari).>"
                     }
                 """.trimIndent()
 
@@ -640,19 +692,7 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                     generationConfig = GenerationConfig(responseMimeType = "application/json", temperature = 0.2f)
                 )
 
-                val response = if (useBackend) {
-                    RetrofitClient.backendService.generateContent(
-                        model = "gemini-3.5-flash",
-                        authHeader = RetrofitClient.getBackendAuthHeader(),
-                        request = request
-                    )
-                } else {
-                    RetrofitClient.service.generateContent(
-                        model = "gemini-3.5-flash",
-                        apiKey = userKey,
-                        request = request
-                    )
-                }
+                val response = RetrofitClient.executeGenerateContent("gemini-3.5-flash", userKey, request)
 
                 val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (responseText != null) {
@@ -817,5 +857,64 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
         _examResult.value = null
         _userAnswers.value = emptyMap()
         _remainingTimeSeconds.value = null
+    }
+
+    fun transitionToChatExam(lisanViewModel: LisanViewModel) {
+        val exam = _examData.value ?: return
+        val examLanguage = _config.value.language
+        val sourceName = if (_config.value.sourceType == ExamSourceType.BOOK_PDF) {
+            _config.value.uploadedPdfName ?: _config.value.selectedBook?.title ?: "Uploaded Document"
+        } else {
+            "Learned Topics & History"
+        }
+
+        val mcqCorrect = _userAnswers.value.values.count { it.isCorrect == true }
+        val mcqTotal = exam.questions.size
+
+        val prompt = buildString {
+            if (examLanguage == "Urdu") {
+                append("🎓 امتحانی اطلاع • LISAN EXAM INTERACTIVE PHASE\n\n")
+                append("طالب علم نے اپنے امتحان کا MCQ حصہ مکمل کر لیا ہے!\n")
+                append("امتحان کی زبان: اردو رہنمائی (Urdu)\n")
+                append("ماخذ: $sourceName\n")
+                append("ایم سی کیو (MCQs) کا نتیجہ: $mcqCorrect / $mcqTotal درست\n\n")
+                append("طرزِ عمل کی ہدایت (Instruction for Tutor):\n")
+                append("1. اب مندرجہ ذیل سوالات گفتگو کی صورت میں ایک ایک کر کے پوچھیں۔\n")
+                append("2. طالب علم کے ہر جواب کا فوری جائزہ لیں، فیڈ بیک دیں اور نمبر بتائیں۔\n")
+                append("3. تمام شارٹ سوالات (Short Questions) مکمل ہونے کے بعد لانگ سوالات (Long Questions) کی طرف بڑھیں۔\n\n")
+            } else {
+                append("🎓 LISAN EXAM • INTERACTIVE CHAT PHASE\n\n")
+                append("The learner has completed the MCQ section of their exam!\n")
+                append("Language: English\n")
+                append("Source: $sourceName\n")
+                append("MCQ Results: $mcqCorrect / $mcqTotal Correct\n\n")
+                append("TUTOR DIRECTIVE:\n")
+                append("1. Administer the following Short Questions and Long Questions ONE BY ONE.\n")
+                append("2. Evaluate each learner response with feedback and score out of 100.\n")
+                append("3. Complete all Short Questions first, then smoothly proceed to the Long Questions.\n\n")
+            }
+
+            if (exam.shortQuestions.isNotEmpty()) {
+                append("SHORT QUESTIONS (${exam.shortQuestions.size}):\n")
+                exam.shortQuestions.forEachIndexed { i, q ->
+                    append("SQ${i + 1}: $q\n")
+                }
+            }
+
+            if (exam.longQuestions.isNotEmpty()) {
+                append("\nLONG QUESTIONS (${exam.longQuestions.size}):\n")
+                exam.longQuestions.forEachIndexed { i, q ->
+                    append("LQ${i + 1}: $q\n")
+                }
+            }
+
+            if (examLanguage == "Urdu") {
+                append("\nبراہ کرم طالب علم سے پہلا سوال (SQ1) پوچھ کر آغاز کریں!")
+            } else {
+                append("\nPlease greet the learner and ask Short Question #1 (SQ1) to begin!")
+            }
+        }
+
+        lisanViewModel.injectSystemExamMessage(prompt)
     }
 }

@@ -32,8 +32,8 @@ data class UserSettings(
     // Language & Learning
     val explanationLanguage: String = "English + Urdu", // English, Urdu, English + Urdu
     val showArabicGrammarComparison: Boolean = true,
-    val romanUrduAssistance: Boolean = true,
-    val defaultLearningTab: String = "Learn", // Learn, Analyze, Tutor, Idioms, Library
+    val romanUrduAssistance: Boolean = false,
+    val defaultLearningTab: String = "Tutor", // Learn, Analyze, Tutor, Idioms, Library
     val adaptDifficulty: Boolean = true,
     val appLanguage: String = "English / Urdu",
     val englishLevel: String = "Beginner",
@@ -224,7 +224,7 @@ class SettingsRepository(private val context: Context) {
             explanationLanguage = preferences[PreferencesKeys.EXPLANATION_LANGUAGE] ?: "English + Urdu",
             showArabicGrammarComparison = preferences[PreferencesKeys.SHOW_ARABIC_GRAMMAR_COMPARISON] ?: true,
             romanUrduAssistance = preferences[PreferencesKeys.ROMAN_URDU_ASSISTANCE] ?: true,
-            defaultLearningTab = preferences[PreferencesKeys.DEFAULT_LEARNING_TAB] ?: "Learn",
+            defaultLearningTab = preferences[PreferencesKeys.DEFAULT_LEARNING_TAB] ?: "Tutor",
             adaptDifficulty = preferences[PreferencesKeys.ADAPT_DIFFICULTY] ?: true,
             appLanguage = preferences[PreferencesKeys.APP_LANGUAGE] ?: "English / Urdu",
             englishLevel = preferences[PreferencesKeys.ENGLISH_LEVEL] ?: "Beginner",

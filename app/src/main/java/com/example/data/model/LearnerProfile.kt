@@ -34,6 +34,15 @@ data class LearningPreferences(
 )
 
 @Serializable
+data class LearnerMemoryItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val text: String,
+    val category: String = "global", // "global" vs "conversation_derived"
+    val conversationId: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Serializable
 data class RecentLearningItem(
     val type: String, // "lesson", "quiz", "daily_challenge", "analyzer", "idiom", "tutor_chat"
     val topic: String,
@@ -65,6 +74,10 @@ data class LearnerProfile(
     val usefulMemories: List<String> = listOf(
         "Student is learning English grammar with Urdu explanations.",
         "Student benefits from Arabic grammar comparisons."
+    ),
+    val memoryItems: List<LearnerMemoryItem> = listOf(
+        LearnerMemoryItem(text = "Student is learning English grammar with Urdu explanations.", category = "global"),
+        LearnerMemoryItem(text = "Student benefits from Arabic grammar comparisons.", category = "global")
     ),
     val masteredContentIds: List<String> = emptyList(),
     val reviewDueContentIds: List<String> = emptyList(),

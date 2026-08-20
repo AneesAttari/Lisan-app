@@ -51,8 +51,6 @@ import com.example.ui.viewmodel.LisanViewModel
 fun IdiomScreen(viewModel: LisanViewModel) {
     val searchQuery by viewModel.idiomSearchQuery.collectAsState()
     val filteredIdioms by viewModel.filteredIdioms.collectAsState()
-    val selectedLevel by viewModel.selectedIdiomLevel.collectAsState()
-    val selectedCategory by viewModel.selectedIdiomCategory.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -115,70 +113,24 @@ fun IdiomScreen(viewModel: LisanViewModel) {
             keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
         )
 
-        // Filters
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val hasFilters = selectedLevel != null || selectedCategory != null || searchQuery.isNotBlank()
-            Text(
-                text = if (!hasFilters) "All Levels · All Categories" else "${filteredIdioms.size} matches found",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (hasFilters) {
-                TextButton(onClick = { viewModel.clearIdiomFilters() }) {
-                    Text("Clear filters")
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (searchQuery.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${filteredIdioms.size} matches found",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = { viewModel.setIdiomSearchQuery("") }) {
+                    Text("Clear search")
                 }
-            }
-        }
-
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                FilterChip(
-                    selected = selectedLevel == null,
-                    onClick = { viewModel.setIdiomLevelFilter(null) },
-                    label = { Text("All Levels") }
-                )
-            }
-            items(IdiomLevel.values()) { level ->
-                FilterChip(
-                    selected = selectedLevel == level,
-                    onClick = { viewModel.setIdiomLevelFilter(level) },
-                    label = { Text(level.label) }
-                )
-            }
-        }
-
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                FilterChip(
-                    selected = selectedCategory == null,
-                    onClick = { viewModel.setIdiomCategoryFilter(null) },
-                    label = { Text("All Categories") }
-                )
-            }
-            items(IdiomCategory.values()) { category ->
-                FilterChip(
-                    selected = selectedCategory == category,
-                    onClick = { viewModel.setIdiomCategoryFilter(category) },
-                    label = { Text(category.label) }
-                )
             }
         }
 

@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import com.example.utils.LanguageDetector
 import android.Manifest
 import android.app.Activity
 import android.content.Context
@@ -32,24 +33,37 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Hearing
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalDensity
+import androidx.core.view.WindowCompat
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Weekend
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -244,7 +258,8 @@ fun FlutterGlowingSphere(
     rmsVolume: Float,
     voiceSessionState: VoiceSessionState,
     isIntenseMode: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isCompact: Boolean = false
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "living_orb_anim")
     
@@ -313,11 +328,13 @@ fun FlutterGlowingSphere(
         0f
     }
 
+    val orbSize = if (isCompact) 100.dp else 190.dp
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .scale(baseScale * pulseScale)
-            .size(240.dp)
+            .size(orbSize)
             .testTag("lisan_voice_orb_container")
     ) {
         Canvas(
@@ -504,7 +521,11 @@ fun FlutterGlowingSphere(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalLayoutApi::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class
+)
 @Composable
 fun VoiceTutorDialog(
     viewModel: LisanViewModel,
@@ -557,11 +578,12 @@ fun VoiceTutorDialog(
     var userSpeechText by remember { mutableStateOf("") }
     var tutorSpeechText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
-    var isMuted by remember { mutableStateOf(false) }
+    var isMicMuted by remember { mutableStateOf(false) }
+    var isTutorSpeakerMuted by remember { mutableStateOf(false) }
     var manualInputText by remember { mutableStateOf("") }
     var rmsVolume by remember { mutableFloatStateOf(0f) }
     var autoListenEnabled by remember { mutableStateOf(true) }
-    var currentSpeed by remember { mutableFloatStateOf(1.0f) }
+    var currentSpeed by remember { mutableFloatStateOf(userSettings.speechRate.coerceAtLeast(1.1f)) }
     var listeningTimeoutJob by remember { mutableStateOf<Job?>(null) }
     var bargeInJob by remember { mutableStateOf<Job?>(null) }
     var textStreamingJob by remember { mutableStateOf<Job?>(null) }
@@ -570,63 +592,12 @@ fun VoiceTutorDialog(
     var errorRetryCount by remember { mutableIntStateOf(0) }
     var isRecognizerListening by remember { mutableStateOf(false) }
     var consecutiveNoSpeechCount by remember { mutableIntStateOf(0) }
+    var isTurnSubmitted by remember { mutableStateOf(false) }
+    var currentTurnPartialText by remember { mutableStateOf("") }
+    var wasSpeaking by remember { mutableStateOf(false) }
 
-    val animateTextProgressively: (String, kotlinx.coroutines.CoroutineScope) -> Unit = { text, scope ->
-        textStreamingJob?.cancel()
-        val words = text.split(" ")
-        tutorSpeechText = ""
-        textStreamingJob = scope.launch(Dispatchers.Main) {
-            for (i in words.indices) {
-                if (voiceSessionState != VoiceSessionState.SPEAKING && voiceSessionState != VoiceSessionState.REPLYING) {
-                    break
-                }
-                tutorSpeechText = words.take(i + 1).joinToString(" ")
-                delay(180) // Standard speaking pace (~150-200 wpm)
-            }
-            if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
-                tutorSpeechText = text
-            }
-        }
-    }
-
-    val reconnectVoiceAssistant: () -> Unit = {
-        scope.launch {
-            connectionStatus = ConnectionStateStatus.CONNECTING
-            connectionErrorMessage = ""
-            viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
-            kotlinx.coroutines.delay(2000)
-            if (!isNetworkAvailable(context)) {
-                connectionStatus = ConnectionStateStatus.ERROR
-                connectionErrorMessage = "Connection timed out. Please retry."
-                viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
-            } else {
-                connectionStatus = ConnectionStateStatus.CONNECTED
-                viewModel.setVoiceSessionState(VoiceSessionState.READY)
-                val welcome = when (selectedVoiceLanguage) {
-                    VoiceInputLanguage.URDU -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں دوبارہ خوش آمدید۔ میں آپ کا گرامر کا استاد ہوں۔ میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گا۔"
-                    VoiceInputLanguage.ARABIC -> "السلام عليكم ورحمة الله وبركاته. أهلاً بك مجدداً في لسان قواعد اللغة. سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية."
-                    else -> "السلام عليكم ورحمة الله وبركاته\nWelcome back to Lisan Grammar. I am ready to help you learn English grammar by comparing it with Arabic grammar."
-                }
-                tutorSpeechText = welcome
-                viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
-                viewModel.ttsManager.speak(welcome)
-            }
-        }
-    }
-
-    var showSettingsMenu by remember { mutableStateOf(false) }
-    var showPlusMenu by remember { mutableStateOf(false) }
-    var showEndSessionConfirmation by remember { mutableStateOf(false) }
-    var showPronunciationDialog by remember { mutableStateOf(false) }
-    var showVoiceSelectionDialog by remember { mutableStateOf(false) }
-    var showFirstTimeVoiceDialog by remember { mutableStateOf(false) }
-
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-
-    val isSpeechRecognizerAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
-    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
-    val currentlySpeakingText by viewModel.ttsManager.currentlySpeaking.collectAsState()
+    var startListeningInternalRef: (Boolean) -> Unit = {}
+    var startListeningRef: () -> Unit = {}
 
     var hasAudioPermission by remember {
         mutableStateOf(
@@ -646,6 +617,96 @@ fun VoiceTutorDialog(
             errorMessage = "Microphone permission is required for speech input."
         }
     }
+
+    val animateTextProgressively: (String, kotlinx.coroutines.CoroutineScope) -> Unit = { text, scope ->
+        textStreamingJob?.cancel()
+        tutorSpeechText = text
+    }
+
+    val reconnectVoiceAssistant: () -> Unit = {
+        scope.launch {
+            connectionStatus = ConnectionStateStatus.CONNECTING
+            connectionErrorMessage = ""
+            viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
+            if (!isNetworkAvailable(context)) {
+                connectionStatus = ConnectionStateStatus.ERROR
+                connectionErrorMessage = "Connection timed out. Please retry."
+                viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
+            } else {
+                connectionStatus = ConnectionStateStatus.CONNECTED
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                val welcome = when (selectedVoiceLanguage) {
+                    VoiceInputLanguage.URDU -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں دوبارہ خوش آمدید۔ میں آپ کی گرامر کی ٹیچر ہوں۔ میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گی۔"
+                    VoiceInputLanguage.ARABIC -> "السلام عليكم ورحمة الله وبركاته. أهلاً بك مجدداً في لسان قواعد اللغة. سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية."
+                    else -> "السلام عليكم ورحمة الله وبركاته\nWelcome back to Lisan Grammar. I am ready to help you learn English grammar by comparing it with Arabic grammar."
+                }
+                tutorSpeechText = welcome
+                if (!isTutorSpeakerMuted) {
+                    viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                    viewModel.ttsManager.speak(welcome)
+                } else {
+                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    if (!isMicMuted && hasAudioPermission) {
+                        startListeningRef()
+                    }
+                }
+            }
+        }
+    }
+
+    var showSettingsMenu by remember { mutableStateOf(false) }
+    var showPlusMenu by remember { mutableStateOf(false) }
+    var showEndSessionConfirmation by remember { mutableStateOf(false) }
+    var showPronunciationDialog by remember { mutableStateOf(false) }
+    var showVoiceSelectionDialog by remember { mutableStateOf(false) }
+    var showFirstTimeVoiceDialog by remember { mutableStateOf(false) }
+    var showManualTextInput by remember { mutableStateOf(false) }
+    val inputFocusRequester = remember { FocusRequester() }
+
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val view = LocalView.current
+
+    // ==========================================
+    // [4] FIXED KEYBOARD DETECTION
+    // ==========================================
+    // Use WindowInsets API instead of fragile ViewTreeObserver
+    val isKeyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
+    // ==========================================
+    // [2] FIXED KEYBOARD FOCUS & OPEN EFFECT
+    // ==========================================
+    LaunchedEffect(showManualTextInput) {
+        if (showManualTextInput) {
+            // Wait for the UI to settle
+            delay(250)
+            
+            // Request focus on the text field
+            inputFocusRequester.requestFocus()
+            
+            // Explicitly show the keyboard using InputMethodManager
+            // (keyboardController?.show() is unreliable in dialogs)
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) 
+                as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(
+                view, 
+                android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT
+            )
+        } else {
+            // Hide keyboard when input is closed
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                as? android.view.inputmethod.InputMethodManager
+            imm?.hideSoftInputFromWindow(
+                view.windowToken, 
+                0
+            )
+            focusManager.clearFocus()
+        }
+    }
+
+    val isSpeechRecognizerAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    val currentlySpeakingText by viewModel.ttsManager.currentlySpeaking.collectAsState()
 
     val isNetworkAvailable: (Context) -> Boolean = { ctx ->
         val connectivityManager = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -669,39 +730,46 @@ fun VoiceTutorDialog(
 
     val handleNoSpeechDetected: () -> Unit = {
         listeningTimeoutJob?.cancel()
+        turnEndDebounceJob?.cancel()
         rmsVolume = 0f
-        userSpeechText = ""
-        consecutiveNoSpeechCount++
         
-        val fallbackText = when (selectedVoiceLanguage) {
-            VoiceInputLanguage.URDU -> "مجھے آپ کی آواز سنائی نہیں دی۔ براہ کرم دوبارہ بولیے۔"
-            VoiceInputLanguage.ARABIC -> "لم أتمكن من سماع صوتك. يرجى المحاولة والتحدث مرة أخرى."
-            else -> "I couldn't hear your voice. Please try speaking again."
-        }
-        val stopMessage = when (selectedVoiceLanguage) {
-            VoiceInputLanguage.URDU -> "گفتگو کا سیشن روک دیا گیا ہے۔ جب آپ بات کرنے کے لیے تیار ہوں، مائیکروفون پر ٹیپ کریں۔"
-            VoiceInputLanguage.ARABIC -> "تم إيقاف الجلسة الصوتية مؤقتاً. اضغط على الميكروفون عندما تكون مستعداً للتحدث."
-            else -> "Voice session paused. Tap the microphone when you are ready to speak."
-        }
-
-        if (consecutiveNoSpeechCount <= 2) {
-            errorMessage = fallbackText
-            tutorSpeechText = ""
-            if (!isMuted) {
-                viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
-                viewModel.ttsManager.speak(fallbackText, speed = currentSpeed)
-                animateTextProgressively(fallbackText, scope)
-            } else {
-                tutorSpeechText = fallbackText
-                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+        if (!isTurnSubmitted && (voiceSessionState == VoiceSessionState.LISTENING || voiceSessionState == VoiceSessionState.READY)) {
+            userSpeechText = ""
+            consecutiveNoSpeechCount++
+            
+            val fallbackText = when (selectedVoiceLanguage) {
+                VoiceInputLanguage.URDU -> "مجھے آپ کی آواز سنائی نہیں دی۔ براہ کرم دوبارہ بولیے۔"
+                VoiceInputLanguage.ARABIC -> "لم أتمكن من سماع صوتك. يرجى المحاولة والتحدث مرة أخرى."
+                else -> "I couldn't hear your voice. Please try speaking again."
             }
-        } else {
-            errorMessage = stopMessage
-            tutorSpeechText = ""
-            viewModel.setVoiceSessionState(VoiceSessionState.READY)
-            if (consecutiveNoSpeechCount == 3 && !isMuted) {
-                viewModel.ttsManager.speak(stopMessage, speed = currentSpeed)
-                animateTextProgressively(stopMessage, scope)
+            val stopMessage = when (selectedVoiceLanguage) {
+                VoiceInputLanguage.URDU -> "گفتگو کا سیشن روک دیا گیا ہے۔ جب آپ بات کرنے کے لیے تیار ہوں، مائیکروفون پر ٹیپ کریں۔"
+                VoiceInputLanguage.ARABIC -> "تم إيقاف الجلسة الصوتية مؤقتاً. اضغط على الميكروفون عندما تكون مستعداً للتحدث."
+                else -> "Voice session paused. Tap the microphone when you are ready to speak."
+            }
+
+            if (consecutiveNoSpeechCount <= 2) {
+                errorMessage = fallbackText
+                tutorSpeechText = ""
+                if (!isTutorSpeakerMuted) {
+                    viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                    viewModel.ttsManager.speak(fallbackText, speed = currentSpeed)
+                    animateTextProgressively(fallbackText, scope)
+                } else {
+                    tutorSpeechText = fallbackText
+                    viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                    if (autoListenEnabled && !isMicMuted && hasAudioPermission) {
+                        startListeningInternalRef(false)
+                    }
+                }
+            } else {
+                errorMessage = stopMessage
+                tutorSpeechText = ""
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                if (consecutiveNoSpeechCount == 3 && !isTutorSpeakerMuted) {
+                    viewModel.ttsManager.speak(stopMessage, speed = currentSpeed)
+                    animateTextProgressively(stopMessage, scope)
+                }
             }
         }
     }
@@ -711,6 +779,9 @@ fun VoiceTutorDialog(
         if (trimmed.isBlank() || trimmed == "Listening...") {
             handleNoSpeechDetected()
         } else {
+            isTurnSubmitted = true
+            listeningTimeoutJob?.cancel()
+            turnEndDebounceJob?.cancel()
             userSpeechText = trimmed
             manualInputText = ""
             viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
@@ -727,10 +798,27 @@ fun VoiceTutorDialog(
                     } else {
                         viewModel.learnerProfileManager.buildPersonalizedPromptContext()
                     }
-                    val langStr = when (selectedVoiceLanguage) {
+                    val currentLangStr = when (selectedVoiceLanguage) {
                         VoiceInputLanguage.URDU -> "Urdu"
                         VoiceInputLanguage.ARABIC -> "Arabic"
+                        VoiceInputLanguage.AUTO -> "Auto"
                         else -> "English"
+                    }
+                    val activeIntent = LanguageDetector.resolveActiveInstructionIntent(updatedHistory, currentLangStr)
+                    val langStr = if (activeIntent.isExplicitInstructionPresent) {
+                        val req = activeIntent.requestedLanguage
+                        withContext(Dispatchers.Main) {
+                            when (req) {
+                                "Urdu" -> viewModel.setActiveVoiceLanguage(VoiceInputLanguage.URDU)
+                                "Arabic" -> viewModel.setActiveVoiceLanguage(VoiceInputLanguage.ARABIC)
+                                "English" -> viewModel.setActiveVoiceLanguage(VoiceInputLanguage.ENGLISH)
+                            }
+                        }
+                        req
+                    } else if (selectedVoiceLanguage == VoiceInputLanguage.AUTO) {
+                        LanguageDetector.detect(text).defaultResponseLang
+                    } else {
+                        currentLangStr
                     }
                     val reply = RetrofitClient.getVoiceTutorResponse(
                         history = updatedHistory,
@@ -744,19 +832,20 @@ fun VoiceTutorDialog(
                     Log.d("VoiceTutorDialog", "Received tutor reply: $cleanReply")
                     
                     withContext(Dispatchers.Main) {
-                        tutorSpeechText = "" // Clear for word-by-word streaming
+                        tutorSpeechText = cleanReply
                         val modelContent = Content(role = "model", parts = listOf(Part(text = reply)))
                         voiceHistory = updatedHistory + modelContent
 
-                        if (!isMuted) {
+                        if (!isTutorSpeakerMuted) {
                             viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
                             Log.d("VoiceTutorDialog", "Telling TTS Manager to speak")
                             viewModel.ttsManager.speak(reply, speed = currentSpeed)
-                            animateTextProgressively(cleanReply, this)
                         } else {
-                            Log.d("VoiceTutorDialog", "Muted, not speaking")
-                            tutorSpeechText = cleanReply
+                            Log.d("VoiceTutorDialog", "Speaker Muted, not speaking")
                             viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                            if (autoListenEnabled && !isMicMuted && hasAudioPermission) {
+                                startListeningInternalRef(false)
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -786,26 +875,25 @@ fun VoiceTutorDialog(
         }
     }
 
-    var startListeningInternalRef: (Boolean) -> Unit = {}
-
     val initSpeechRecognizer: () -> SpeechRecognizer? = {
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
-        } catch (e: Exception) {
-            Log.e("VoiceTutor", "Error releasing speech recognizer", e)
-        }
         isRecognizerListening = false
 
-        var recognizer: SpeechRecognizer? = null
-        try {
-            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+        var recognizer = speechRecognizer
+        if (recognizer == null && SpeechRecognizer.isRecognitionAvailable(context)) {
+            try {
                 recognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+                speechRecognizer = recognizer
+            } catch (e: Exception) {
+                Log.e("VoiceTutor", "Error creating SpeechRecognizer", e)
+            }
+        }
+
+        if (recognizer != null) {
+            try {
                 recognizer.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
                         isRecognizerListening = true
-                        if (voiceSessionState != VoiceSessionState.SPEAKING && voiceSessionState != VoiceSessionState.REPLYING) {
+                        if (voiceSessionState != VoiceSessionState.SPEAKING && voiceSessionState != VoiceSessionState.REPLYING && voiceSessionState != VoiceSessionState.PROCESSING) {
                             viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
                         }
                     }
@@ -818,8 +906,10 @@ fun VoiceTutorDialog(
                         if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
                             Log.d("VoiceTutor", "Barge-in onBeginningOfSpeech detected! Interrupting.")
                             stopSpeaking()
-                            viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
+                            isTurnSubmitted = false
+                            currentTurnPartialText = ""
                             accumulatedSpeechText = ""
+                            viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
                             userSpeechText = "Listening..."
                         } else {
                             if (userSpeechText.isBlank() || userSpeechText == "Listening...") {
@@ -840,46 +930,43 @@ fun VoiceTutorDialog(
                         isRecognizerListening = false
                         listeningTimeoutJob?.cancel()
                         rmsVolume = 0f
-                        // DO NOT transition to PROCESSING here. This allows natural silence/pauses.
                     }
 
                     override fun onError(error: Int) {
                         isRecognizerListening = false
-                        Log.e("VoiceTutor", "Speech recognizer error: $error")
-                        val errorDescription = when (error) {
-                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error. Please check your microphone."
-                            SpeechRecognizer.ERROR_CLIENT -> "Client-side error."
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required."
-                            SpeechRecognizer.ERROR_NETWORK -> "Network error. Please check your internet connection."
-                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout."
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized."
-                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition service is busy."
-                            SpeechRecognizer.ERROR_SERVER -> "Server error."
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected."
-                            else -> "Speech recognition error ($error)."
-                        }
-                        
                         listeningTimeoutJob?.cancel()
+                        turnEndDebounceJob?.cancel()
                         rmsVolume = 0f
 
+                        Log.d("VoiceTutor", "onError: $error, isTurnSubmitted: $isTurnSubmitted, state: $voiceSessionState, partialText: '$currentTurnPartialText'")
+
+                        if (isTurnSubmitted || voiceSessionState != VoiceSessionState.LISTENING) {
+                            // Input was already submitted or state is no longer LISTENING; ignore error
+                            return
+                        }
+
+                        // If we captured partial text during this turn, submit it instead of failing!
+                        if (currentTurnPartialText.isNotBlank()) {
+                            isTurnSubmitted = true
+                            consecutiveNoSpeechCount = 0
+                            val processed = com.example.utils.SpeechTextProcessor.processTranscribedText(
+                                rawText = currentTurnPartialText,
+                                targetLanguage = userSettings.selectedVoiceLanguage
+                            )
+                            userSpeechText = processed
+                            sendVoiceInput(processed)
+                            return
+                        }
+
                         if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                            if (accumulatedSpeechText.isNotBlank()) {
-                                Log.d("VoiceTutor", "No match/timeout but we have accumulated text: $accumulatedSpeechText. Restarting recognizer.")
-                                if (voiceSessionState == VoiceSessionState.LISTENING) {
-                                    startListeningInternalRef(true)
-                                }
-                            } else {
-                                handleNoSpeechDetected()
-                            }
+                            handleNoSpeechDetected()
                         } else {
-                            // Technical error: do NOT call launchGoogleSpeechInput()!
-                            // Recover inside Lisan AI safely up to 3 times
                             if (errorRetryCount < 3) {
                                 errorRetryCount++
                                 Log.d("VoiceTutor", "Technical error $error, retry count $errorRetryCount. Re-triggering listening.")
                                 scope.launch {
                                     delay(1000)
-                                    if (voiceSessionState == VoiceSessionState.LISTENING) {
+                                    if (voiceSessionState == VoiceSessionState.LISTENING && !isTurnSubmitted) {
                                         startListeningInternalRef(true)
                                     }
                                 }
@@ -894,57 +981,44 @@ fun VoiceTutorDialog(
                     override fun onResults(results: Bundle?) {
                         isRecognizerListening = false
                         listeningTimeoutJob?.cancel()
+                        turnEndDebounceJob?.cancel()
                         rmsVolume = 0f
+
+                        if (isTurnSubmitted) {
+                            Log.d("VoiceTutor", "onResults received but input was already submitted for this turn.")
+                            return
+                        }
+
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val newTextSegment = matches?.firstOrNull() ?: ""
-                        
-                        if (newTextSegment.isNotBlank()) {
+                        val rawText = matches?.firstOrNull() ?: ""
+                        val textToProcess = if (rawText.isNotBlank()) rawText else currentTurnPartialText
+
+                        Log.d("VoiceTutor", "onResults rawText: '$rawText', fallbackPartialText: '$currentTurnPartialText'")
+
+                        if (textToProcess.isNotBlank()) {
+                            isTurnSubmitted = true
                             consecutiveNoSpeechCount = 0
+
                             if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
-                                Log.d("VoiceTutor", "Barge-in onResults detected! Interrupting.")
                                 stopSpeaking()
-                                viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
                             }
 
-                            // Dynamic auto language detection
                             if (userSettings.selectedVoiceLanguage == "Auto") {
-                                val detected = detectLanguageFromText(newTextSegment)
+                                val detected = detectLanguageFromText(textToProcess)
                                 if (detected != null) {
                                     viewModel.setActiveVoiceLanguage(detected)
                                 }
                             }
-                            
-                            // Accumulate the speech input segment
-                            accumulatedSpeechText = if (accumulatedSpeechText.isBlank()) {
-                                newTextSegment
-                            } else {
-                                "$accumulatedSpeechText $newTextSegment"
-                            }
-                            userSpeechText = accumulatedSpeechText
-                            
-                            // Trigger/Reset turn-end debounce job
-                            turnEndDebounceJob?.cancel()
-                            turnEndDebounceJob = scope.launch(Dispatchers.Main) {
-                                delay(2000) // 2 seconds of silence means they're actually done speaking!
-                                val finalSpeech = accumulatedSpeechText.trim()
-                                accumulatedSpeechText = ""
-                                if (finalSpeech.isNotBlank()) {
-                                    sendVoiceInput(finalSpeech)
-                                } else {
-                                    handleNoSpeechDetected()
-                                }
-                            }
-                            
-                            // Immediately restart listening so they can keep speaking
-                            if (voiceSessionState == VoiceSessionState.LISTENING) {
-                                startListeningInternalRef(true)
-                            }
+
+                            val processed = com.example.utils.SpeechTextProcessor.processTranscribedText(
+                                rawText = textToProcess,
+                                targetLanguage = userSettings.selectedVoiceLanguage
+                            )
+                            userSpeechText = processed
+
+                            sendVoiceInput(processed)
                         } else {
-                            if (accumulatedSpeechText.isNotBlank()) {
-                                if (voiceSessionState == VoiceSessionState.LISTENING) {
-                                    startListeningInternalRef(true)
-                                }
-                            } else {
+                            if (voiceSessionState == VoiceSessionState.LISTENING && !isTurnSubmitted) {
                                 handleNoSpeechDetected()
                             }
                         }
@@ -955,38 +1029,28 @@ fun VoiceTutorDialog(
                         val partialText = matches?.firstOrNull()
                         if (!partialText.isNullOrBlank()) {
                             consecutiveNoSpeechCount = 0
+                            currentTurnPartialText = partialText
                             if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
                                 Log.d("VoiceTutor", "Barge-in onPartialResults detected! Interrupting.")
                                 stopSpeaking()
                                 viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
                             }
 
-                            // Dynamic auto language detection from partial results
                             if (userSettings.selectedVoiceLanguage == "Auto") {
                                 val detected = detectLanguageFromText(partialText)
                                 if (detected != null) {
                                     viewModel.setActiveVoiceLanguage(detected)
                                 }
                             }
-                            
-                            // Show live partial results alongside the accumulated text
-                            userSpeechText = if (accumulatedSpeechText.isBlank()) {
-                                partialText
-                            } else {
-                                "$accumulatedSpeechText $partialText"
-                            }
                         }
                     }
 
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
-            } else {
-                Log.e("VoiceTutor", "Speech recognizer is not available on this device.")
+            } catch (e: Exception) {
+                Log.e("VoiceTutor", "Error setting RecognitionListener", e)
             }
-        } catch (e: Exception) {
-            Log.e("VoiceTutor", "Error initializing speech recognizer", e)
         }
-        speechRecognizer = recognizer
         recognizer
     }
 
@@ -994,9 +1058,11 @@ fun VoiceTutorDialog(
         listeningTimeoutJob?.cancel()
         turnEndDebounceJob?.cancel()
         accumulatedSpeechText = ""
+        currentTurnPartialText = ""
         isRecognizerListening = false
         try {
             speechRecognizer?.stopListening()
+            speechRecognizer?.cancel()
         } catch (e: Exception) {
             Log.e("VoiceTutor", "Error in stopListening", e)
         }
@@ -1006,43 +1072,58 @@ fun VoiceTutorDialog(
         }
     }
 
-    LaunchedEffect(isMuted) {
-        if (isMuted) {
-            stopSpeaking()
-            stopListening()
+    var lastMicToggleTime by remember { mutableStateOf(0L) }
+    val debouncedToggleListening: () -> Unit = {
+        val now = System.currentTimeMillis()
+        if (now - lastMicToggleTime > 350L) {
+            lastMicToggleTime = now
+            if (isMicMuted) {
+                isMicMuted = false
+                consecutiveNoSpeechCount = 0
+                startListeningInternalRef(false)
+            } else {
+                if (voiceSessionState == VoiceSessionState.LISTENING) {
+                    stopListening()
+                } else {
+                    consecutiveNoSpeechCount = 0
+                    startListeningInternalRef(false)
+                }
+            }
         }
     }
 
     val startListeningInternal: (Boolean) -> Unit = { isBargeIn ->
-        if (isMuted) {
-            // Do not start speech input if muted
+        if (isMicMuted) {
+            Log.d("VoiceTutor", "Microphone is muted. Not starting speech recognizer.")
+            isRecognizerListening = false
         } else if (!hasAudioPermission) {
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             errorMessage = "Microphone permission is required for speech input."
         } else if (!isNetworkAvailable(context)) {
             viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
             errorMessage = "Voice feature requires an internet connection."
-        } else if (isRecognizerListening) {
+        } else if (isRecognizerListening && voiceSessionState == VoiceSessionState.LISTENING) {
             Log.d("VoiceTutor", "SpeechRecognizer is already listening. Ignoring start command.")
         } else {
+            isTurnSubmitted = false
+            currentTurnPartialText = ""
+            accumulatedSpeechText = ""
+            turnEndDebounceJob?.cancel()
+            listeningTimeoutJob?.cancel()
+            
             if (!isBargeIn) {
                 stopSpeaking()
-                accumulatedSpeechText = ""
-                turnEndDebounceJob?.cancel()
                 userSpeechText = ""
                 errorMessage = ""
                 viewModel.setVoiceSessionState(VoiceSessionState.LISTENING)
             }
             rmsVolume = 0f
 
-            // Start an 8-second timeout if they haven't spoken anything yet
-            if (accumulatedSpeechText.isBlank()) {
-                listeningTimeoutJob?.cancel()
-                listeningTimeoutJob = scope.launch(Dispatchers.Main) {
-                    delay(8000) // 8 seconds timeout
-                    if (voiceSessionState == VoiceSessionState.LISTENING && accumulatedSpeechText.isBlank()) {
-                        handleNoSpeechDetected()
-                    }
+            // Start an 8-second timeout if no speech is detected at all
+            listeningTimeoutJob = scope.launch(Dispatchers.Main) {
+                delay(8000)
+                if (voiceSessionState == VoiceSessionState.LISTENING && !isTurnSubmitted && currentTurnPartialText.isBlank() && accumulatedSpeechText.isBlank()) {
+                    handleNoSpeechDetected()
                 }
             }
 
@@ -1063,7 +1144,6 @@ fun VoiceTutorDialog(
                             putExtra(RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES, arrayListOf("en-US", "ur-PK", "ar-SA"))
                             putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "ur-PK", "ar-SA"))
                             
-                            // For API 34+ (Android 14+) automatic language detection and switching
                             if (android.os.Build.VERSION.SDK_INT >= 34) {
                                 putExtra("android.speech.extra.EXTRA_ENABLE_LANGUAGE_DETECTION", true)
                                 putExtra("android.speech.extra.EXTRA_ENABLE_LANGUAGE_SWITCH", "balanced")
@@ -1077,7 +1157,6 @@ fun VoiceTutorDialog(
                         putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.applicationContext.packageName)
                         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                        // Extra silence configuration
                         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
                     }
@@ -1113,12 +1192,42 @@ fun VoiceTutorDialog(
         startListeningInternal(false)
     }
 
+    startListeningRef = startListening
+
     launchGoogleSpeechInput = {
         Log.d("VoiceTutor", "launchGoogleSpeechInput called but disabled to avoid external UI popup")
         handleNoSpeechDetected()
     }
 
-    var wasSpeaking by remember { mutableStateOf(false) }
+    LaunchedEffect(isTutorSpeakerMuted) {
+        if (isTutorSpeakerMuted) {
+            stopSpeaking()
+        } else {
+            if (tutorSpeechText.isNotBlank() && (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING)) {
+                if (viewModel.ttsManager.currentlySpeaking.value == null) {
+                    viewModel.ttsManager.speak(tutorSpeechText, speed = currentSpeed)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(isMicMuted) {
+        if (isMicMuted) {
+            stopListening()
+            if (!isTutorSpeakerMuted) {
+                if (tutorSpeechText.isNotBlank()) {
+                    if (viewModel.ttsManager.currentlySpeaking.value == null) {
+                        viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                        viewModel.ttsManager.speak(tutorSpeechText, speed = currentSpeed)
+                    }
+                }
+            }
+        } else {
+            if (voiceSessionState == VoiceSessionState.READY && connectionStatus == ConnectionStateStatus.CONNECTED && !wasSpeaking && hasAudioPermission) {
+                startListening()
+            }
+        }
+    }
 
     LaunchedEffect(currentlySpeakingText) {
         if (currentlySpeakingText != null) {
@@ -1131,7 +1240,7 @@ fun VoiceTutorDialog(
             bargeInJob?.cancel()
             if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
                 viewModel.setVoiceSessionState(VoiceSessionState.READY)
-                if (autoListenEnabled && !isMuted && hasAudioPermission) {
+                if (autoListenEnabled && !isMicMuted && hasAudioPermission) {
                     startListeningInternal(false)
                 }
             }
@@ -1139,14 +1248,13 @@ fun VoiceTutorDialog(
     }
 
     LaunchedEffect(hasAudioPermission) {
-        if (hasAudioPermission && voiceSessionState == VoiceSessionState.READY && connectionStatus == ConnectionStateStatus.CONNECTED && !wasSpeaking) {
+        if (hasAudioPermission && voiceSessionState == VoiceSessionState.READY && connectionStatus == ConnectionStateStatus.CONNECTED && !wasSpeaking && !isMicMuted) {
             startListening()
         }
     }
 
     LaunchedEffect(Unit) {
         connectionStatus = ConnectionStateStatus.CONNECTING
-        kotlinx.coroutines.delay(2000)
         
         if (!isNetworkAvailable(context)) {
             connectionStatus = ConnectionStateStatus.ERROR
@@ -1154,7 +1262,7 @@ fun VoiceTutorDialog(
             viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
         } else {
             connectionStatus = ConnectionStateStatus.CONNECTED
-            if (!hasAudioPermission) {
+            if (!hasAudioPermission && !isMicMuted) {
                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
             val welcome = when (selectedVoiceLanguage) {
@@ -1163,8 +1271,15 @@ fun VoiceTutorDialog(
                 else -> "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
             }
             tutorSpeechText = welcome
-            viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
-            viewModel.ttsManager.speak(welcome)
+            if (!isTutorSpeakerMuted) {
+                viewModel.setVoiceSessionState(VoiceSessionState.SPEAKING)
+                viewModel.ttsManager.speak(welcome)
+            } else {
+                viewModel.setVoiceSessionState(VoiceSessionState.READY)
+                if (!isMicMuted && hasAudioPermission) {
+                    startListening()
+                }
+            }
         }
     }
 
@@ -1258,6 +1373,11 @@ fun VoiceTutorDialog(
     )
     val thinkingDots = ".".repeat(dotFloat.toInt().coerceIn(0, 3))
 
+    LaunchedEffect(Unit) {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+    }
+
     Dialog(
         onDismissRequest = {
             stopSpeaking()
@@ -1266,32 +1386,34 @@ fun VoiceTutorDialog(
         },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false
+            decorFitsSystemWindows = false
         )
     ) {
         val view = LocalView.current
-        val dialogWindowProvider = view.parent as? DialogWindowProvider
-        SideEffect {
-            dialogWindowProvider?.window?.let { window ->
-                window.setLayout(
+        DisposableEffect(view) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            window?.let { win ->
+                win.setLayout(
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                // Ensure IME resize is dispatched properly to Compose insets
+                win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                WindowCompat.setDecorFitsSystemWindows(win, false)
             }
+            onDispose {}
         }
 
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding(),
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding(),
             color = Color.White
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .imePadding(),
+                modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // APP BAR (FLUTTER SPEC)
@@ -1335,26 +1457,42 @@ fun VoiceTutorDialog(
                                 )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Lisan Voice Tutor",
-                            style = TextStyle(
-                                color = Color(0xFF3F51B5),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                        Column {
+                            Text(
+                                text = "Lisan Voice Tutor",
+                                style = TextStyle(
+                                    color = Color(0xFF3F51B5),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp
+                                )
                             )
-                        )
+                            Text(
+                                text = when (selectedVoiceLanguage) {
+                                    VoiceInputLanguage.URDU -> "Urdu Mode • اردو"
+                                    VoiceInputLanguage.ARABIC -> "Arabic Mode • العربية"
+                                    VoiceInputLanguage.AUTO -> "Auto Detect Language"
+                                    else -> "English Mode"
+                                },
+                                fontSize = 10.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
 
+                    // Single Speaker / Voice & style options Icon (to the left of Settings, replacing Avatar & Weekend icons)
                     IconButton(
-                        onClick = { showVoiceSelectionDialog = true }
+                        onClick = { showVoiceSelectionDialog = true },
+                        modifier = Modifier.testTag("voice_speaker_top_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = "Change Voice",
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Voice Options",
                             tint = Color(0xFF3F51B5)
                         )
                     }
 
+                    // Settings Icon
                     IconButton(
                         onClick = { showSettingsMenu = true },
                         modifier = Modifier.testTag("voice_settings_button")
@@ -1365,8 +1503,6 @@ fun VoiceTutorDialog(
                             tint = Color(0xFF3F51B5)
                         )
                     }
-
-
                 }
                 HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
 
@@ -1374,10 +1510,14 @@ fun VoiceTutorDialog(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.Center,
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = if (isKeyboardOpen) 6.dp else 12.dp),
+                    verticalArrangement = Arrangement.Top,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Spacer(modifier = Modifier.height(if (isKeyboardOpen) 4.dp else 8.dp))
+
                     // Glowing Pulsing Sphere (ChatGPT-style fBm Fluid Multi-Layered Orb)
                     FlutterGlowingSphere(
                         pulseScale = pulseScale,
@@ -1385,68 +1525,106 @@ fun VoiceTutorDialog(
                         rmsVolume = rmsVolume,
                         voiceSessionState = voiceSessionState,
                         isIntenseMode = isIntenseMode,
+                        isCompact = isKeyboardOpen,
                         modifier = Modifier
-                            .padding(bottom = 24.dp)
+                            .padding(bottom = if (isKeyboardOpen) 8.dp else 16.dp)
                             .clip(CircleShape)
                             .clickable {
                                 if (connectionStatus == ConnectionStateStatus.CONNECTED) {
                                     if (voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING) {
                                         stopSpeaking()
-                                        startListeningInternal(false)
-                                    } else if (voiceSessionState == VoiceSessionState.LISTENING) {
-                                        stopListening()
-                                    } else if (voiceSessionState == VoiceSessionState.READY) {
-                                        startListeningInternal(false)
+                                        if (!isMicMuted) {
+                                            startListeningInternal(false)
+                                        }
+                                    } else {
+                                        if (isMicMuted) {
+                                            isMicMuted = false
+                                            startListeningInternal(false)
+                                        } else {
+                                            debouncedToggleListening()
+                                        }
                                     }
                                 }
                             }
                     )
 
-                    // Status message
+                    // Status message banner
                     val labelText = when (connectionStatus) {
                         ConnectionStateStatus.CONNECTING -> "Connecting to Lisan AI..."
                         ConnectionStateStatus.ERROR -> connectionErrorMessage.ifBlank { "Connection timed out. Please retry." }
                         ConnectionStateStatus.IDLE -> "Idle"
                         ConnectionStateStatus.CONNECTED -> {
-                            when (voiceSessionState) {
-                                VoiceSessionState.SPEAKING, VoiceSessionState.REPLYING -> "Lisan Tutor is speaking..."
-                                VoiceSessionState.LISTENING -> "Listening to your voice..."
-                                VoiceSessionState.PROCESSING -> "Thinking" + thinkingDots
-                                VoiceSessionState.ERROR -> errorMessage.ifBlank { "Connection timed out. Please retry." }
+                            when {
+                                voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING -> {
+                                    if (isTutorSpeakerMuted) "Lisan Tutor is replying (Audio Muted)..." else "Lisan Tutor is speaking..."
+                                }
+                                voiceSessionState == VoiceSessionState.LISTENING -> "Listening to your voice..."
+                                voiceSessionState == VoiceSessionState.PROCESSING -> "Thinking" + thinkingDots
+                                voiceSessionState == VoiceSessionState.ERROR -> errorMessage.ifBlank { "Connection timed out. Please retry." }
+                                isMicMuted && !isTutorSpeakerMuted -> "Microphone is muted — Tutor can speak"
+                                isMicMuted && isTutorSpeakerMuted -> "Microphone & Tutor Speaker are muted"
+                                !isMicMuted && isTutorSpeakerMuted -> "Tutor Speaker muted — Speak freely"
                                 else -> "Lisan AI Voice Assistant"
                             }
                         }
                     }
 
-                    Text(
-                        text = labelText,
-                        style = TextStyle(
-                            color = if (connectionStatus == ConnectionStateStatus.ERROR || voiceSessionState == VoiceSessionState.ERROR) Color(0xFFEF4444) else Color(0xFF757575),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.W500
-                        ),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    )
+                    Surface(
+                        color = when {
+                            connectionStatus == ConnectionStateStatus.ERROR || voiceSessionState == VoiceSessionState.ERROR -> Color(0xFFFEF2F2)
+                            voiceSessionState == VoiceSessionState.LISTENING -> Color(0xFFEFF6FF)
+                            voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING -> Color(0xFFF5F3FF)
+                            isMicMuted || isTutorSpeakerMuted -> Color(0xFFFFFBEB)
+                            else -> Color(0xFFF8FAFC)
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            when {
+                                connectionStatus == ConnectionStateStatus.ERROR || voiceSessionState == VoiceSessionState.ERROR -> Color(0xFFFECACA)
+                                voiceSessionState == VoiceSessionState.LISTENING -> Color(0xFFBFDBFE)
+                                voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING -> Color(0xFFDDD6FE)
+                                isMicMuted || isTutorSpeakerMuted -> Color(0xFFFDE68A)
+                                else -> Color(0xFFE2E8F0)
+                            }
+                        )
+                    ) {
+                        Text(
+                            text = labelText,
+                            style = TextStyle(
+                                color = when {
+                                    connectionStatus == ConnectionStateStatus.ERROR || voiceSessionState == VoiceSessionState.ERROR -> Color(0xFFDC2626)
+                                    voiceSessionState == VoiceSessionState.LISTENING -> Color(0xFF1D4ED8)
+                                    voiceSessionState == VoiceSessionState.SPEAKING || voiceSessionState == VoiceSessionState.REPLYING -> Color(0xFF6D28D9)
+                                    isMicMuted || isTutorSpeakerMuted -> Color(0xFFB45309)
+                                    else -> Color(0xFF475569)
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     FilterChip(
                         selected = isIntenseMode,
                         onClick = { isIntenseMode = !isIntenseMode },
                         label = { 
                             Text(
-                                text = if (isIntenseMode) "Intense Orb Mode" else "Standard Orb Mode",
-                                fontSize = 12.sp,
+                                text = if (isIntenseMode) "Intense Orb Glow" else "Standard Orb Mode",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF2563EB).copy(alpha = 0.15f),
+                            selectedContainerColor = Color(0xFF2563EB).copy(alpha = 0.12f),
                             selectedLabelColor = Color(0xFF2563EB),
                             selectedLeadingIconColor = Color(0xFF2563EB),
                             containerColor = Color.Transparent,
-                            labelColor = Color(0xFF757575)
+                            labelColor = Color(0xFF64748B)
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             enabled = true,
@@ -1462,7 +1640,7 @@ fun VoiceTutorDialog(
                         Button(
                             onClick = reconnectVoiceAssistant,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF3F51B5), // Indigo
+                                containerColor = Color(0xFF3F51B5),
                                 contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(24.dp)
@@ -1471,136 +1649,337 @@ fun VoiceTutorDialog(
                         }
                     }
 
-                    // Recent transcription preview (only when connected)
-                    if (connectionStatus == ConnectionStateStatus.CONNECTED && (userSpeechText.isNotBlank() || tutorSpeechText.isNotBlank())) {
-                        Surface(
-                            color = Color(0xFFF8FAFC),
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier
-                                .fillMaxWidth(0.9f)
-                                .padding(top = 24.dp)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // SPEECH TRANSCRIPTION & TRANSLATION CARD (CENTER STAGE)
+                    Surface(
+                        color = Color(0xFFF8FAFC),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .fillMaxWidth(0.96f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
+                            // 1. Learner Speech Section
                             Column(
-                                modifier = Modifier
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(14.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") {
-                                    Text(
-                                        text = "You: $userSpeechText",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = EditorialPrimary
-                                    )
+                                Surface(
+                                    color = Color(0xFFEFF6FF),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Mic,
+                                            contentDescription = null,
+                                            tint = Color(0xFF2563EB),
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = "You",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF2563EB)
+                                        )
+                                    }
                                 }
-                                if (tutorSpeechText.isNotBlank()) {
-                                    if (userSpeechText.isNotBlank() && userSpeechText != "Listening...") Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "Tutor: $tutorSpeechText",
-                                        fontSize = 13.sp,
-                                        color = EditorialTextPrimary
-                                    )
-                                }
+                                Text(
+                                    text = if (userSpeechText.isNotBlank()) userSpeechText else if (voiceSessionState == VoiceSessionState.LISTENING) "Listening..." else "Tap microphone to speak",
+                                    fontSize = 14.sp,
+                                    color = if (userSpeechText.isNotBlank()) EditorialPrimary else Color(0xFF94A3B8),
+                                    style = TextStyle(
+                                        textDirection = if (isLineRtl(userSpeechText)) TextDirection.Rtl else TextDirection.Ltr
+                                    ),
+                                    modifier = Modifier.padding(start = 2.dp)
+                                )
                             }
+
+                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                            // 2. Tutor Speech Section
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    color = Color(0xFFEEF2FF),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                            contentDescription = null,
+                                            tint = Color(0xFF4F46E5),
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = "Lisan Tutor",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF4F46E5)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (tutorSpeechText.isNotBlank()) tutorSpeechText else if (voiceSessionState == VoiceSessionState.PROCESSING) "Thinking..." else "Ready to teach English grammar with Arabic & Urdu comparisons.",
+                                    fontSize = 14.sp,
+                                    color = if (tutorSpeechText.isNotBlank()) EditorialTextPrimary else Color(0xFF94A3B8),
+                                    lineHeight = 20.sp,
+                                    style = TextStyle(
+                                        textDirection = if (isLineRtl(tutorSpeechText)) TextDirection.Rtl else TextDirection.Ltr
+                                    ),
+                                    modifier = Modifier.padding(start = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // OPTIONAL MANUAL TEXT INPUT (TOGGLEABLE VIA KEYBOARD ICON)
+                if (showManualTextInput) {
+                    HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                    
+                    // BringIntoViewRequester ensures the field stays visible above keyboard
+                    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFF8FAFC))
+                            // This padding pushes the row above the keyboard
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            color = Color.White,
+                            shape = RoundedCornerShape(24.dp),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = manualInputText,
+                                onValueChange = { 
+                                    manualInputText = it
+                                    // Keep field visible while typing
+                                    scope.launch {
+                                        bringIntoViewRequester.bringIntoView()
+                                    }
+                                },
+                                placeholder = {
+                                    Text(
+                                        text = "Type a message...",
+                                        fontSize = 14.sp,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                },
+                                textStyle = TextStyle(
+                                    fontSize = 14.sp,
+                                    color = EditorialTextPrimary,
+                                    textDirection = if (isLineRtl(manualInputText)) TextDirection.Rtl else TextDirection.Ltr
+                                ),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent,
+                                    disabledBorderColor = Color.Transparent
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 44.dp)
+                                    .focusRequester(inputFocusRequester)
+                                    .bringIntoViewRequester(bringIntoViewRequester),  // Auto-scroll on focus
+                                singleLine = true,
+                                enabled = (connectionStatus == ConnectionStateStatus.CONNECTED),
+                                keyboardOptions = KeyboardOptions(
+                                    imeAction = ImeAction.Send
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onSend = {
+                                        if (manualInputText.isNotBlank()) {
+                                            val textToSend = manualInputText.trim()
+                                            manualInputText = ""
+                                            sendVoiceInput(textToSend)
+                                            
+                                            // Hide keyboard
+                                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) 
+                                                as? android.view.inputmethod.InputMethodManager
+                                            imm?.hideSoftInputFromWindow(
+                                                view.windowToken, 
+                                                0
+                                            )
+                                            focusManager.clearFocus()
+                                        }
+                                    }
+                                )
+                            )
+                        }
+                        
+                        // SEPARATE Send button (outside text field — more reliable)
+                        IconButton(
+                            onClick = {
+                                if (manualInputText.isNotBlank()) {
+                                    val textToSend = manualInputText.trim()
+                                    manualInputText = ""
+                                    sendVoiceInput(textToSend)
+                                    
+                                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) 
+                                        as? android.view.inputmethod.InputMethodManager
+                                    imm?.hideSoftInputFromWindow(
+                                        view.windowToken, 
+                                        0
+                                    )
+                                    focusManager.clearFocus()
+                                }
+                            },
+                            enabled = manualInputText.isNotBlank() && connectionStatus == ConnectionStateStatus.CONNECTED,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(
+                                    color = if (manualInputText.isNotBlank()) 
+                                        Color(0xFF3F51B5) else Color(0xFFE2E8F0),
+                                    shape = CircleShape
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
+                                tint = if (manualInputText.isNotBlank()) 
+                                    Color.White else Color(0xFF94A3B8),
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
                     }
                 }
 
-                // BOTTOM CHAT INPUT PREVIEW BAR (FLUTTER SPEC)
-                HorizontalDivider(color = Color(0xFFE0E0E0), thickness = 1.dp)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFFF5F5F5))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-
-
-                    // Rounded white Text Field
+                // BOTTOM ACTION BAR: PURE ICONS FLOATING DOCK ELEVATED INTO MARKED POSITION (HIDDEN WHEN KEYBOARD IS OPEN)
+                if (!isKeyboardOpen) {
                     Surface(
-                        color = Color.White,
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = 20.dp,
+                                end = 20.dp,
+                                top = 8.dp,
+                                bottom = if (showManualTextInput) 16.dp else 52.dp
+                            ),
+                        shape = RoundedCornerShape(32.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        shadowElevation = 4.dp
                     ) {
-                        OutlinedTextField(
-                            value = manualInputText,
-                            onValueChange = { manualInputText = it },
-                            placeholder = {
-                                Text(
-                                    text = "Type a message...",
-                                    fontSize = 14.sp,
-                                    color = Color.Gray
-                                )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        // 1. SPEAKER ICON (TUTOR AUDIO MUTE / UNMUTE)
+                        IconButton(
+                            onClick = {
+                                isTutorSpeakerMuted = !isTutorSpeakerMuted
                             },
-                            textStyle = TextStyle(
-                                fontSize = 15.sp,
-                                color = Color.Black,
-                                textDirection = if (isLineRtl(manualInputText)) TextDirection.Rtl else TextDirection.Ltr
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                disabledBorderColor = Color.Transparent
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .defaultMinSize(minHeight = 40.dp),
-                            singleLine = true,
                             enabled = (connectionStatus == ConnectionStateStatus.CONNECTED),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(
-                                onSend = {
-                                    if (manualInputText.isNotBlank()) {
-                                        val textToSend = manualInputText
-                                        manualInputText = ""
-                                        sendVoiceInput(textToSend)
-                                        keyboardController?.hide()
-                                        focusManager.clearFocus()
-                                    }
-                                }
+                            modifier = Modifier
+                                .size(54.dp)
+                                .background(
+                                    color = if (isTutorSpeakerMuted) Color(0xFFFEE2E2) else Color(0xFFEEF2FF),
+                                    shape = CircleShape
+                                )
+                                .testTag("tutor_speaker_mute_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isTutorSpeakerMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = if (isTutorSpeakerMuted) "Unmute Tutor Speaker" else "Mute Tutor Speaker",
+                                tint = if (isTutorSpeakerMuted) Color(0xFFDC2626) else Color(0xFF3F51B5),
+                                modifier = Modifier.size(26.dp)
                             )
-                        )
-                    }
+                        }
 
-                    // Speaker toggle button
-                    IconButton(
-                        onClick = {
-                            isMuted = !isMuted
-                        },
-                        enabled = (connectionStatus == ConnectionStateStatus.CONNECTED)
-                    ) {
-                        Icon(
-                            imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = "Mute/Unmute Speaker",
-                            tint = if (isMuted) Color.Red else Color(0xFF3F51B5)
-                        )
-                    }
-
-                    // Mic toggle button
-                    IconButton(
-                        onClick = {
-                            if (connectionStatus == ConnectionStateStatus.CONNECTED) {
-                                if (voiceSessionState == VoiceSessionState.LISTENING) {
-                                    stopListening()
-                                } else {
-                                    startListening()
+                        // 2. MICROPHONE ICON (LEARNER MIC MUTE / UNMUTE)
+                        IconButton(
+                            onClick = {
+                                if (connectionStatus == ConnectionStateStatus.CONNECTED) {
+                                    isMicMuted = !isMicMuted
                                 }
-                            }
-                        },
-                        enabled = (connectionStatus == ConnectionStateStatus.CONNECTED && !isMuted)
-                    ) {
-                        Icon(
-                            imageVector = if (isMuted) Icons.Default.MicOff else (if (voiceSessionState == VoiceSessionState.LISTENING) Icons.Default.MicOff else Icons.Default.Mic),
-                            contentDescription = "Microphone",
-                            tint = if (isMuted) Color.Gray else (if (voiceSessionState == VoiceSessionState.LISTENING) Color.Red else Color(0xFF3F51B5))
-                        )
+                            },
+                            enabled = (connectionStatus == ConnectionStateStatus.CONNECTED),
+                            modifier = Modifier
+                                .size(54.dp)
+                                .background(
+                                    color = if (isMicMuted) Color(0xFFFEE2E2) else if (voiceSessionState == VoiceSessionState.LISTENING) Color(0xFF2563EB) else Color(0xFFEEF2FF),
+                                    shape = CircleShape
+                                )
+                                .testTag("mic_mute_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                                contentDescription = if (isMicMuted) "Unmute Microphone" else "Mute Microphone",
+                                tint = if (isMicMuted) Color(0xFFDC2626) else if (voiceSessionState == VoiceSessionState.LISTENING) Color.White else Color(0xFF3F51B5),
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        // 3. KEYBOARD ICON (TOGGLE MESSAGE TYPING BAR)
+                        IconButton(
+                            onClick = {
+                                showManualTextInput = !showManualTextInput
+                            },
+                            modifier = Modifier
+                                .size(54.dp)
+                                .background(
+                                    color = if (showManualTextInput) Color(0xFF3F51B5) else Color(0xFFEEF2FF),
+                                    shape = CircleShape
+                                )
+                                .testTag("keyboard_toggle_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Keyboard,
+                                contentDescription = "Toggle Keyboard",
+                                tint = if (showManualTextInput) Color.White else Color(0xFF3F51B5),
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        // 4. END CALL ICON (RED CIRCULAR BUTTON)
+                        IconButton(
+                            onClick = {
+                                showEndSessionConfirmation = true
+                            },
+                            modifier = Modifier
+                                .size(54.dp)
+                                .background(
+                                    color = Color(0xFFDC2626),
+                                    shape = CircleShape
+                                )
+                                .testTag("end_voice_session_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CallEnd,
+                                contentDescription = "End Call",
+                                tint = Color.White,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
                     }
                 }
+            }
             }
         }
     }

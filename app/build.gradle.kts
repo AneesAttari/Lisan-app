@@ -33,7 +33,12 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
+      val customKeystore = file("${rootDir}/debug.keystore")
+      if (customKeystore.exists()) {
+        storeFile = customKeystore
+      } else {
+        storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+      }
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"
@@ -64,10 +69,12 @@ android {
 val envFile = file("${rootDir}/.env")
 val backendUrl = System.getenv("BACKEND_URL") ?: "https://lisan-ai-backend.example.com"
 val backendSecret = System.getenv("BACKEND_API_SECRET") ?: "lisan_dev_secure_8a7d2f9e4b6c810d_prod_verified"
+val geminiApiKey = System.getenv("GEMINI_API_KEY")?.takeIf { it.isNotBlank() } ?: "DEFAULT_KEY"
 
 val envContent = StringBuilder()
 envContent.append("BACKEND_URL=$backendUrl\n")
 envContent.append("BACKEND_API_SECRET=$backendSecret\n")
+envContent.append("GEMINI_API_KEY=$geminiApiKey\n")
 envFile.writeText(envContent.toString())
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files

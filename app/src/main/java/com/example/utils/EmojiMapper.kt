@@ -259,7 +259,7 @@ object EmojiMapper {
             "study" -> "📚"
 
             // Jobs & Professions
-            "teacher" -> "👨‍🏫"
+            "teacher" -> "👩‍🏫"
             "doctor" -> "👨‍⚕️"
             "nurse" -> "👩‍⚕️"
             "police" -> "👮"
