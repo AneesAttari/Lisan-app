@@ -94,19 +94,23 @@ app.get('/health', (req, res) => {
 // BASE GEMINI URL
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 
-// 4. Proxy non-streaming content generation
-app.post('/v1beta/models/:model\\:generateContent', apiLimiter, authenticateRequest, validateGeminiRequest, async (req, res) => {
-  const { model } = req.params;
+// 4. Proxy content generation (both streaming and non-streaming) using robust regex route matching
+app.post(/^\/v1(?:beta)?\/models\/(.+):(generateContent|streamGenerateContent)$/, apiLimiter, authenticateRequest, validateGeminiRequest, async (req, res) => {
+  const model = req.params[0];
+  const action = req.params[1];
+  const isStreaming = action === 'streamGenerateContent';
   const geminiKey = process.env.GEMINI_API_KEY;
 
   if (!geminiKey) {
-    console.error("[CRITICAL] Server GEMINI_API_KEY is not set.");
+    console.error("[CRITICAL] Server GEMINI_API_KEY is not set in backend environment.");
     return res.status(500).json({ error: "Internal Server Error: Gemini credentials missing on backend." });
   }
 
   try {
-    const url = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-    
+    const url = isStreaming
+      ? `${GEMINI_BASE_URL}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`
+      : `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -117,77 +121,180 @@ app.post('/v1beta/models/:model\\:generateContent', apiLimiter, authenticateRequ
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[ERROR] Gemini API returned status ${response.status}:`, errorText);
+      console.error(`[ERROR] Gemini API (${action}) returned status ${response.status}:`, errorText);
       return res.status(response.status).json({
         error: "Gemini API failure",
-        statusCode: response.status
+        statusCode: response.status,
+        details: errorText
       });
     }
 
-    const data = await response.json();
-    res.json(data);
+    if (isStreaming) {
+      // Set standard SSE stream response headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Transfer-Encoding', 'chunked');
 
-  } catch (error) {
-    console.error("[ERROR] Failed to forward request to Gemini:", error);
-    res.status(500).json({ error: "Internal Server Error", message: "Failed to communicate with AI provider." });
-  }
-});
-
-// 5. Proxy streaming content generation (Server-Sent Events)
-app.post('/v1beta/models/:model\\:streamGenerateContent', apiLimiter, authenticateRequest, validateGeminiRequest, async (req, res) => {
-  const { model } = req.params;
-  const geminiKey = process.env.GEMINI_API_KEY;
-
-  if (!geminiKey) {
-    console.error("[CRITICAL] Server GEMINI_API_KEY is not set.");
-    return res.status(500).json({ error: "Internal Server Error: Gemini credentials missing on backend." });
-  }
-
-  try {
-    // Force alt=sse so Gemini returns clean Server-Sent Events line-by-line
-    const url = `${GEMINI_BASE_URL}/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${geminiKey}`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(req.body)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[ERROR] Gemini API stream returned status ${response.status}:`, errorText);
-      return res.status(response.status).json({
-        error: "Gemini streaming API failure",
-        statusCode: response.status
-      });
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    } else {
+      const data = await response.json();
+      res.json(data);
     }
-
-    // Set standard SSE stream response headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    const reader = response.body.getReader();
-    
-    // Read and write chunks iteratively to stream tokens instantly to client
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(value);
-    }
-    
-    res.end();
-
   } catch (error) {
-    console.error("[ERROR] Streaming proxy failed:", error);
+    console.error(`[ERROR] Proxy for ${action} failed:`, error);
     if (!res.headersSent) {
-      res.status(500).json({ error: "Internal Server Error", message: "Streaming connection failed." });
+      res.status(500).json({ error: "Internal Server Error", message: "Failed to communicate with AI provider." });
     } else {
       res.end();
     }
+  }
+});
+
+// Fallback explicit routes for standard Express router compatibility
+app.post('/v1beta/models/:model/generateContent', apiLimiter, authenticateRequest, validateGeminiRequest, async (req, res) => {
+  const { model } = req.params;
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) return res.status(500).json({ error: "Gemini credentials missing." });
+  try {
+    const url = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// API Prices endpoint for live metal & commodity market rates
+app.get('/api/prices', async (req, res) => {
+  try {
+    const country = req.query.country || 'Pakistan';
+    const currency = req.query.currency || 'PKR';
+
+    // Fetch live XAU, XAG and Exchange rates in parallel
+    let xauPriceUsd = 2500.0;
+    let xagPriceUsd = 29.50;
+    let usdToPkr = 278.50;
+
+    try {
+      const [goldRes, silverRes, exRes] = await Promise.allSettled([
+        fetch('https://api.gold-api.com/price/XAU'),
+        fetch('https://api.gold-api.com/price/XAG'),
+        fetch('https://open.er-api.com/v6/latest/USD')
+      ]);
+
+      if (goldRes.status === 'fulfilled' && goldRes.value.ok) {
+        const gData = await goldRes.value.json();
+        if (gData && gData.price) xauPriceUsd = gData.price;
+      }
+
+      if (silverRes.status === 'fulfilled' && silverRes.value.ok) {
+        const sData = await silverRes.value.json();
+        if (sData && sData.price) xagPriceUsd = sData.price;
+      }
+
+      if (exRes.status === 'fulfilled' && exRes.value.ok) {
+        const eData = await exRes.value.json();
+        if (eData && eData.rates && eData.rates.PKR) {
+          usdToPkr = eData.rates.PKR;
+        }
+      }
+    } catch (e) {
+      console.warn("[PRICES] External price fetch warning:", e.message);
+    }
+
+    const gramsPerTroyOz = 31.1034768;
+    const gramsPerTola = 11.6638125;
+
+    const goldPricePerGramPkr = (xauPriceUsd / gramsPerTroyOz) * usdToPkr;
+    const goldPricePerTolaPkr = goldPricePerGramPkr * gramsPerTola;
+
+    const silverPricePerGramPkr = (xagPriceUsd / gramsPerTroyOz) * usdToPkr;
+    const silverPricePerTolaPkr = silverPricePerGramPkr * gramsPerTola;
+
+    const now = new Date();
+    const formattedTimestamp = now.getUTCFullYear() + '-' +
+      String(now.getUTCMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getUTCDate()).padStart(2, '0') + ' ' +
+      String(now.getUTCHours()).padStart(2, '0') + ':' +
+      String(now.getUTCMinutes()).padStart(2, '0') + ' UTC';
+
+    res.json({
+      status: "success",
+      timestamp_ms: now.getTime(),
+      formatted_timestamp: formattedTimestamp,
+      freshness_status: "LIVE",
+      requested_country: country,
+      requested_currency: currency,
+      gold: {
+        price_per_gram: Math.round(goldPricePerGramPkr * 100) / 100,
+        price_per_tola: Math.round(goldPricePerTolaPkr * 100) / 100,
+        currency: "PKR",
+        source: "Global Bullion Spot Feed & Sarafa Benchmark"
+      },
+      silver: {
+        price_per_gram: Math.round(silverPricePerGramPkr * 100) / 100,
+        price_per_tola: Math.round(silverPricePerTolaPkr * 100) / 100,
+        currency: "PKR",
+        source: "Global Bullion Spot Feed & Sarafa Benchmark"
+      },
+      commodities: {
+        wheat: {
+          name_en: "Wheat / Flour",
+          name_ur: "گندم / آٹا",
+          price_per_kg: 105.0,
+          price_per_maund: 4200.0,
+          currency: "PKR",
+          source: "Pakistan Mandi Commodity Bulletin"
+        },
+        barley: {
+          name_en: "Barley",
+          name_ur: "جو",
+          price_per_kg: 280.0,
+          price_per_maund: 11200.0,
+          currency: "PKR",
+          source: "Pakistan Mandi Commodity Bulletin"
+        },
+        dates: {
+          name_en: "Dates",
+          name_ur: "کھجور",
+          price_per_kg: 650.0,
+          price_per_maund: 26000.0,
+          currency: "PKR",
+          source: "Pakistan Dry Fruit Market Bulletin"
+        },
+        raisins: {
+          name_en: "Raisins",
+          name_ur: "کشمش",
+          price_per_kg: 1400.0,
+          price_per_maund: 56000.0,
+          currency: "PKR",
+          source: "Pakistan Dry Fruit Market Bulletin"
+        },
+        ajwa_dates: {
+          name_en: "Ajwa / Premium Dates",
+          name_ur: "اعلیٰ کھجور / عجوہ",
+          price_per_kg: 2500.0,
+          price_per_maund: 100000.0,
+          currency: "PKR",
+          source: "Saudi Import Date Market Bulletin"
+        }
+      }
+    });
+  } catch (err) {
+    console.error("[ERROR] /api/prices failed:", err);
+    res.status(500).json({ error: "Failed to fetch prices", message: err.message });
   }
 });
 

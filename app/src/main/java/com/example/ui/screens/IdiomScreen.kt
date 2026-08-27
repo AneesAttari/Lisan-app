@@ -55,6 +55,10 @@ fun IdiomScreen(viewModel: LisanViewModel) {
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
 
+    LaunchedEffect(Unit) {
+        viewModel.ensureIdiomsLoaded()
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -136,8 +140,9 @@ fun IdiomScreen(viewModel: LisanViewModel) {
 
         // Popular Chips (Horizontal)
         if (searchQuery.isBlank()) {
+            val popularToday = remember(filteredIdioms) { com.example.data.repository.IdiomRepository.getPopularToday5() }
             Text(
-                text = "Popular today",
+                text = "Popular today (Calendar Daily 5)",
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 color = MaterialTheme.colorScheme.primary
@@ -147,11 +152,50 @@ fun IdiomScreen(viewModel: LisanViewModel) {
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val popular = listOf("Break the ice", "Piece of cake", "Under the weather")
-                items(popular) { term ->
-                    SuggestionChip(
-                        onClick = { viewModel.setIdiomSearchQuery(term) },
-                        label = { Text(term) }
+                items(popularToday) { item ->
+                    FilterChip(
+                        selected = false,
+                        onClick = { viewModel.setIdiomSearchQuery(item.expression) },
+                        label = { Text(item.expression) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Star,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Categories Row
+            val selectedCategory by viewModel.selectedIdiomCategory.collectAsState()
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = selectedCategory == null,
+                        onClick = { viewModel.setIdiomCategoryFilter(null) },
+                        label = { Text("All Categories") }
+                    )
+                }
+                items(IdiomCategory.values()) { category ->
+                    FilterChip(
+                        selected = selectedCategory == category,
+                        onClick = {
+                            if (selectedCategory == category) {
+                                viewModel.setIdiomCategoryFilter(null)
+                            } else {
+                                viewModel.setIdiomCategoryFilter(category)
+                            }
+                        },
+                        label = { Text(category.label) }
                     )
                 }
             }

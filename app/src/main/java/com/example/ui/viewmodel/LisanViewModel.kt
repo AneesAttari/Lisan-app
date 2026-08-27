@@ -45,6 +45,9 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("lisan_prefs", Context.MODE_PRIVATE)
     private val _userName = MutableStateFlow(prefs.getString("user_name", "Learner") ?: "Learner")
     val userName: StateFlow<String> = _userName.asStateFlow()
+
+    private val _geminiApiKey = MutableStateFlow(prefs.getString("user_gemini_api_key", "") ?: "")
+    val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
     private val database = AppDatabase.getDatabase(application)
     private val savedIdiomRepository = SavedIdiomRepository(database.savedIdiomDao())
     private val libraryRepository = com.example.data.repository.LibraryRepository(database.libraryDao(), database.likedDao(), database.dislikedDao(), database.feedbackDao())
@@ -110,13 +113,6 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _todayAssignment = MutableStateFlow<DailyQuizAssignmentEntity?>(null)
     val todayAssignment: StateFlow<DailyQuizAssignmentEntity?> = _todayAssignment.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            val userId = "current_user" // Assume a fixed user for now
-            _dailyChallengeProgress.value = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
-        }
-    }
-
     private val _currentSession = MutableStateFlow<RevisionSessionEntity?>(null)
     val currentSession: StateFlow<RevisionSessionEntity?> = _currentSession.asStateFlow()
 
@@ -164,10 +160,6 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            lisanJourneyRepository.initializeDefinitionsIfNeeded()
-            loadLast7DaysActivity()
-        }
-        viewModelScope.launch {
             authState.collect { state ->
                 val name = when (state) {
                     is AuthState.LoggedIn -> state.user.displayName
@@ -186,27 +178,42 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            var lastReminderEnabled: Boolean? = null
+            var lastReminderHour: Int? = null
+            var lastReminderMinute: Int? = null
+
             userSettings.collect { settings ->
                 _isSettingsLoaded.value = true
                 ttsManager.applySpeakerPreset(settings.selectedSpeaker)
                 ttsManager.setPlaybackSpeed(settings.speechRate)
                 ttsManager.setPitch(settings.pitch)
 
-                // Schedule / cancel WorkManager daily reminder
-                if (settings.dailyReminderEnabled) {
-                    com.example.utils.RevisionReminderScheduler.scheduleDailyReminder(
-                        getApplication(),
-                        settings.reminderHour,
-                        settings.reminderMinute
-                    )
-                } else {
-                    com.example.utils.RevisionReminderScheduler.cancelDailyReminder(getApplication())
-                }
+                val customKey = settings.userApiKey?.trim() ?: ""
+                _geminiApiKey.value = customKey
+                RetrofitClient.setCustomApiKey(customKey)
 
-                if (settings.dailyChallengeReminderEnabled) {
-                    com.example.utils.RevisionReminderScheduler.scheduleDailyChallengeReminder(getApplication())
-                } else {
-                    com.example.utils.RevisionReminderScheduler.cancelDailyChallengeReminder(getApplication())
+                val reminderConfigChanged = (lastReminderEnabled != settings.dailyReminderEnabled) ||
+                        (lastReminderHour != settings.reminderHour) ||
+                        (lastReminderMinute != settings.reminderMinute)
+
+                if (reminderConfigChanged) {
+                    lastReminderEnabled = settings.dailyReminderEnabled
+                    lastReminderHour = settings.reminderHour
+                    lastReminderMinute = settings.reminderMinute
+
+                    try {
+                        if (settings.dailyReminderEnabled) {
+                            com.example.utils.RevisionReminderScheduler.scheduleDailyReminder(
+                                getApplication(),
+                                settings.reminderHour,
+                                settings.reminderMinute
+                            )
+                        } else {
+                            com.example.utils.RevisionReminderScheduler.cancelDailyReminder(getApplication())
+                        }
+                    } catch (t: Throwable) {
+                        Log.e("LisanViewModel", "Error updating daily reminder schedule", t)
+                    }
                 }
             }
         }
@@ -1293,9 +1300,6 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _effectiveResponseLanguage = MutableStateFlow("English")
     val effectiveResponseLanguage: StateFlow<String> = _effectiveResponseLanguage.asStateFlow()
 
-    private val _geminiApiKey = MutableStateFlow(prefs.getString("user_gemini_api_key", "") ?: "")
-    val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
-
     fun setUserName(name: String) {
         _userName.value = name
         prefs.edit().putString("user_name", name).apply()
@@ -1524,6 +1528,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         _effectiveResponseLanguage.value = effective
 
         viewModelScope.launch {
+            var streamingMessageIndex = -1
             try {
                 if (!isRetry) {
                     chatMessageRepository.saveMessage("user", message, imageUri)
@@ -1720,7 +1725,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     }
                 }
 
-                val streamingMessageIndex = _chatHistory.value.size
+                streamingMessageIndex = _chatHistory.value.size
                 val placeholderContent = com.example.data.model.Content(
                     role = "model",
                     parts = listOf(com.example.data.model.Part(text = ""))
@@ -1834,37 +1839,35 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                 }
             } catch (e: Exception) {
                 Log.e("LisanViewModel", "BYOK_REQUEST_ERROR: ${e.message}", e)
-                val lastHistory = _chatHistory.value
-                if (lastHistory.isNotEmpty() && lastHistory.last().parts.firstOrNull()?.text.isNullOrBlank() && lastHistory.last().role == "model") {
-                    _chatHistory.value = lastHistory.dropLast(1)
-                }
-
-                val msg = e.message ?: ""
-                val isQuotaOrAuthError = msg.contains("429") || msg.contains("403") || msg.contains("401") ||
-                        msg.contains("Quota") || msg.contains("RESOURCE_EXHAUSTED") || msg.contains("limit") ||
-                        msg.contains("quota") || msg.contains("API key") || msg.contains("API_KEY_INVALID") ||
-                        msg.contains("exhausted") || msg.contains("limit/rate-limit") || msg.contains("access denied") ||
-                        (e is retrofit2.HttpException && (e.code() == 429 || e.code() == 401 || e.code() == 403))
-
-                val isServiceUnavailable = msg.contains("503") || (e is retrofit2.HttpException && e.code() == 503)
-
-                if (isQuotaOrAuthError && !hasCustomUserApiKey()) {
-                    _isApiKeyFallbackNeeded.value = true
-                    pendingMessageText = message
-                    pendingImageUri = imageUri
-                    pendingIsCreateImage = isCreateImage
-
-                    _chatError.value = "Your AI access is currently unavailable. Please add your own API key to continue."
-                    _showApiKeyGuideModal.value = true
-                } else if (isQuotaOrAuthError && hasCustomUserApiKey()) {
-                    _chatError.value = "API Key Error: Please verify that your custom Gemini API key is valid and has remaining quota."
-                } else if (isServiceUnavailable) {
-                    _chatError.value = "Lisan AI service is temporarily unavailable due to high server demand (HTTP 503). Please retry in a moment, or add your personal Gemini API key under Settings to bypass shared capacity."
-                } else if (msg.contains("Gemini service is not configured") || msg.contains("API Key is missing")) {
-                    _chatError.value = "Gemini service is not configured. Please configure your personal API Key under Settings, or set up a secure backend proxy URL."
+                val errorMessage = if (e.message?.contains("API key", ignoreCase = true) == true || e.message?.contains("403") == true || e.message?.contains("401") == true) {
+                    "براہ کرم سیٹنگز میں جا کر اپنی درست Gemini API کی درج کریں، یا انٹرنیٹ کنکشن چیک کریں۔\n(Please check your Gemini API key in Settings or your internet connection.)"
                 } else {
-                    _chatError.value = "Error: ${e.message ?: "Failed to get response. Please check your connection."}"
+                    "رابطہ قائم نہیں ہو سکا (${e.localizedMessage ?: "Connection error"}). براہ کرم دوبارہ کوشش کریں۔\n(Could not reach AI tutor. Please check your connection and try again.)"
                 }
+                val modelContent = com.example.data.model.Content(
+                    role = "model",
+                    parts = listOf(com.example.data.model.Part(text = errorMessage)),
+                    debugMetadata = com.example.data.model.TutorDebugMetadata(
+                        requestId = "req_error",
+                        submittedMessage = message,
+                        provider = "Lisan Network Engine",
+                        modelName = "error",
+                        endpointCalled = "gemini-error",
+                        httpStatus = "Error",
+                        source = "error",
+                        responseId = "res-" + java.util.UUID.randomUUID().toString().take(12),
+                        errorMessage = e.message
+                    )
+                )
+                val currentHistory = _chatHistory.value.toMutableList()
+                if (streamingMessageIndex in currentHistory.indices) {
+                    currentHistory[streamingMessageIndex] = modelContent
+                    _chatHistory.value = currentHistory
+                } else {
+                    _chatHistory.value = currentHistory + modelContent
+                }
+                chatMessageRepository.saveMessage("model", errorMessage)
+                saveCurrentSessionToHistory()
             } finally {
                 _isChatLoading.value = false
                 synchronized(this@LisanViewModel) {
@@ -2546,7 +2549,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     fun toggleDailyNotification(enabled: Boolean, context: Context) {
         _isDailyNotificationEnabled.value = enabled
         prefs.edit().putBoolean("daily_notification_enabled", enabled).apply()
-        if (enabled) NotificationHelper.showDailyReminderNotification(context)
+        updateUserSettings { it.copy(dailyReminderEnabled = enabled) }
     }
 
     // --- TTS Manager ---
@@ -2953,29 +2956,108 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         }
     }
 
+    private val isLowRam = com.example.utils.DeviceCapabilityHelper.isLowRamDevice(application)
+
+    private val _isLoadingRevisionPlanner = MutableStateFlow(false)
+    val isLoadingRevisionPlanner: StateFlow<Boolean> = _isLoadingRevisionPlanner.asStateFlow()
+
+    @Volatile
+    private var hasLoadedChatHistory = false
+    @Volatile
+    private var hasLoadedDailyActivities = false
+    @Volatile
+    private var hasLoadedRevisionPlanner = false
+    @Volatile
+    private var hasLoadedProgressDashboard = false
+    @Volatile
+    private var hasLoadedIdioms = false
+
     init {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            com.example.data.repository.IdiomRepository.initialize(application)
-        }
         val savedApiKey = prefs.getString("user_gemini_api_key", "") ?: ""
         if (savedApiKey.isNotBlank()) {
             RetrofitClient.setCustomApiKey(savedApiKey)
             viewModelScope.launch { settingsRepository.updateSettings { it.copy(userApiKey = savedApiKey) } }
         }
+
+        if (!isLowRam) {
+            // High-RAM / capable devices: Eagerly pre-warm repositories and initialize in the background
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.data.repository.IdiomRepository.initialize(application)
+            }
+            loadDailyChallenge()
+            loadDailyVerb()
+            observeDailyChallengeResults()
+            loadStoredChatHistory()
+            loadLisanDaily()
+            loadAchievementsList()
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                revisionRepository.seedQuestionBankIfNeeded()
+                loadRevisionDashboard()
+            }
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                lisanJourneyRepository.initializeDefinitionsIfNeeded()
+                loadLast7DaysActivity()
+            }
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val userId = "current_user"
+                _dailyChallengeProgress.value = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
+            }
+            RetrofitClient.triggerPreWarm(application)
+        }
+    }
+
+    fun ensureChatHistoryLoaded() {
+        if (hasLoadedChatHistory && _chatHistory.value.isNotEmpty()) return
+        hasLoadedChatHistory = true
+        loadStoredChatHistory()
+    }
+
+    fun ensureRevisionPlannerLoaded() {
+        if (hasLoadedRevisionPlanner && _dashboardSummary.value != null) return
+        hasLoadedRevisionPlanner = true
+        _isLoadingRevisionPlanner.value = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                revisionRepository.seedQuestionBankIfNeeded()
+                _dashboardSummary.value = revisionRepository.getDashboardSummary()
+            } finally {
+                _isLoadingRevisionPlanner.value = false
+            }
+        }
+    }
+
+    fun ensureLisanDailyLoaded(dateKey: String = _selectedDailyDate.value) {
+        if (hasLoadedDailyActivities && _dailyChallengeState.value != DailyChallengeState.LOADING && _dailyVerb.value != null) return
+        hasLoadedDailyActivities = true
         loadDailyChallenge()
         loadDailyVerb()
         observeDailyChallengeResults()
-        loadStoredChatHistory()
-        loadLisanDaily()
+        loadLisanDaily(dateKey)
+    }
+
+    fun ensureProgressDashboardLoaded() {
+        if (hasLoadedProgressDashboard && _last7DaysActivity.value.isNotEmpty()) return
+        hasLoadedProgressDashboard = true
+        loadLast7DaysActivity()
         loadAchievementsList()
+    }
+
+    fun ensureIdiomsLoaded() {
+        if (hasLoadedIdioms && com.example.data.repository.IdiomRepository.idioms.isNotEmpty()) return
+        hasLoadedIdioms = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            revisionRepository.seedQuestionBankIfNeeded()
-            loadRevisionDashboard()
+            com.example.data.repository.IdiomRepository.initialize(getApplication())
+        }
+    }
+
+    fun ensureDailyChallengeProgressLoaded(userId: String = "current_user") {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _dailyChallengeProgress.value = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
         }
     }
 
     fun loadRevisionDashboard() {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _dashboardSummary.value = revisionRepository.getDashboardSummary()
         }
     }
@@ -3238,6 +3320,556 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
             Log.e("LisanViewModel", "Manual PDF generation failed: ${e.message}", e)
             null
         }
+    }
+
+    // --- Haq Mehr / Islamic Calculator State & Actions (International) ---
+    private val _islamicCalculatorTab = MutableStateFlow(IslamicCalculatorTab.HAQ_MEHR)
+    val islamicCalculatorTab: StateFlow<IslamicCalculatorTab> = _islamicCalculatorTab.asStateFlow()
+
+    private val _silverRateState = MutableStateFlow<SilverRateUiState>(SilverRateUiState.Idle)
+    val silverRateState: StateFlow<SilverRateUiState> = _silverRateState.asStateFlow()
+
+    private val _goldRateState = MutableStateFlow<GoldRateUiState>(GoldRateUiState.Idle)
+    val goldRateState: StateFlow<GoldRateUiState> = _goldRateState.asStateFlow()
+
+    private val _commodityPricesState = MutableStateFlow<CommodityPricesUiState>(CommodityPricesUiState.Idle)
+    val commodityPricesState: StateFlow<CommodityPricesUiState> = _commodityPricesState.asStateFlow()
+
+    private val _silverAmountInput = MutableStateFlow("")
+    val silverAmountInput: StateFlow<String> = _silverAmountInput.asStateFlow()
+
+    private val _silverUnit = MutableStateFlow(SilverUnit.TOLA)
+    val silverUnit: StateFlow<SilverUnit> = _silverUnit.asStateFlow()
+
+    private val _silverPurity = MutableStateFlow(SilverPurity.FINE_999)
+    val silverPurity: StateFlow<SilverPurity> = _silverPurity.asStateFlow()
+
+    private val _selectedHaqMehrPreset = MutableStateFlow<HaqMehrPreset?>(null)
+    val selectedHaqMehrPreset: StateFlow<HaqMehrPreset?> = _selectedHaqMehrPreset.asStateFlow()
+
+    private val _isCustomRateMode = MutableStateFlow(false)
+    val isCustomRateMode: StateFlow<Boolean> = _isCustomRateMode.asStateFlow()
+
+    private val _customRateInput = MutableStateFlow("")
+    val customRateInput: StateFlow<String> = _customRateInput.asStateFlow()
+
+    private val _selectedCountry = MutableStateFlow(prefs.getString("haq_mehr_country", "Pakistan") ?: "Pakistan")
+    val selectedCountry: StateFlow<String> = _selectedCountry.asStateFlow()
+
+    private val _selectedCity = MutableStateFlow(prefs.getString("haq_mehr_city", "Multan") ?: "Multan")
+    val selectedCity: StateFlow<String> = _selectedCity.asStateFlow()
+
+    private val _selectedCurrency = MutableStateFlow(prefs.getString("haq_mehr_currency", "PKR") ?: "PKR")
+    val selectedCurrency: StateFlow<String> = _selectedCurrency.asStateFlow()
+
+    private val _selectedCurrencySymbol = MutableStateFlow(prefs.getString("haq_mehr_currency_symbol", "Rs.") ?: "Rs.")
+    val selectedCurrencySymbol: StateFlow<String> = _selectedCurrencySymbol.asStateFlow()
+
+    private val _isLocationGpsDetected = MutableStateFlow(prefs.getBoolean("haq_mehr_location_is_gps", false))
+    val isLocationGpsDetected: StateFlow<Boolean> = _isLocationGpsDetected.asStateFlow()
+
+    private val _isDetectingLocation = MutableStateFlow(false)
+    val isDetectingLocation: StateFlow<Boolean> = _isDetectingLocation.asStateFlow()
+
+    // --- Zakat Calculator State ---
+    private val _zakatCashInput = MutableStateFlow("")
+    val zakatCashInput: StateFlow<String> = _zakatCashInput.asStateFlow()
+
+    private val _zakatBankBalanceInput = MutableStateFlow("")
+    val zakatBankBalanceInput: StateFlow<String> = _zakatBankBalanceInput.asStateFlow()
+
+    private val _zakatSilverAmountInput = MutableStateFlow("")
+    val zakatSilverAmountInput: StateFlow<String> = _zakatSilverAmountInput.asStateFlow()
+
+    private val _zakatSilverUnit = MutableStateFlow(SilverUnit.TOLA)
+    val zakatSilverUnit: StateFlow<SilverUnit> = _zakatSilverUnit.asStateFlow()
+
+    private val _zakatGoldAmountInput = MutableStateFlow("")
+    val zakatGoldAmountInput: StateFlow<String> = _zakatGoldAmountInput.asStateFlow()
+
+    private val _zakatGoldUnit = MutableStateFlow(GoldUnit.TOLA)
+    val zakatGoldUnit: StateFlow<GoldUnit> = _zakatGoldUnit.asStateFlow()
+
+    private val _zakatGoldPurity = MutableStateFlow(GoldPurity.K24_FINE)
+    val zakatGoldPurity: StateFlow<GoldPurity> = _zakatGoldPurity.asStateFlow()
+
+    private val _zakatBusinessStockInput = MutableStateFlow("")
+    val zakatBusinessStockInput: StateFlow<String> = _zakatBusinessStockInput.asStateFlow()
+
+    private val _zakatInvestmentsInput = MutableStateFlow("")
+    val zakatInvestmentsInput: StateFlow<String> = _zakatInvestmentsInput.asStateFlow()
+
+    private val _zakatReceivablesInput = MutableStateFlow("")
+    val zakatReceivablesInput: StateFlow<String> = _zakatReceivablesInput.asStateFlow()
+
+    private val _zakatLiabilitiesInput = MutableStateFlow("")
+    val zakatLiabilitiesInput: StateFlow<String> = _zakatLiabilitiesInput.asStateFlow()
+
+    private val _zakatOtherDeductibleInput = MutableStateFlow("")
+    val zakatOtherDeductibleInput: StateFlow<String> = _zakatOtherDeductibleInput.asStateFlow()
+
+    private val _zakatHasPassedHawl = MutableStateFlow(true)
+    val zakatHasPassedHawl: StateFlow<Boolean> = _zakatHasPassedHawl.asStateFlow()
+
+    private val _zakatNisabStandard = MutableStateFlow(ZakatNisabStandard.SILVER)
+    val zakatNisabStandard: StateFlow<ZakatNisabStandard> = _zakatNisabStandard.asStateFlow()
+
+    private val _isZakatCustomRateMode = MutableStateFlow(false)
+    val isZakatCustomRateMode: StateFlow<Boolean> = _isZakatCustomRateMode.asStateFlow()
+
+    private val _zakatCustomGoldRate = MutableStateFlow("")
+    val zakatCustomGoldRate: StateFlow<String> = _zakatCustomGoldRate.asStateFlow()
+
+    private val _zakatCustomSilverRate = MutableStateFlow("")
+    val zakatCustomSilverRate: StateFlow<String> = _zakatCustomSilverRate.asStateFlow()
+
+    // --- Haq Mehr Advanced State ---
+    private val _haqMehrMetalType = MutableStateFlow(HaqMehrMetalType.SILVER)
+    val haqMehrMetalType: StateFlow<HaqMehrMetalType> = _haqMehrMetalType.asStateFlow()
+
+    private val _haqMehrGoldAmountInput = MutableStateFlow("")
+    val haqMehrGoldAmountInput: StateFlow<String> = _haqMehrGoldAmountInput.asStateFlow()
+
+    private val _haqMehrGoldUnit = MutableStateFlow(GoldUnit.TOLA)
+    val haqMehrGoldUnit: StateFlow<GoldUnit> = _haqMehrGoldUnit.asStateFlow()
+
+    private val _haqMehrGoldPurity = MutableStateFlow(GoldPurity.K24_FINE)
+    val haqMehrGoldPurity: StateFlow<GoldPurity> = _haqMehrGoldPurity.asStateFlow()
+
+    private val _haqMehrPromptPercent = MutableStateFlow("100")
+    val haqMehrPromptPercent: StateFlow<String> = _haqMehrPromptPercent.asStateFlow()
+
+    // --- Fitrana Calculator State ---
+    private val _fitranaCommodity = MutableStateFlow(FitranaCommodity.WHEAT)
+    val fitranaCommodity: StateFlow<FitranaCommodity> = _fitranaCommodity.asStateFlow()
+
+    private val _fitranaPersonsCount = MutableStateFlow("1")
+    val fitranaPersonsCount: StateFlow<String> = _fitranaPersonsCount.asStateFlow()
+
+    private val _fitranaAdultsCount = MutableStateFlow("1")
+    val fitranaAdultsCount: StateFlow<String> = _fitranaAdultsCount.asStateFlow()
+
+    private val _fitranaMinorsCount = MutableStateFlow("0")
+    val fitranaMinorsCount: StateFlow<String> = _fitranaMinorsCount.asStateFlow()
+
+    private val _fitranaCustomPricePerKg = MutableStateFlow("")
+    val fitranaCustomPricePerKg: StateFlow<String> = _fitranaCustomPricePerKg.asStateFlow()
+
+    // --- Ushr Calculator State ---
+    private val _ushrProduceAmount = MutableStateFlow("")
+    val ushrProduceAmount: StateFlow<String> = _ushrProduceAmount.asStateFlow()
+
+    private val _ushrProduceUnit = MutableStateFlow(UshrProduceUnit.MAUND)
+    val ushrProduceUnit: StateFlow<UshrProduceUnit> = _ushrProduceUnit.asStateFlow()
+
+    private val _ushrIrrigationType = MutableStateFlow(UshrIrrigationType.NATURAL)
+    val ushrIrrigationType: StateFlow<UshrIrrigationType> = _ushrIrrigationType.asStateFlow()
+
+    private val _ushrCropCategory = MutableStateFlow(UshrCropCategory.GRAINS)
+    val ushrCropCategory: StateFlow<UshrCropCategory> = _ushrCropCategory.asStateFlow()
+
+    private val _ushrMarketPricePerUnit = MutableStateFlow("")
+    val ushrMarketPricePerUnit: StateFlow<String> = _ushrMarketPricePerUnit.asStateFlow()
+
+    fun setIslamicCalculatorTab(tab: IslamicCalculatorTab) {
+        _islamicCalculatorTab.value = tab
+    }
+
+    fun setHaqMehrMetalType(metal: HaqMehrMetalType) {
+        _haqMehrMetalType.value = metal
+    }
+
+    fun setHaqMehrGoldAmountInput(amount: String) {
+        _haqMehrGoldAmountInput.value = amount
+    }
+
+    fun setHaqMehrGoldUnit(unit: GoldUnit) {
+        _haqMehrGoldUnit.value = unit
+    }
+
+    fun setHaqMehrGoldPurity(purity: GoldPurity) {
+        _haqMehrGoldPurity.value = purity
+    }
+
+    fun setHaqMehrPromptPercent(percent: String) {
+        _haqMehrPromptPercent.value = percent
+    }
+
+    fun setZakatCashInput(amount: String) {
+        _zakatCashInput.value = amount
+    }
+
+    fun setZakatBankBalanceInput(amount: String) {
+        _zakatBankBalanceInput.value = amount
+    }
+
+    fun setZakatSilverAmountInput(amount: String) {
+        _zakatSilverAmountInput.value = amount
+    }
+
+    fun setZakatSilverUnit(unit: SilverUnit) {
+        _zakatSilverUnit.value = unit
+    }
+
+    fun setZakatGoldAmountInput(amount: String) {
+        _zakatGoldAmountInput.value = amount
+    }
+
+    fun setZakatGoldUnit(unit: GoldUnit) {
+        _zakatGoldUnit.value = unit
+    }
+
+    fun setZakatGoldPurity(purity: GoldPurity) {
+        _zakatGoldPurity.value = purity
+    }
+
+    fun setZakatBusinessStockInput(amount: String) {
+        _zakatBusinessStockInput.value = amount
+    }
+
+    fun setZakatInvestmentsInput(amount: String) {
+        _zakatInvestmentsInput.value = amount
+    }
+
+    fun setZakatReceivablesInput(amount: String) {
+        _zakatReceivablesInput.value = amount
+    }
+
+    fun setZakatLiabilitiesInput(amount: String) {
+        _zakatLiabilitiesInput.value = amount
+    }
+
+    fun setZakatOtherDeductibleInput(amount: String) {
+        _zakatOtherDeductibleInput.value = amount
+    }
+
+    fun setZakatHasPassedHawl(passed: Boolean) {
+        _zakatHasPassedHawl.value = passed
+    }
+
+    fun setZakatNisabStandard(standard: ZakatNisabStandard) {
+        _zakatNisabStandard.value = standard
+    }
+
+    fun setZakatCustomRateMode(enabled: Boolean) {
+        _isZakatCustomRateMode.value = enabled
+    }
+
+    fun setZakatCustomGoldRate(rate: String) {
+        _zakatCustomGoldRate.value = rate
+    }
+
+    fun setZakatCustomSilverRate(rate: String) {
+        _zakatCustomSilverRate.value = rate
+    }
+
+    fun setFitranaCommodity(commodity: FitranaCommodity) {
+        _fitranaCommodity.value = commodity
+    }
+
+    fun setFitranaPersonsCount(count: String) {
+        _fitranaPersonsCount.value = count
+    }
+
+    fun setFitranaAdultsCount(count: String) {
+        _fitranaAdultsCount.value = count
+    }
+
+    fun setFitranaMinorsCount(count: String) {
+        _fitranaMinorsCount.value = count
+    }
+
+    fun setFitranaCustomPricePerKg(price: String) {
+        _fitranaCustomPricePerKg.value = price
+    }
+
+    fun setUshrProduceAmount(amount: String) {
+        _ushrProduceAmount.value = amount
+    }
+
+    fun setUshrProduceUnit(unit: UshrProduceUnit) {
+        _ushrProduceUnit.value = unit
+    }
+
+    fun setUshrIrrigationType(type: UshrIrrigationType) {
+        _ushrIrrigationType.value = type
+    }
+
+    fun setUshrCropCategory(category: UshrCropCategory) {
+        _ushrCropCategory.value = category
+    }
+
+    fun setUshrMarketPricePerUnit(price: String) {
+        _ushrMarketPricePerUnit.value = price
+    }
+
+    fun resetHaqMehr() {
+        _silverAmountInput.value = ""
+        _haqMehrGoldAmountInput.value = ""
+        _selectedHaqMehrPreset.value = null
+        _customRateInput.value = ""
+        _isCustomRateMode.value = false
+        _haqMehrPromptPercent.value = "100"
+    }
+
+    fun resetZakat() {
+        _zakatCashInput.value = ""
+        _zakatBankBalanceInput.value = ""
+        _zakatSilverAmountInput.value = ""
+        _zakatGoldAmountInput.value = ""
+        _zakatBusinessStockInput.value = ""
+        _zakatInvestmentsInput.value = ""
+        _zakatReceivablesInput.value = ""
+        _zakatLiabilitiesInput.value = ""
+        _zakatOtherDeductibleInput.value = ""
+        _zakatCustomGoldRate.value = ""
+        _zakatCustomSilverRate.value = ""
+        _isZakatCustomRateMode.value = false
+        _zakatHasPassedHawl.value = true
+    }
+
+    fun resetFitrana() {
+        _fitranaCommodity.value = FitranaCommodity.WHEAT
+        _fitranaPersonsCount.value = "1"
+        _fitranaAdultsCount.value = "1"
+        _fitranaMinorsCount.value = "0"
+        _fitranaCustomPricePerKg.value = ""
+    }
+
+    fun resetUshr() {
+        _ushrProduceAmount.value = ""
+        _ushrProduceUnit.value = UshrProduceUnit.MAUND
+        _ushrIrrigationType.value = UshrIrrigationType.NATURAL
+        _ushrCropCategory.value = UshrCropCategory.GRAINS
+        _ushrMarketPricePerUnit.value = ""
+    }
+
+    fun detectLocationFromGps(context: Context, onLocationDetected: ((com.example.utils.LocationDetectionResult) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isDetectingLocation.value = true
+            val detected = com.example.utils.CityLocationHelper.detectLocation(context)
+            _isDetectingLocation.value = false
+            if (detected != null) {
+                _selectedCountry.value = detected.country
+                _selectedCity.value = detected.city
+                _selectedCurrency.value = detected.currency
+                _selectedCurrencySymbol.value = detected.currencySymbol
+                _isLocationGpsDetected.value = true
+                
+                // Adjust default unit for international users
+                if (!detected.country.equals("Pakistan", ignoreCase = true) && !detected.country.equals("India", ignoreCase = true)) {
+                    if (_silverUnit.value == SilverUnit.TOLA) {
+                        setSilverUnit(SilverUnit.GRAMS)
+                    }
+                    if (_zakatSilverUnit.value == SilverUnit.TOLA) {
+                        setZakatSilverUnit(SilverUnit.GRAMS)
+                    }
+                    if (_zakatGoldUnit.value == GoldUnit.TOLA) {
+                        setZakatGoldUnit(GoldUnit.GRAMS)
+                    }
+                }
+
+                prefs.edit()
+                    .putString("haq_mehr_country", detected.country)
+                    .putString("haq_mehr_city", detected.city)
+                    .putString("haq_mehr_currency", detected.currency)
+                    .putString("haq_mehr_currency_symbol", detected.currencySymbol)
+                    .putBoolean("haq_mehr_location_is_gps", true)
+                    .apply()
+
+                fetchLiveBullionRates(forceRefresh = true)
+                onLocationDetected?.invoke(detected)
+            }
+        }
+    }
+
+    fun selectCountry(countryNameOrCode: String) {
+        if (countryNameOrCode.isBlank()) return
+        val countryInfo = com.example.utils.CityLocationHelper.getCountryInfo(countryNameOrCode)
+        val countryName = countryInfo?.nameEn ?: countryNameOrCode.trim()
+        val defaultCity = countryInfo?.majorCities?.firstOrNull() ?: _selectedCity.value
+        val currency = countryInfo?.defaultCurrency ?: com.example.utils.CityLocationHelper.getCurrencyForCountryCode(countryNameOrCode)
+        val symbol = countryInfo?.currencySymbol ?: currency
+
+        _selectedCountry.value = countryName
+        _selectedCity.value = defaultCity
+        _selectedCurrency.value = currency
+        _selectedCurrencySymbol.value = symbol
+        _isLocationGpsDetected.value = false
+
+        if (countryInfo != null && countryInfo.defaultUnit != _silverUnit.value) {
+            setSilverUnit(countryInfo.defaultUnit)
+        }
+
+        prefs.edit()
+            .putString("haq_mehr_country", countryName)
+            .putString("haq_mehr_city", defaultCity)
+            .putString("haq_mehr_currency", currency)
+            .putString("haq_mehr_currency_symbol", symbol)
+            .putBoolean("haq_mehr_location_is_gps", false)
+            .apply()
+
+        fetchLiveBullionRates(forceRefresh = true)
+    }
+
+    fun selectCity(city: String) {
+        if (city.isBlank()) return
+        _selectedCity.value = city.trim()
+        _isLocationGpsDetected.value = false
+        prefs.edit()
+            .putString("haq_mehr_city", city.trim())
+            .putBoolean("haq_mehr_location_is_gps", false)
+            .apply()
+        fetchLiveBullionRates(forceRefresh = true)
+    }
+
+    fun selectCurrency(currency: String, symbol: String) {
+        _selectedCurrency.value = currency
+        _selectedCurrencySymbol.value = symbol
+        prefs.edit()
+            .putString("haq_mehr_currency", currency)
+            .putString("haq_mehr_currency_symbol", symbol)
+            .apply()
+        fetchLiveBullionRates(forceRefresh = true)
+    }
+
+    fun refreshAllCalculatorPrices(forceRefresh: Boolean = true) {
+        fetchLiveBullionRates(forceRefresh = forceRefresh)
+    }
+
+    fun fetchLiveBullionRates(forceRefresh: Boolean = false) {
+        fetchLiveSilverRate(forceRefresh)
+        fetchLiveGoldRate(forceRefresh)
+        fetchLiveCommodityPrices(forceRefresh)
+    }
+
+    fun fetchLiveSilverRate(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            Log.i("CALCULATOR_REFRESH", "CALCULATOR_REFRESH: fetchLiveSilverRate triggered (forceRefresh = true)")
+        }
+        _silverRateState.value = SilverRateUiState.Loading
+        val countryToFetch = _selectedCountry.value
+        val cityToFetch = _selectedCity.value
+        val currencyToFetch = _selectedCurrency.value
+
+        viewModelScope.launch {
+            val result = com.example.data.repository.PriceRepository.getCurrentSilverPrice(
+                context = null,
+                country = countryToFetch,
+                city = cityToFetch,
+                currency = currencyToFetch,
+                forceRefresh = forceRefresh
+            )
+            _silverRateState.value = result
+            if (result is SilverRateUiState.Success) {
+                val tolaPrice = result.rate.pricePerTola
+                if (tolaPrice != null && tolaPrice > 0.0) {
+                    val formattedPrice = String.format(java.util.Locale.US, "%.0f", tolaPrice)
+                    _customRateInput.value = formattedPrice
+                    _isCustomRateMode.value = true
+                }
+            }
+            if (forceRefresh) {
+                Log.i("CALCULATOR_UPDATED", "CALCULATOR_UPDATED: silver rate calculator updated with state: $result")
+            }
+        }
+    }
+
+    fun fetchLiveGoldRate(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            Log.i("CALCULATOR_REFRESH", "CALCULATOR_REFRESH: fetchLiveGoldRate triggered (forceRefresh = true)")
+        }
+        _goldRateState.value = GoldRateUiState.Loading
+        val countryToFetch = _selectedCountry.value
+        val cityToFetch = _selectedCity.value
+        val currencyToFetch = _selectedCurrency.value
+
+        viewModelScope.launch {
+            val result = com.example.data.repository.PriceRepository.getCurrentGoldPrice(
+                context = null,
+                country = countryToFetch,
+                city = cityToFetch,
+                currency = currencyToFetch,
+                forceRefresh = forceRefresh
+            )
+            _goldRateState.value = result
+            if (forceRefresh) {
+                Log.i("CALCULATOR_UPDATED", "CALCULATOR_UPDATED: gold rate calculator updated with state: $result")
+            }
+        }
+    }
+
+    fun fetchLiveCommodityPrices(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            Log.i("CALCULATOR_REFRESH", "CALCULATOR_REFRESH: fetchLiveCommodityPrices triggered (forceRefresh = true)")
+        }
+        _commodityPricesState.value = CommodityPricesUiState.Loading
+        val countryToFetch = _selectedCountry.value
+        val currencyToFetch = _selectedCurrency.value
+
+        viewModelScope.launch {
+            val result = com.example.data.repository.PriceRepository.getCurrentCommodityPrices(
+                context = null,
+                country = countryToFetch,
+                currency = currencyToFetch,
+                forceRefresh = forceRefresh
+            )
+            _commodityPricesState.value = result
+            if (forceRefresh) {
+                Log.i("CALCULATOR_UPDATED", "CALCULATOR_UPDATED: commodity prices calculator updated with state: $result")
+            }
+        }
+    }
+
+    fun setSilverAmountInput(amount: String) {
+        _silverAmountInput.value = amount
+        _selectedHaqMehrPreset.value = null
+    }
+
+    fun setSilverUnit(newUnit: SilverUnit) {
+        val oldUnit = _silverUnit.value
+        if (oldUnit == newUnit) return
+
+        val currentVal = _silverAmountInput.value.replace(',', '.').trim().toDoubleOrNull()
+        if (currentVal != null && currentVal > 0.0) {
+            val totalGrams = currentVal * oldUnit.gramsFactor
+            val newValInNewUnit = totalGrams / newUnit.gramsFactor
+            val formatted = if (newValInNewUnit % 1.0 == 0.0) {
+                newValInNewUnit.toLong().toString()
+            } else {
+                String.format(java.util.Locale.US, "%.3f", newValInNewUnit).trimEnd('0').trimEnd('.')
+            }
+            _silverAmountInput.value = formatted
+        }
+        _silverUnit.value = newUnit
+    }
+
+    fun setSilverPurity(purity: SilverPurity) {
+        _silverPurity.value = purity
+    }
+
+    fun setCustomRateMode(enabled: Boolean) {
+        _isCustomRateMode.value = enabled
+    }
+
+    fun setCustomRateInput(rate: String) {
+        _customRateInput.value = rate
+    }
+
+    fun applyHaqMehrPreset(preset: HaqMehrPreset) {
+        _selectedHaqMehrPreset.value = preset
+        val amount = if (_silverUnit.value == SilverUnit.TOLA) {
+            preset.weightInTola
+        } else {
+            val totalGrams = preset.weightInGrams
+            totalGrams / _silverUnit.value.gramsFactor
+        }
+        val formatted = if (amount % 1.0 == 0.0) {
+            amount.toLong().toString()
+        } else {
+            String.format(java.util.Locale.US, "%.3f", amount).trimEnd('0').trimEnd('.')
+        }
+        _silverAmountInput.value = formatted
     }
 
     override fun onCleared() {

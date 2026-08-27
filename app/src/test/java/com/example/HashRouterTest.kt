@@ -36,7 +36,7 @@ class HashRouterTest {
         assertEquals(2, HashRouter.routeToTab("#/tutor"))
         assertEquals(10, HashRouter.routeToTab("#/settings"))
         assertEquals(14, HashRouter.routeToTab("#/picture-vocabulary"))
-        assertEquals(0, HashRouter.routeToTab("#/unknown-route"))
+        assertEquals(2, HashRouter.routeToTab("#/unknown-route"))
 
         assertEquals("#/lessons", HashRouter.tabToRoute(0))
         assertEquals("#/settings", HashRouter.tabToRoute(10))

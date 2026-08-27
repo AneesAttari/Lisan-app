@@ -56,4 +56,18 @@ object IdiomRepository {
             )
         }
     }
+
+    fun getPopularToday5(): List<Idiom> {
+        val all = _idiomsState.value
+        if (all.isEmpty()) return emptyList()
+        val dayOfYear = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+        val count = all.size
+        val startIndex = (dayOfYear * 5) % count
+        val list = mutableListOf<Idiom>()
+        for (i in 0 until 5) {
+            val idx = (startIndex + i) % count
+            list.add(all[idx])
+        }
+        return list
+    }
 }

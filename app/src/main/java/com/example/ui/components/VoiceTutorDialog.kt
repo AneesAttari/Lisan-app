@@ -179,9 +179,10 @@ fun LisanAnimatedOrb(
         )
 
         // Fluid middle rotation glow layer
+        val rotationGlowSize = if (isCompact) 130.dp else 250.dp
         Box(
             modifier = Modifier
-                .size(250.dp)
+                .size(rotationGlowSize)
                 .rotate(rotationAngle)
                 .background(
                     brush = Brush.sweepGradient(
@@ -580,7 +581,6 @@ fun VoiceTutorDialog(
     var errorMessage by remember { mutableStateOf("") }
     var isMicMuted by remember { mutableStateOf(false) }
     var isTutorSpeakerMuted by remember { mutableStateOf(false) }
-    var manualInputText by remember { mutableStateOf("") }
     var rmsVolume by remember { mutableFloatStateOf(0f) }
     var autoListenEnabled by remember { mutableStateOf(true) }
     var currentSpeed by remember { mutableFloatStateOf(userSettings.speechRate.coerceAtLeast(1.1f)) }
@@ -660,49 +660,6 @@ fun VoiceTutorDialog(
     var showPronunciationDialog by remember { mutableStateOf(false) }
     var showVoiceSelectionDialog by remember { mutableStateOf(false) }
     var showFirstTimeVoiceDialog by remember { mutableStateOf(false) }
-    var showManualTextInput by remember { mutableStateOf(false) }
-    val inputFocusRequester = remember { FocusRequester() }
-
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-    val view = LocalView.current
-
-    // ==========================================
-    // [4] FIXED KEYBOARD DETECTION
-    // ==========================================
-    // Use WindowInsets API instead of fragile ViewTreeObserver
-    val isKeyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-
-    // ==========================================
-    // [2] FIXED KEYBOARD FOCUS & OPEN EFFECT
-    // ==========================================
-    LaunchedEffect(showManualTextInput) {
-        if (showManualTextInput) {
-            // Wait for the UI to settle
-            delay(250)
-            
-            // Request focus on the text field
-            inputFocusRequester.requestFocus()
-            
-            // Explicitly show the keyboard using InputMethodManager
-            // (keyboardController?.show() is unreliable in dialogs)
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) 
-                as? android.view.inputmethod.InputMethodManager
-            imm?.showSoftInput(
-                view, 
-                android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT
-            )
-        } else {
-            // Hide keyboard when input is closed
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE)
-                as? android.view.inputmethod.InputMethodManager
-            imm?.hideSoftInputFromWindow(
-                view.windowToken, 
-                0
-            )
-            focusManager.clearFocus()
-        }
-    }
 
     val isSpeechRecognizerAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
@@ -783,7 +740,6 @@ fun VoiceTutorDialog(
             listeningTimeoutJob?.cancel()
             turnEndDebounceJob?.cancel()
             userSpeechText = trimmed
-            manualInputText = ""
             viewModel.setVoiceSessionState(VoiceSessionState.PROCESSING)
             errorMessage = ""
 
@@ -825,7 +781,8 @@ fun VoiceTutorDialog(
                         userName = viewModel.userName.value,
                         learnerProfileSummary = profileSummary,
                         isStudyModeOn = isStudyModeOn,
-                        selectedVoiceLanguage = langStr
+                        selectedVoiceLanguage = langStr,
+                        speakerGender = "Female"
                     )
                     
                     val cleanReply = reply.replace(Regex("\\[(pause_short|pause_long|pitch_high|pitch_low|pitch_normal)\\]"), "").replace(Regex("\\s+"), " ").trim()
@@ -1266,7 +1223,7 @@ fun VoiceTutorDialog(
                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
             val welcome = when (selectedVoiceLanguage) {
-                VoiceInputLanguage.URDU -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں خوش آمدید۔ میں آپ کا گرامر کا استاد ہوں۔ میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گا۔"
+                VoiceInputLanguage.URDU -> "السلام علیکم ورحمۃ اللہ وبرکاتہ۔ لسان گرامر میں خوش آمدید۔ میں آپ کی گرامر کی ٹیچر ہوں۔ میں اردو کے ساتھ موازنہ کر کے انگریزی گرامر سیکھنے میں آپ کی مدد کروں گی۔"
                 VoiceInputLanguage.ARABIC -> "السلام عليكم ورحمة الله وبركاته. أهلاً بك في لسان قواعد اللغة. سأساعدك في تعلم قواعد اللغة الإنجليزية بمقارنتها مع قواعد اللغة العربية."
                 else -> "السلام عليكم ورحمة الله وبركاته\nWelcome to Lisan Grammar. I will help you learn English grammar by comparing it with Arabic grammar."
             }
@@ -1373,11 +1330,6 @@ fun VoiceTutorDialog(
     )
     val thinkingDots = ".".repeat(dotFloat.toInt().coerceIn(0, 3))
 
-    LaunchedEffect(Unit) {
-        keyboardController?.hide()
-        focusManager.clearFocus()
-    }
-
     Dialog(
         onDismissRequest = {
             stopSpeaking()
@@ -1397,9 +1349,6 @@ fun VoiceTutorDialog(
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                // Ensure IME resize is dispatched properly to Compose insets
-                win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                WindowCompat.setDecorFitsSystemWindows(win, false)
             }
             onDispose {}
         }
@@ -1408,23 +1357,22 @@ fun VoiceTutorDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding()
-                .imePadding(),
+                .navigationBarsPadding(),
             color = Color.White
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // APP BAR (FLUTTER SPEC)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .background(Color.White)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // APP BAR (FLUTTER SPEC)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .background(Color.White)
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
                     IconButton(
                         onClick = {
                             stopSpeaking()
@@ -1512,11 +1460,11 @@ fun VoiceTutorDialog(
                         .weight(1f)
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = if (isKeyboardOpen) 6.dp else 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.Top,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Spacer(modifier = Modifier.height(if (isKeyboardOpen) 4.dp else 8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Glowing Pulsing Sphere (ChatGPT-style fBm Fluid Multi-Layered Orb)
                     FlutterGlowingSphere(
@@ -1525,9 +1473,9 @@ fun VoiceTutorDialog(
                         rmsVolume = rmsVolume,
                         voiceSessionState = voiceSessionState,
                         isIntenseMode = isIntenseMode,
-                        isCompact = isKeyboardOpen,
+                        isCompact = false,
                         modifier = Modifier
-                            .padding(bottom = if (isKeyboardOpen) 8.dp else 16.dp)
+                            .padding(bottom = 16.dp)
                             .clip(CircleShape)
                             .clickable {
                                 if (connectionStatus == ConnectionStateStatus.CONNECTED) {
@@ -1663,48 +1611,7 @@ fun VoiceTutorDialog(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            // 1. Learner Speech Section
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Surface(
-                                    color = Color(0xFFEFF6FF),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Mic,
-                                            contentDescription = null,
-                                            tint = Color(0xFF2563EB),
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Text(
-                                            text = "You",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF2563EB)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = if (userSpeechText.isNotBlank()) userSpeechText else if (voiceSessionState == VoiceSessionState.LISTENING) "Listening..." else "Tap microphone to speak",
-                                    fontSize = 14.sp,
-                                    color = if (userSpeechText.isNotBlank()) EditorialPrimary else Color(0xFF94A3B8),
-                                    style = TextStyle(
-                                        textDirection = if (isLineRtl(userSpeechText)) TextDirection.Rtl else TextDirection.Ltr
-                                    ),
-                                    modifier = Modifier.padding(start = 2.dp)
-                                )
-                            }
-
-                            HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-
-                            // 2. Tutor Speech Section
+                            // Tutor Speech Section
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -1749,140 +1656,21 @@ fun VoiceTutorDialog(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // OPTIONAL MANUAL TEXT INPUT (TOGGLEABLE VIA KEYBOARD ICON)
-                if (showManualTextInput) {
-                    HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
-                    
-                    // BringIntoViewRequester ensures the field stays visible above keyboard
-                    val bringIntoViewRequester = remember { BringIntoViewRequester() }
-                    
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFFF8FAFC))
-                            // This padding pushes the row above the keyboard
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            color = Color.White,
-                            shape = RoundedCornerShape(24.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            OutlinedTextField(
-                                value = manualInputText,
-                                onValueChange = { 
-                                    manualInputText = it
-                                    // Keep field visible while typing
-                                    scope.launch {
-                                        bringIntoViewRequester.bringIntoView()
-                                    }
-                                },
-                                placeholder = {
-                                    Text(
-                                        text = "Type a message...",
-                                        fontSize = 14.sp,
-                                        color = Color(0xFF94A3B8)
-                                    )
-                                },
-                                textStyle = TextStyle(
-                                    fontSize = 14.sp,
-                                    color = EditorialTextPrimary,
-                                    textDirection = if (isLineRtl(manualInputText)) TextDirection.Rtl else TextDirection.Ltr
-                                ),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    focusedBorderColor = Color.Transparent,
-                                    unfocusedBorderColor = Color.Transparent,
-                                    disabledBorderColor = Color.Transparent
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .defaultMinSize(minHeight = 44.dp)
-                                    .focusRequester(inputFocusRequester)
-                                    .bringIntoViewRequester(bringIntoViewRequester),  // Auto-scroll on focus
-                                singleLine = true,
-                                enabled = (connectionStatus == ConnectionStateStatus.CONNECTED),
-                                keyboardOptions = KeyboardOptions(
-                                    imeAction = ImeAction.Send
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onSend = {
-                                        if (manualInputText.isNotBlank()) {
-                                            val textToSend = manualInputText.trim()
-                                            manualInputText = ""
-                                            sendVoiceInput(textToSend)
-                                            
-                                            // Hide keyboard
-                                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) 
-                                                as? android.view.inputmethod.InputMethodManager
-                                            imm?.hideSoftInputFromWindow(
-                                                view.windowToken, 
-                                                0
-                                            )
-                                            focusManager.clearFocus()
-                                        }
-                                    }
-                                )
-                            )
-                        }
-                        
-                        // SEPARATE Send button (outside text field — more reliable)
-                        IconButton(
-                            onClick = {
-                                if (manualInputText.isNotBlank()) {
-                                    val textToSend = manualInputText.trim()
-                                    manualInputText = ""
-                                    sendVoiceInput(textToSend)
-                                    
-                                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) 
-                                        as? android.view.inputmethod.InputMethodManager
-                                    imm?.hideSoftInputFromWindow(
-                                        view.windowToken, 
-                                        0
-                                    )
-                                    focusManager.clearFocus()
-                                }
-                            },
-                            enabled = manualInputText.isNotBlank() && connectionStatus == ConnectionStateStatus.CONNECTED,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(
-                                    color = if (manualInputText.isNotBlank()) 
-                                        Color(0xFF3F51B5) else Color(0xFFE2E8F0),
-                                    shape = CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send",
-                                tint = if (manualInputText.isNotBlank()) 
-                                    Color.White else Color(0xFF94A3B8),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                }
-
-                // BOTTOM ACTION BAR: PURE ICONS FLOATING DOCK ELEVATED INTO MARKED POSITION (HIDDEN WHEN KEYBOARD IS OPEN)
-                if (!isKeyboardOpen) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = 20.dp,
-                                end = 20.dp,
-                                top = 8.dp,
-                                bottom = if (showManualTextInput) 16.dp else 52.dp
-                            ),
-                        shape = RoundedCornerShape(32.dp),
-                        color = Color(0xFFF8FAFC),
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        shadowElevation = 4.dp
-                    ) {
+                // BOTTOM ACTION BAR: PURE ICONS FLOATING DOCK
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = 20.dp,
+                            end = 20.dp,
+                            top = 8.dp,
+                            bottom = 40.dp
+                        ),
+                    shape = RoundedCornerShape(32.dp),
+                    color = Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    shadowElevation = 4.dp
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1936,28 +1724,7 @@ fun VoiceTutorDialog(
                             )
                         }
 
-                        // 3. KEYBOARD ICON (TOGGLE MESSAGE TYPING BAR)
-                        IconButton(
-                            onClick = {
-                                showManualTextInput = !showManualTextInput
-                            },
-                            modifier = Modifier
-                                .size(54.dp)
-                                .background(
-                                    color = if (showManualTextInput) Color(0xFF3F51B5) else Color(0xFFEEF2FF),
-                                    shape = CircleShape
-                                )
-                                .testTag("keyboard_toggle_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Keyboard,
-                                contentDescription = "Toggle Keyboard",
-                                tint = if (showManualTextInput) Color.White else Color(0xFF3F51B5),
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
-
-                        // 4. END CALL ICON (RED CIRCULAR BUTTON)
+                        // 3. END CALL ICON (RED CIRCULAR BUTTON)
                         IconButton(
                             onClick = {
                                 showEndSessionConfirmation = true
@@ -1979,7 +1746,6 @@ fun VoiceTutorDialog(
                         }
                     }
                 }
-            }
             }
         }
     }
@@ -2088,8 +1854,8 @@ fun PremiumVoiceSelectionDialog(
                                 onClick = {
                                     previewSpeaker = "Young Voice"
                                     val text = when (userSettings.selectedVoiceLanguage) {
-                                        "Urdu" -> "ہیلو! میں آپ کا دوست اور استاد ہوں۔ آئیں اردو کے ذریعے انگریزی گرامر کو بہت آسان طریقے سے سیکھیں۔"
-                                        "Arabic" -> "أهلاً بك! أنا معلمك الذكي والصديق. دعنا نتعلم قواعد اللغة الإنجليزية معاً بطريقة ممتعة وسهلة."
+                                        "Urdu" -> "ہیلو! میں آپ کی دوست اور ٹیچر ہوں۔ آئیں اردو کے ذریعے انگریزی گرامر کو بہت آسان طریقے سے سیکھیں۔"
+                                        "Arabic" -> "أهلاً بك! أنا معلمتك الذكية والصديقة. دعنا نتعلم قواعد اللغة الإنجليزية معاً بطريقة ممتعة وسهلة."
                                         else -> "Hey there! I am your friendly AI teacher. Let's learn English grammar together in an energetic and fun way!"
                                     }
                                     if (isThisPreviewing) {
@@ -2158,8 +1924,8 @@ fun PremiumVoiceSelectionDialog(
                                 onClick = {
                                     previewSpeaker = "Mature Voice"
                                     val text = when (userSettings.selectedVoiceLanguage) {
-                                        "Urdu" -> "السلام علیکم۔ میں آپ کا گرامر کا استاد ہوں۔ ہم پرسکون اور سنجیدہ انداز میں انگریزی گرامر کی تمام باریکیوں کو سمجھیں گے۔"
-                                        "Arabic" -> "السلام عليكم. أنا معلمك المحترف لتعلم القواعد. سنمضي في رحلتنا خطوة بخطوة وبكل هدوء لنتقن اللغة الإنجليزية."
+                                        "Urdu" -> "السلام علیکم۔ میں آپ کی گرامر کی ٹیچر ہوں۔ ہم پرسکون اور سنجیدہ انداز میں انگریزی گرامر کی تمام باریکیوں کو سمجھیں گے۔"
+                                        "Arabic" -> "السلام عليكم. أنا معلمتك المحترفة لتعلم القواعد. سنمضي في رحلتنا خطوة بخطوة وبكل هدوء لنتقن اللغة الإنجليزية."
                                         else -> "Hello. I am your professional AI instructor. We will take a calm, structured, and deep approach to mastering English grammar."
                                     }
                                     if (isThisPreviewing) {
@@ -2228,8 +1994,8 @@ fun PremiumVoiceSelectionDialog(
                                 onClick = {
                                     previewSpeaker = "Gentle Voice"
                                     val text = when (userSettings.selectedVoiceLanguage) {
-                                        "Urdu" -> "پیارے دوست، خوش آمدید۔ میں آپ کا دوست اور استاد ہوں۔ ہم بہت آرام سے اور صبر کے ساتھ انگریزی گرامر سیکھیں گے۔"
-                                        "Arabic" -> "مرحباً بك يا صديقي. أنا معلمك الصبور. سنتعلم معاً بكل هدوء وخطوة بخطوة."
+                                        "Urdu" -> "پیاری دوست، خوش آمدید۔ میں آپ کی ٹیچر ہوں۔ ہم بہت آرام سے اور صبر کے ساتھ انگریزی گرامر سیکھیں گی۔"
+                                        "Arabic" -> "مرحباً بك يا صديقتي. أنا معلمتك الصبورة. سنتعلم معاً بكل هدوء وخطوة بخطوة."
                                         else -> "Welcome, my friend. I am your gentle AI instructor. We will learn English grammar at a pleasant, warm, and highly patient pace."
                                     }
                                     if (isThisPreviewing) {

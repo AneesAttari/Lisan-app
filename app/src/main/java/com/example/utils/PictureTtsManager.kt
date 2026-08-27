@@ -8,31 +8,52 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
-class PictureTtsManager(context: Context) {
+class PictureTtsManager(private val context: Context) {
     private var tts: TextToSpeech? = null
     private var isInitialized = false
+    private var isInitializing = false
 
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    private val isLowRam = DeviceCapabilityHelper.isLowRamDevice(context)
+
     init {
+        if (!isLowRam) {
+            initTtsInternal()
+        }
+    }
+
+    private fun initTtsInternal(onReady: (() -> Unit)? = null) {
+        if (isInitialized || isInitializing) {
+            if (isInitialized) onReady?.invoke()
+            return
+        }
+        isInitializing = true
         try {
             tts = TextToSpeech(context.applicationContext) { status ->
+                isInitializing = false
                 if (status == TextToSpeech.SUCCESS) {
                     val result = tts?.setLanguage(Locale.US)
                     isInitialized = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+                    if (isInitialized) {
+                        onReady?.invoke()
+                    }
                 } else {
                     Log.e("PictureTtsManager", "TTS initialization failed with status: $status")
                 }
             }
         } catch (e: Exception) {
+            isInitializing = false
             Log.e("PictureTtsManager", "Error initializing TTS", e)
         }
     }
 
     fun speak(text: String) {
-        if (!isInitialized || tts == null) {
-            Log.w("PictureTtsManager", "TTS not initialized")
+        if (!isInitialized) {
+            initTtsInternal {
+                speak(text)
+            }
             return
         }
         try {

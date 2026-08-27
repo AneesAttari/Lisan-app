@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.DelayedLoadingIndicator
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.PictureCardThumbnail
 import com.example.ui.navigation.HashRouter
@@ -28,12 +29,14 @@ import com.example.ui.viewmodel.PictureVocabularyViewModel
 @Composable
 fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
     val categories by viewModel.categories.collectAsState()
+    val isLoadingCategories by viewModel.isLoadingCategories.collectAsState()
     val sessionId by viewModel.currentSessionId.collectAsState()
     val colors = EditorialTheme.colors
     var startQuizTriggered by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.clearCurrentSession()
+        viewModel.ensureContentInitialized()
     }
 
     LaunchedEffect(sessionId, startQuizTriggered) {
@@ -96,15 +99,28 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(categories) { category ->
+        if (categories.isEmpty() && isLoadingCategories) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                DelayedLoadingIndicator(
+                    message = "Loading picture categories...",
+                    delayMillis = 200L
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(categories) { category ->
                 EditorialCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -157,4 +173,5 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
             }
         }
     }
+}
 }

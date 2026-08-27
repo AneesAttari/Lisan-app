@@ -642,7 +642,7 @@ fun HelpAndFeedbackScreen(
                 OutlinedButton(
                     onClick = {
                         val whatsappIntent = Intent(Intent.ACTION_VIEW).apply {
-                            data = Uri.parse("https://wa.me/923096794698?text=Hi%20Lisan%20Team,%0A%0AFeedback:%0A")
+                            data = Uri.parse("https://wa.me/923171503094?text=Hi%20Lisan%20Team,%0A%0AFeedback:%0A")
                         }
                         try {
                             context.startActivity(whatsappIntent)
@@ -655,7 +655,7 @@ fun HelpAndFeedbackScreen(
                 ) {
                     Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Contact on WhatsApp")
+                    Text("Contact on WhatsApp (0317 1503094)")
                 }
 
                 OutlinedButton(

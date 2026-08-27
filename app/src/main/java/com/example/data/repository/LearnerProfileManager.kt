@@ -34,7 +34,6 @@ class LearnerProfileManager(context: Context) {
     }
 
     private fun saveProfile(profile: LearnerProfile) {
-        com.example.utils.RevisionReminderScheduler.scheduleRevisionReminder(com.example.LisanApplication.instance)
         val updatedProfile = profile.copy(lastUpdated = System.currentTimeMillis())
         _learnerProfile.value = updatedProfile
         try {

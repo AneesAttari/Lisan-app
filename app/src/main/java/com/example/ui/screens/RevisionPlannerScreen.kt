@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.*
 import com.example.data.model.DashboardSummary
 import com.example.data.model.AnswerResult
+import com.example.ui.components.DelayedLoadingIndicator
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialSectionTitle
 import com.example.ui.theme.*
@@ -59,19 +60,26 @@ fun RevisionPlannerDashboard(
     viewModel: LisanViewModel
 ) {
     val dashboardSummary by viewModel.dashboardSummary.collectAsState()
+    val isLoadingRevisionPlanner by viewModel.isLoadingRevisionPlanner.collectAsState()
     val topicProgressList by viewModel.topicProgress.collectAsState()
 
-    // Trigger dashboard refresh on composition
+    // Trigger dashboard refresh and deferred seeding on composition
     LaunchedEffect(Unit) {
-        viewModel.loadRevisionDashboard()
+        viewModel.ensureRevisionPlannerLoaded()
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    if (dashboardSummary == null && isLoadingRevisionPlanner) {
+        DelayedLoadingIndicator(
+            message = "Preparing Revision Bank & Topics...",
+            delayMillis = 200L
+        )
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         // 1. Header Summary Card
         item {
             EditorialCard(
@@ -274,6 +282,7 @@ fun RevisionPlannerDashboard(
             )
         }
     }
+}
 }
 
 @Composable

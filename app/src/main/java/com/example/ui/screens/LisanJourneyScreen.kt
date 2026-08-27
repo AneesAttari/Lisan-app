@@ -35,10 +35,15 @@ fun LisanJourneyScreen(
     modifier: Modifier = Modifier
 ) {
     val definitions by viewModel.activeDefinitions.collectAsState()
+    val isInitializing by viewModel.isInitializing.collectAsState()
     val progressList by viewModel.allProgress.collectAsState()
     val userStats by viewModel.userStats.collectAsState()
     val tutorSchedule by viewModel.tutorSchedule.collectAsState()
     val pendingRewards by viewModel.pendingRewards.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.ensureInitialized()
+    }
 
     var selectedFilter by remember { mutableStateOf("ALL") }
     var showScheduleDialog by remember { mutableStateOf(false) }
@@ -61,11 +66,17 @@ fun LisanJourneyScreen(
     val stats = userStats ?: UserAchievementStatsEntity()
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        LazyColumn(
-            modifier = modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        if (definitions.isEmpty() && isInitializing) {
+            DelayedLoadingIndicator(
+                message = "Loading achievements and journey...",
+                delayMillis = 200L
+            )
+        } else {
+            LazyColumn(
+                modifier = modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // 1. Header & Overview
             item {
                 EditorialCard(
@@ -263,6 +274,7 @@ fun LisanJourneyScreen(
             }
         }
     }
+}
 
     if (showScheduleDialog) {
         DailyTutorScheduleDialog(

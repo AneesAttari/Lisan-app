@@ -44,11 +44,41 @@ class PictureVocabularyViewModel(application: Application) : AndroidViewModel(ap
 
     val isSpeaking = ttsManager.isSpeaking
 
+    private val isLowRam = com.example.utils.DeviceCapabilityHelper.isLowRamDevice(application)
+
+    private val _isLoadingCategories = MutableStateFlow(false)
+    val isLoadingCategories: StateFlow<Boolean> = _isLoadingCategories.asStateFlow()
+
+    @Volatile
+    private var isInitializingContent = false
+
     init {
-        viewModelScope.launch {
-            repository.initializeContentIfNeeded()
-            repository.getAllCategories().collect { list ->
-                _categories.value = list
+        if (!isLowRam) {
+            // Capable devices: initialize in background on IO dispatcher to keep startup snappy
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                repository.initializeContentIfNeeded()
+                repository.getAllCategories().collect { list ->
+                    _categories.value = list
+                }
+            }
+        }
+    }
+
+    fun ensureContentInitialized() {
+        if (_categories.value.isNotEmpty() || isInitializingContent) return
+        isInitializingContent = true
+        _isLoadingCategories.value = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                repository.initializeContentIfNeeded()
+                repository.getAllCategories().collect { list ->
+                    _categories.value = list
+                    _isLoadingCategories.value = false
+                    isInitializingContent = false
+                }
+            } catch (e: Exception) {
+                _isLoadingCategories.value = false
+                isInitializingContent = false
             }
         }
     }

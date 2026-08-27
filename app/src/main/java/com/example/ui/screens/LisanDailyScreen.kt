@@ -83,6 +83,10 @@ fun LisanDailyScreen(
     val currentQuestion = dailyChallengeQuestions.getOrNull(currentQuestionIndex)
     val isChallengeCompleted = dailyChallengeState == DailyChallengeState.COMPLETED
 
+    LaunchedEffect(Unit) {
+        viewModel.ensureLisanDailyLoaded()
+    }
+
     // Scroll state for the entire hub page
     val scrollState = rememberScrollState()
 

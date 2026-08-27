@@ -108,6 +108,10 @@ fun ProgressDashboardScreen(
     var selectedFilterCategory by remember { mutableStateOf("ALL") }
     var reportSaveMessage by remember { mutableStateOf<String?>(null) }
 
+    LaunchedEffect(Unit) {
+        viewModel.ensureProgressDashboardLoaded()
+    }
+
     val scrollState = rememberScrollState()
 
     Column(

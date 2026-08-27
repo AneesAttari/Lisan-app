@@ -28,9 +28,33 @@ class LisanJourneyViewModel(application: Application) : AndroidViewModel(applica
     val pendingRewards: StateFlow<List<RewardTransactionEntity>> = repository.pendingRewards
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    private val isLowRam = com.example.utils.DeviceCapabilityHelper.isLowRamDevice(application)
+
+    private val _isInitializing = MutableStateFlow(false)
+    val isInitializing: StateFlow<Boolean> = _isInitializing.asStateFlow()
+
+    @Volatile
+    private var hasInitialized = false
+
     init {
-        viewModelScope.launch {
-            repository.initializeDefinitionsIfNeeded()
+        if (!isLowRam) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                repository.initializeDefinitionsIfNeeded()
+                hasInitialized = true
+            }
+        }
+    }
+
+    fun ensureInitialized() {
+        if (hasInitialized) return
+        hasInitialized = true
+        _isInitializing.value = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                repository.initializeDefinitionsIfNeeded()
+            } finally {
+                _isInitializing.value = false
+            }
         }
     }
 

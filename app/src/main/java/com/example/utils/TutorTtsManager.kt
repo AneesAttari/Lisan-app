@@ -30,20 +30,37 @@ class TutorTtsManager(private val context: Context) {
     private var mediaPlayer: MediaPlayer? = null
     private var nativeTts: TextToSpeech? = null
     private var isNativeTtsReady = false
+    private var isInitializingNativeTts = false
+
+    private val isLowRam = DeviceCapabilityHelper.isLowRamDevice(context)
 
     init {
+        if (!isLowRam) {
+            initNativeTtsInternal()
+        }
+    }
+
+    private fun initNativeTtsInternal(onReady: (() -> Unit)? = null) {
+        if (isNativeTtsReady || isInitializingNativeTts) {
+            if (isNativeTtsReady) onReady?.invoke()
+            return
+        }
+        isInitializingNativeTts = true
         try {
             nativeTts = TextToSpeech(context.applicationContext) { status ->
+                isInitializingNativeTts = false
                 if (status == TextToSpeech.SUCCESS) {
                     Log.d("TutorTtsManager", "Native TextToSpeech initialized successfully")
                     isNativeTtsReady = true
                     nativeTts?.language = Locale.US
                     checkUrduVoiceAvailability()
+                    onReady?.invoke()
                 } else {
                     Log.e("TutorTtsManager", "Native TextToSpeech init failed: $status")
                 }
             }
         } catch (e: Exception) {
+            isInitializingNativeTts = false
             Log.e("TutorTtsManager", "Error initializing native TextToSpeech", e)
         }
     }
@@ -654,8 +671,9 @@ class TutorTtsManager(private val context: Context) {
 
     private fun speakWithNativeTts(chunk: SpeakChunk) {
         if (!isNativeTtsReady || nativeTts == null) {
-            Log.e("TutorTtsManager", "Native TTS is not ready yet")
-            processNextChunk()
+            initNativeTtsInternal {
+                speakWithNativeTts(chunk)
+            }
             return
         }
 

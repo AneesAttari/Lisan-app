@@ -81,6 +81,7 @@ object HashRouter {
             "#/api-key-guide", "#/implement-api-key" -> 15
             "#/chat-theme" -> 16
             "#/create-image" -> 17
+            "#/haq-mehr", "#/silver-calculator", "#/silver-rate", "#/islamic-calculator", "#/zakat-calculator", "#/fitrana-calculator", "#/ushr-calculator" -> 18
             else -> 2
         }
     }
@@ -108,6 +109,7 @@ object HashRouter {
             15 -> "#/api-key-guide"
             16 -> "#/chat-theme"
             17 -> "#/create-image"
+            18 -> "#/haq-mehr"
             else -> "#/tutor"
         }
     }

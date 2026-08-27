@@ -37,6 +37,7 @@ import com.example.ui.screens.HelpAndFeedbackScreen
 import com.example.ui.screens.PictureVocabularyRootScreen
 import com.example.ui.screens.ImplementApiKeyScreen
 import com.example.ui.screens.ChatThemeSelectionScreen
+import com.example.ui.screens.HaqMehrCalculatorScreen
 import com.example.ui.theme.EditorialBackground
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.LisanViewModel
@@ -89,42 +90,53 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val isSettingsLoaded by viewModel.isSettingsLoaded.collectAsState()
-            if (isSettingsLoaded) {
-                val userSettings by viewModel.userSettings.collectAsState()
-                val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
-                val darkTheme = when (userSettings.themeMode) {
-                    "Dark" -> true
-                    "Light" -> false
-                    else -> isSystemDark
-                }
-                MyApplicationTheme(
-                    darkTheme = darkTheme,
-                    dynamicColor = userSettings.dynamicColor,
-                    fontSizeSetting = userSettings.fontSize
-                ) {
+            var showSplashScreen by remember { mutableStateOf(true) }
+
+            LaunchedEffect(Unit) {
+                kotlinx.coroutines.delay(2000L)
+                showSplashScreen = false
+            }
+
+            val userSettings by viewModel.userSettings.collectAsState()
+            val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val darkTheme = when (userSettings.themeMode) {
+                "Dark" -> true
+                "Light" -> false
+                else -> isSystemDark
+            }
+            MyApplicationTheme(
+                darkTheme = darkTheme,
+                dynamicColor = userSettings.dynamicColor,
+                fontSizeSetting = userSettings.fontSize
+            ) {
+                if (showSplashScreen) {
+                    SplashScreen()
+                } else {
                     LisanMainApp(
                         viewModel = viewModel,
                         pictureVocabularyViewModel = pictureVocabularyViewModel,
                         lisanJourneyViewModel = lisanJourneyViewModel
                     )
                 }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF1E0040)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.lisan_ai_splash_screen_1786018639638),
-                        contentDescription = "Lisan AI Splash Screen",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
             }
         }
+    }
+}
+
+@Composable
+fun SplashScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F0C20)),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.lisan_ai_splash_screen_1786018639638),
+            contentDescription = "Lisan AI Splash Screen",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
     }
 }
 
@@ -214,7 +226,8 @@ fun LisanMainApp(
         14 to "Learn with Pictures",
         15 to "Implement Your API Key",
         16 to "Chat Theme",
-        17 to "Create Image"
+        17 to "Create Image",
+        18 to "Islamic Calculator"
     )
 
     if (showLevelDialog) {
@@ -332,6 +345,7 @@ fun LisanMainApp(
                             )
 
                             val specialItems = listOf(
+                                DrawerItem("Islamic Calculator", Icons.Default.Calculate, 18, "شرعی کیلکولیٹر"),
                                 DrawerItem("Implement Your API Key", Icons.Default.Key, 15, "مفت Key"),
                                 DrawerItem("Learn with Pictures", Icons.Default.Image, 14, "جدید")
                             )
@@ -549,6 +563,7 @@ fun LisanMainApp(
                                 14 -> PictureVocabularyRootScreen(viewModel = pictureVocabularyViewModel)
                                 15 -> ImplementApiKeyScreen(viewModel = viewModel)
                                 16 -> ChatThemeSelectionScreen(viewModel = viewModel)
+                                18 -> HaqMehrCalculatorScreen(viewModel = viewModel)
                                 else -> LessonScreen(viewModel = viewModel)
                             }
                         }

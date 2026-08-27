@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.Color
@@ -79,75 +80,72 @@ fun LessonScreen(
     val quizFeedback by viewModel.quizFeedback.collectAsState()
     val isCheckingQuiz by viewModel.isCheckingQuiz.collectAsState()
     val userNameState by viewModel.userName.collectAsState()
+    val completedTopicIds by viewModel.completedTopicIds.collectAsState()
+
+    val completedCount = completedTopicIds.size
+    val totalTopics = CurriculumData.topics.size.coerceAtLeast(1)
+    val progressRatio = (completedCount.toFloat() / totalTopics).coerceIn(0f, 1f)
+    val progressPercentage = (progressRatio * 100).toInt()
 
     SelectionContainer {
         LazyColumn(
             modifier = modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp),
-            contentPadding = PaddingValues(vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(top = 10.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            item(key = "user_header") {
-                val displayName = if (userNameState == "Learner" || userNameState == "Lisan Guest Learner") "" else userNameState
-                
+            // Progress Bar Overview (Just beneath the lessons top header)
+            item(key = "progress_overview") {
                 EditorialCard(
-                    containerColor = EditorialContainer,
-                    borderColor = EditorialBorderSoft
+                    modifier = Modifier.clickable { viewModel.setSelectedTab(9) },
+                    containerColor = EditorialAccentPurple.copy(alpha = 0.05f),
+                    borderColor = EditorialAccentPurple.copy(alpha = 0.25f),
+                    showBottomAccent = true
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        UserAvatar(
-                            photoPath = when (val state = authState) {
-                                is com.example.data.model.AuthState.LoggedIn -> state.user.profilePhotoPath
-                                is com.example.data.model.AuthState.Guest -> state.user.profilePhotoPath
-                                else -> null
-                            },
-                            displayName = if (displayName.isBlank()) "Learner" else displayName,
-                            size = 56.dp,
-                            fontSize = 18.sp
-                        )
-                        
-                        Column(modifier = Modifier.weight(1f)) {
-                            val greeting = remember(displayName) {
-                                if (displayName.isBlank()) {
-                                    "Assalamu Alaikum!"
-                                } else {
-                                    "Assalamu Alaikum, $displayName!"
-                                }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BarChart,
+                                    contentDescription = "Progress Bar",
+                                    tint = EditorialAccentPurple,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "MY PROGRESS",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.8.sp,
+                                    color = EditorialTextMuted
+                                )
                             }
                             Text(
-                                text = greeting,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EditorialPrimary
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Ready to continue your English journey?",
+                                text = "$completedCount/$totalTopics Topics ($progressPercentage%)",
                                 fontSize = 12.sp,
-                                color = EditorialTextSecondary
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple
                             )
                         }
-                    }
-                }
-            }
 
-            // Progress Overview
-            item(key = "progress_overview") {
-                EditorialCard(containerColor = EditorialAccentPurple.copy(alpha = 0.05f), borderColor = EditorialAccentPurple.copy(alpha = 0.2f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { viewModel.setSelectedTab(9) },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("MY PROGRESS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EditorialTextMuted)
-                        }
-                        Icon(Icons.Default.BarChart, contentDescription = null, tint = EditorialAccentPurple)
+                        LinearProgressIndicator(
+                            progress = { progressRatio },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = EditorialAccentPurple,
+                            trackColor = EditorialAccentPurple.copy(alpha = 0.15f)
+                        )
                     }
                 }
             }

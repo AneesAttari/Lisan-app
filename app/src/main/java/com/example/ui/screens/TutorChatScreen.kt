@@ -264,6 +264,10 @@ fun TutorChatScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.ensureChatHistoryLoaded()
+    }
+
     var showTutorPreferences by remember { mutableStateOf(false) }
 
     var imageMetadata by remember(selectedImageUri) {
@@ -869,8 +873,16 @@ fun TutorChatScreen(
                 }
             }
 
-            val totalChatItems = chatHistory.size + (if (isChatLoading) 1 else 0) + (if (chatError != null) 1 else 0)
-            val lastMsgText = chatHistory.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
+            val displayableChatHistory = remember(chatHistory) {
+                chatHistory.filter { message ->
+                    val isUser = message.role == "user"
+                    val textContent = message.parts.firstOrNull()?.text ?: ""
+                    val hasAttachments = message.imageUri != null || message.generatedImageBase64 != null || message.generatedPdfUri != null
+                    isUser || textContent.isNotBlank() || hasAttachments
+                }
+            }
+            val totalChatItems = displayableChatHistory.size + (if (isChatLoading) 1 else 0) + (if (chatError != null) 1 else 0)
+            val lastMsgText = displayableChatHistory.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
 
             LaunchedEffect(Unit) {
                 // Initial welcome message handled locally by ViewModel without extra network delay
@@ -1088,7 +1100,7 @@ fun TutorChatScreen(
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             contentPadding = PaddingValues(vertical = 12.dp)
                         ) {
-                            items(chatHistory) { message ->
+                            items(displayableChatHistory) { message ->
                                 val isUser = message.role == "user"
                                 val textContent = message.parts.firstOrNull()?.text ?: ""
 
@@ -1979,7 +1991,7 @@ fun TutorChatScreen(
                                                 ),
                                                 keyboardActions = KeyboardActions(
                                                     onSend = {
-                                                        if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading && isNetworkAvailable) {
+                                                        if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading) {
                                                             viewModel.sendChatMessage(
                                                                 message = inputText,
                                                                 imageUri = selectedImageUri?.toString(),
@@ -2084,14 +2096,14 @@ fun TutorChatScreen(
                                         }
                                     } else {
                                         // Send Button [ Send ]
-                                        val isSendEnabled = !isChatLoading && isNetworkAvailable
+                                        val isSendEnabled = !isChatLoading && (inputText.isNotBlank() || selectedImageUri != null)
                                         Surface(
                                             color = if (isSendEnabled) EditorialAccentPurple else EditorialBorder,
                                             shape = CircleShape,
                                             modifier = Modifier
                                                 .size(40.dp)
                                                 .clickable(enabled = isSendEnabled) {
-                                                    if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading && isNetworkAvailable) {
+                                                    if ((inputText.isNotBlank() || selectedImageUri != null) && !isChatLoading) {
                                                         viewModel.sendChatMessage(
                                                             message = inputText,
                                                             imageUri = selectedImageUri?.toString(),

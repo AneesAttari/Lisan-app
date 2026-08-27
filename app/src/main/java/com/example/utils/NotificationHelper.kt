@@ -11,23 +11,49 @@ import com.example.MainActivity
 import com.example.R
 
 object NotificationHelper {
-    private const val CHANNEL_ID = "lisan_daily_reminder_channel"
+    const val CHANNEL_ID = "lisan_daily_reminder_channel"
     private const val NOTIFICATION_ID = 1001
 
-    fun showDailyReminderNotification(context: Context) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
+    fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Daily Grammar Reminders"
-            val descriptionText = "Reminds you to complete your daily English grammar lesson"
-            val importance = NotificationManager.IMPORTANCE_DEFAULT
-            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
-                description = descriptionText
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            val dailyChannel = NotificationChannel(
+                CHANNEL_ID,
+                "Daily English Reminders",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Daily reminders to practice English at your fixed scheduled time"
                 enableVibration(true)
             }
-            notificationManager.createNotificationChannel(channel)
+            notificationManager.createNotificationChannel(dailyChannel)
+
+            val revisionChannel = NotificationChannel(
+                "revision_channel",
+                "Grammar Revision Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Reminders for grammar review sessions"
+                enableVibration(true)
+            }
+            notificationManager.createNotificationChannel(revisionChannel)
         }
-        // Channel should be created in Application class
+    }
+
+    fun showDailyReminderNotification(context: Context, style: String = "Motivational") {
+        createChannels(context)
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+        }
+
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -36,13 +62,29 @@ object NotificationHelper {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val (shortText, bigText) = when (style) {
+            "Gentle" -> Pair(
+                "العلم نور، والاستقامة طريق النجاح.",
+                "العلم نور، والاستقامة طريق النجاح. روزانہ کی باقاعدگی اور علمی محنت ہی کامیابی کا حقیقی راستہ ہے۔"
+            )
+            "Minimal" -> Pair(
+                "الاستقامة فوق الكرامة • العلم نور",
+                "الاستقامة فوق الكرامة • العلم نور، والتعلم المستمر طريق النجاح."
+            )
+            else -> Pair(
+                "العلم نور، والاستقامة طريق النجاح.",
+                "العلم نور، والاستقامة طريق النجاح. اپنے روزانہ کے سبق اور مشق کو باقاعدگی سے مکمل کریں۔"
+            )
+        }
+
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_agenda)
-            .setContentTitle("Lisan Grammar • روزانہ گرامر سبق")
-            .setContentText("آپ کا آج کا Grammar سبق تیار ہے۔ آج کی English Grammar practice مکمل کریں۔")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Lisani")
+            .setSubText("Al-Istiqamatu fawqa al-karama")
+            .setContentText(shortText)
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText("آپ کا آج کا Grammar سبق تیار ہے۔ آج کی English Grammar practice مکمل کریں اور اپنا تسلسل (Streak) جاری رکھیں!")
+                    .bigText(bigText)
             )
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
@@ -58,8 +100,18 @@ object NotificationHelper {
     fun showRevisionReminderNotification(context: Context) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Revision Reminders"
+            val name = "Lisani Reminders"
             val descriptionText = "Reminders for your grammar revision sessions"
             val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel("revision_channel", name, importance).apply {
@@ -79,8 +131,13 @@ object NotificationHelper {
 
         val builder = NotificationCompat.Builder(context, "revision_channel")
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Time to Review! • دہرائی کا وقت")
-            .setContentText("It's time for your scheduled grammar revision session.")
+            .setContentTitle("Lisani")
+            .setSubText("Al-Istiqamatu fawqa al-karama")
+            .setContentText("العلم نور، والدراسة دأب الصالحين.")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("العلم نور، والدراسة دأب الصالحين. حان وقت مراجعة القواعد والتمارين اليومية.")
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

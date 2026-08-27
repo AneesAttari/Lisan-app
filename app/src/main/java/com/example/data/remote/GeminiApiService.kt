@@ -25,7 +25,7 @@ interface GeminiApiService {
         @Body request: GenerateContentRequest
     ): GenerateContentResponse
 
-    @POST("v1beta/models/{model}:streamGenerateContent")
+    @POST("v1beta/models/{model}:streamGenerateContent?alt=sse")
     @Streaming
     suspend fun generateContentStream(
         @Path("model") model: String,
@@ -45,7 +45,7 @@ interface BackendApiService {
         @Body request: GenerateContentRequest
     ): GenerateContentResponse
 
-    @POST("v1beta/models/{model}:streamGenerateContent")
+    @POST("v1beta/models/{model}:streamGenerateContent?alt=sse")
     @Streaming
     suspend fun generateContentStream(
         @Path("model") model: String,
