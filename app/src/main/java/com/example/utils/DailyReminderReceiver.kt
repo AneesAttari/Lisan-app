@@ -33,7 +33,7 @@ class DailyReminderReceiver : BroadcastReceiver() {
                 if (action == Intent.ACTION_BOOT_COMPLETED) {
                     // Device restarted: Reschedule the alarm for the user's fixed time
                     if (settings.dailyReminderEnabled) {
-                        RevisionReminderScheduler.scheduleDailyReminder(
+                        DailyReminderScheduler.scheduleDailyReminder(
                             context = context,
                             hour = settings.reminderHour,
                             minute = settings.reminderMinute
@@ -67,7 +67,7 @@ class DailyReminderReceiver : BroadcastReceiver() {
                     }
 
                     // Reschedule for the next day at the user's fixed hour & minute
-                    RevisionReminderScheduler.scheduleDailyReminder(
+                    DailyReminderScheduler.scheduleDailyReminder(
                         context = context,
                         hour = settings.reminderHour,
                         minute = settings.reminderMinute

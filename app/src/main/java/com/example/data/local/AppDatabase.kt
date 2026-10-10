@@ -9,7 +9,6 @@ import com.example.data.model.SavedNote
 import com.example.data.model.DailyChallengeResultEntity
 import com.example.data.model.DailyIdiomAssignment
 import com.example.data.model.DailyChallengeAssignment
-import com.example.data.model.RevisionItem
 import com.example.data.model.AchievementUnlock
 import com.example.data.model.DailyCompletionReward
 
@@ -24,10 +23,6 @@ import com.example.data.model.ConversationSessionEntity
 import com.example.data.model.CachedLessonEntity
 import com.example.data.model.DailyVerbAssignment
 import com.example.data.model.PronunciationHistoryItem
-import com.example.data.model.RevisionQuestionEntity
-import com.example.data.model.QuestionProgressEntity
-import com.example.data.model.RevisionSessionEntity
-import com.example.data.model.RevisionSessionQuestionEntity
 import com.example.data.model.TopicProgressEntity
 
 import com.example.data.model.PictureVocabularyCategoryEntity
@@ -57,17 +52,12 @@ import com.example.data.model.UserAchievementStatsEntity
         ChatMessageEntity::class,
         DailyIdiomAssignment::class,
         DailyChallengeAssignment::class,
-        RevisionItem::class,
         AchievementUnlock::class,
         DailyCompletionReward::class,
         ConversationSessionEntity::class,
         CachedLessonEntity::class,
         DailyVerbAssignment::class,
         PronunciationHistoryItem::class,
-        RevisionQuestionEntity::class,
-        QuestionProgressEntity::class,
-        RevisionSessionEntity::class,
-        RevisionSessionQuestionEntity::class,
         TopicProgressEntity::class,
         PictureVocabularyCategoryEntity::class,
         PictureVocabularyItemEntity::class,
@@ -89,7 +79,7 @@ import com.example.data.model.UserAchievementStatsEntity
         com.example.data.model.DocumentEntity::class,
         com.example.data.model.DocumentChunkEntity::class
     ], 
-    version = 19, 
+    version = 21, 
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -103,17 +93,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun dailyIdiomAssignmentDao(): DailyIdiomAssignmentDao
     abstract fun dailyChallengeAssignmentDao(): DailyChallengeAssignmentDao
-    abstract fun revisionItemDao(): RevisionItemDao
     abstract fun achievementUnlockDao(): AchievementUnlockDao
     abstract fun dailyCompletionRewardDao(): DailyCompletionRewardDao
     abstract fun conversationSessionDao(): ConversationSessionDao
     abstract fun cachedLessonDao(): CachedLessonDao
     abstract fun dailyVerbAssignmentDao(): DailyVerbAssignmentDao
     abstract fun pronunciationHistoryDao(): PronunciationHistoryDao
-    abstract fun revisionQuestionDao(): RevisionQuestionDao
-    abstract fun questionProgressDao(): QuestionProgressDao
-    abstract fun revisionSessionDao(): RevisionSessionDao
-    abstract fun revisionSessionQuestionDao(): RevisionSessionQuestionDao
     abstract fun topicProgressDao(): TopicProgressDao
     abstract fun pictureVocabularyDao(): PictureVocabularyDao
     abstract fun lisanJourneyDao(): LisanJourneyDao

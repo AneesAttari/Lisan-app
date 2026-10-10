@@ -38,7 +38,8 @@ data class LessonContent(
     val examples: List<BilingualExample>,
     val commonMistake: String, // Explained in Urdu
     val practiceQuestion: String,
-    val practiceAnswerHint: String = ""
+    val practiceAnswerHint: String = "",
+    val mcqs: List<LessonMcq> = emptyList()
 )
 
 object CurriculumData {
@@ -196,8 +197,32 @@ object CurriculumData {
         )
     )
 
-    fun getDefaultLesson(topicId: String): LessonContent {
+    fun getLessonMcqs(topicId: String): List<LessonMcq> {
         return when (topicId) {
+            "verb_to_be" -> FoundationsMcqData.verbToBeMcqs
+            "articles_a_an_the" -> FoundationsMcqData.articlesMcqs
+            "present_simple" -> PresentTensesMcqData.presentSimpleMcqs
+            "present_continuous" -> PresentTensesMcqData.presentContinuousMcqs
+            "present_perfect" -> PresentTensesMcqData.presentPerfectMcqs
+            "present_perfect_continuous" -> PresentTensesMcqData.presentPerfectContinuousMcqs
+            "past_simple" -> PastTensesMcqData.pastSimpleMcqs
+            "past_continuous" -> PastTensesMcqData.pastContinuousMcqs
+            "past_perfect" -> PastTensesMcqData.pastPerfectMcqs
+            "past_perfect_continuous" -> PastTensesMcqData.pastPerfectContinuousMcqs
+            "future_simple" -> FutureTensesMcqData.futureSimpleMcqs
+            "future_continuous" -> FutureTensesMcqData.futureContinuousMcqs
+            "future_perfect" -> FutureTensesMcqData.futurePerfectMcqs
+            "future_perfect_continuous" -> FutureTensesMcqData.futurePerfectContinuousMcqs
+            "passive_voice" -> AdvancedGrammarMcqData.passiveVoiceFoundationsMcqs
+            "passive_voice_conversion" -> AdvancedGrammarMcqData.passiveVoiceConversionMcqs
+            "direct_indirect_foundations" -> AdvancedGrammarMcqData.directIndirectFoundationsMcqs
+            "direct_indirect_sentences" -> AdvancedGrammarMcqData.directIndirectSentencesMcqs
+            else -> emptyList()
+        }
+    }
+
+    fun getDefaultLesson(topicId: String): LessonContent {
+        val baseLesson = when (topicId) {
             "verb_to_be" -> LessonContent(
                 topicTitleEn = "Verb 'To Be' (Am/Is/Are)",
                 topicTitleUr = "فعلِ ربط (Verb To Be)",
@@ -1109,5 +1134,6 @@ When Reporting Verb is in PAST (e.g., 'said'):
                 practiceAnswerHint = "Yes, it is."
             )
         }
+        return baseLesson.copy(mcqs = getLessonMcqs(topicId))
     }
 }

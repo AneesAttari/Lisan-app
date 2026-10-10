@@ -50,15 +50,17 @@ class PictureTtsManager(private val context: Context) {
     }
 
     fun speak(text: String) {
+        val sanitized = TtsSanitizer.sanitizeForSpeech(text)
+        if (sanitized.isBlank()) return
         if (!isInitialized) {
             initTtsInternal {
-                speak(text)
+                speak(sanitized)
             }
             return
         }
         try {
             _isSpeaking.value = true
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "vocab_${System.currentTimeMillis()}")
+            tts?.speak(sanitized, TextToSpeech.QUEUE_FLUSH, null, "vocab_${System.currentTimeMillis()}")
             // Reset speaking state after a short delay
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 _isSpeaking.value = false

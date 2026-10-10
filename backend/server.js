@@ -182,10 +182,10 @@ app.get('/api/prices', async (req, res) => {
     const country = req.query.country || 'Pakistan';
     const currency = req.query.currency || 'PKR';
 
-    // Fetch live XAU, XAG and Exchange rates in parallel
-    let xauPriceUsd = 2500.0;
-    let xagPriceUsd = 29.50;
-    let usdToPkr = 278.50;
+    // Fetch live XAU, XAG and Exchange rates in parallel without fake fallback numbers
+    let xauPriceUsd = null;
+    let xagPriceUsd = null;
+    let usdToPkr = null;
 
     try {
       const [goldRes, silverRes, exRes] = await Promise.allSettled([
@@ -196,32 +196,23 @@ app.get('/api/prices', async (req, res) => {
 
       if (goldRes.status === 'fulfilled' && goldRes.value.ok) {
         const gData = await goldRes.value.json();
-        if (gData && gData.price) xauPriceUsd = gData.price;
+        if (gData && gData.price && gData.price > 0) xauPriceUsd = gData.price;
       }
 
       if (silverRes.status === 'fulfilled' && silverRes.value.ok) {
         const sData = await silverRes.value.json();
-        if (sData && sData.price) xagPriceUsd = sData.price;
+        if (sData && sData.price && sData.price > 0) xagPriceUsd = sData.price;
       }
 
       if (exRes.status === 'fulfilled' && exRes.value.ok) {
         const eData = await exRes.value.json();
-        if (eData && eData.rates && eData.rates.PKR) {
+        if (eData && eData.rates && eData.rates.PKR && eData.rates.PKR > 0) {
           usdToPkr = eData.rates.PKR;
         }
       }
     } catch (e) {
       console.warn("[PRICES] External price fetch warning:", e.message);
     }
-
-    const gramsPerTroyOz = 31.1034768;
-    const gramsPerTola = 11.6638125;
-
-    const goldPricePerGramPkr = (xauPriceUsd / gramsPerTroyOz) * usdToPkr;
-    const goldPricePerTolaPkr = goldPricePerGramPkr * gramsPerTola;
-
-    const silverPricePerGramPkr = (xagPriceUsd / gramsPerTroyOz) * usdToPkr;
-    const silverPricePerTolaPkr = silverPricePerGramPkr * gramsPerTola;
 
     const now = new Date();
     const formattedTimestamp = now.getUTCFullYear() + '-' +
@@ -230,67 +221,97 @@ app.get('/api/prices', async (req, res) => {
       String(now.getUTCHours()).padStart(2, '0') + ':' +
       String(now.getUTCMinutes()).padStart(2, '0') + ' UTC';
 
+    const gramsPerTroyOz = 31.1034768;
+    const gramsPerTola = 11.6638125;
+
+    let goldObj = null;
+    if (xauPriceUsd && usdToPkr) {
+      const goldPricePerGramPkr = (xauPriceUsd / gramsPerTroyOz) * usdToPkr;
+      const goldPricePerTolaPkr = goldPricePerGramPkr * gramsPerTola;
+      goldObj = {
+        price_per_gram: Math.round(goldPricePerGramPkr * 100) / 100,
+        price_per_tola: Math.round(goldPricePerTolaPkr * 100) / 100,
+        currency: "PKR",
+        source: "Global Bullion Spot Feed (gold-api.com)",
+        freshness_status: "LIVE"
+      };
+    }
+
+    let silverObj = null;
+    if (xagPriceUsd && usdToPkr) {
+      const silverPricePerGramPkr = (xagPriceUsd / gramsPerTroyOz) * usdToPkr;
+      const silverPricePerTolaPkr = silverPricePerGramPkr * gramsPerTola;
+      silverObj = {
+        price_per_gram: Math.round(silverPricePerGramPkr * 100) / 100,
+        price_per_tola: Math.round(silverPricePerTolaPkr * 100) / 100,
+        currency: "PKR",
+        source: "Global Bullion Spot Feed (gold-api.com)",
+        freshness_status: "LIVE"
+      };
+    }
+
+    // Commodities: Do NOT label hardcoded benchmark values as LIVE.
+    // Explicitly marked as FALLBACK test benchmarks.
+    const commoditiesObj = {
+      wheat: {
+        name_en: "Wheat / Flour",
+        name_ur: "گندم / آٹا",
+        price_per_kg: 105.0,
+        price_per_maund: 4200.0,
+        currency: "PKR",
+        source: "Pakistan Mandi Bulletin (Offline Reference)",
+        freshness_status: "FALLBACK"
+      },
+      barley: {
+        name_en: "Barley",
+        name_ur: "جو",
+        price_per_kg: 280.0,
+        price_per_maund: 11200.0,
+        currency: "PKR",
+        source: "Pakistan Mandi Bulletin (Offline Reference)",
+        freshness_status: "FALLBACK"
+      },
+      dates: {
+        name_en: "Dates",
+        name_ur: "کھجور",
+        price_per_kg: 650.0,
+        price_per_maund: 26000.0,
+        currency: "PKR",
+        source: "Pakistan Dry Fruit Bulletin (Offline Reference)",
+        freshness_status: "FALLBACK"
+      },
+      raisins: {
+        name_en: "Raisins",
+        name_ur: "کشمش",
+        price_per_kg: 1400.0,
+        price_per_maund: 56000.0,
+        currency: "PKR",
+        source: "Pakistan Dry Fruit Bulletin (Offline Reference)",
+        freshness_status: "FALLBACK"
+      },
+      ajwa_dates: {
+        name_en: "Ajwa / Premium Dates",
+        name_ur: "اعلیٰ کھجور / عجوہ",
+        price_per_kg: 2500.0,
+        price_per_maund: 100000.0,
+        currency: "PKR",
+        source: "Saudi Import Bulletin (Offline Reference)",
+        freshness_status: "FALLBACK"
+      }
+    };
+
+    const hasLiveBullion = !!(goldObj || silverObj);
+
     res.json({
       status: "success",
       timestamp_ms: now.getTime(),
       formatted_timestamp: formattedTimestamp,
-      freshness_status: "LIVE",
+      freshness_status: hasLiveBullion ? "LIVE" : "FALLBACK",
       requested_country: country,
       requested_currency: currency,
-      gold: {
-        price_per_gram: Math.round(goldPricePerGramPkr * 100) / 100,
-        price_per_tola: Math.round(goldPricePerTolaPkr * 100) / 100,
-        currency: "PKR",
-        source: "Global Bullion Spot Feed & Sarafa Benchmark"
-      },
-      silver: {
-        price_per_gram: Math.round(silverPricePerGramPkr * 100) / 100,
-        price_per_tola: Math.round(silverPricePerTolaPkr * 100) / 100,
-        currency: "PKR",
-        source: "Global Bullion Spot Feed & Sarafa Benchmark"
-      },
-      commodities: {
-        wheat: {
-          name_en: "Wheat / Flour",
-          name_ur: "گندم / آٹا",
-          price_per_kg: 105.0,
-          price_per_maund: 4200.0,
-          currency: "PKR",
-          source: "Pakistan Mandi Commodity Bulletin"
-        },
-        barley: {
-          name_en: "Barley",
-          name_ur: "جو",
-          price_per_kg: 280.0,
-          price_per_maund: 11200.0,
-          currency: "PKR",
-          source: "Pakistan Mandi Commodity Bulletin"
-        },
-        dates: {
-          name_en: "Dates",
-          name_ur: "کھجور",
-          price_per_kg: 650.0,
-          price_per_maund: 26000.0,
-          currency: "PKR",
-          source: "Pakistan Dry Fruit Market Bulletin"
-        },
-        raisins: {
-          name_en: "Raisins",
-          name_ur: "کشمش",
-          price_per_kg: 1400.0,
-          price_per_maund: 56000.0,
-          currency: "PKR",
-          source: "Pakistan Dry Fruit Market Bulletin"
-        },
-        ajwa_dates: {
-          name_en: "Ajwa / Premium Dates",
-          name_ur: "اعلیٰ کھجور / عجوہ",
-          price_per_kg: 2500.0,
-          price_per_maund: 100000.0,
-          currency: "PKR",
-          source: "Saudi Import Date Market Bulletin"
-        }
-      }
+      gold: goldObj,
+      silver: silverObj,
+      commodities: commoditiesObj
     });
   } catch (err) {
     console.error("[ERROR] /api/prices failed:", err);

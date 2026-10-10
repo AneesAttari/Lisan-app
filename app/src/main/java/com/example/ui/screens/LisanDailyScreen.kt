@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -34,7 +35,6 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.DailyChallengeQuestion
 import com.example.data.model.DailyChallengeQuestionType
 import com.example.data.model.DailyChallengeState
-import com.example.data.model.RevisionItem
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialDivider
 import com.example.ui.components.ScrollToBottomFAB
@@ -75,16 +75,17 @@ fun LisanDailyScreen(
 
     val isLisanDailyRewarded by viewModel.isLisanDailyRewarded.collectAsState()
     val achievements by viewModel.achievements.collectAsState()
-    val revisionItems by viewModel.revisionItems.collectAsState()
-    val dueRevisionCount by viewModel.dueRevisionCount.collectAsState()
     val unlockedCelebration by viewModel.unlockedCelebration.collectAsState()
     val currentlySpeaking by viewModel.activeSpeakingId.collectAsState()
+    val dailyProgress by viewModel.dailyChallengeProgress.collectAsState()
+    val todayAssignment by viewModel.todayAssignment.collectAsState()
 
     val currentQuestion = dailyChallengeQuestions.getOrNull(currentQuestionIndex)
     val isChallengeCompleted = dailyChallengeState == DailyChallengeState.COMPLETED
 
     LaunchedEffect(Unit) {
         viewModel.ensureLisanDailyLoaded()
+        viewModel.ensureDailyChallengeProgressLoaded()
     }
 
     // Scroll state for the entire hub page
@@ -216,6 +217,146 @@ fun LisanDailyScreen(
                         imageVector = Icons.Default.ArrowForward,
                         contentDescription = "Next Day",
                         tint = EditorialAccentPurple
+                    )
+                }
+            }
+        }
+
+        // --- 365 Days Daily 10 Quizzes Direct Portal Card ---
+        val currentQuizDay = ((dailyProgress?.totalCompletedDays ?: 0) + 1).coerceIn(1, 365)
+        val completedDaysCount = dailyProgress?.totalCompletedDays ?: 0
+
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp)),
+            color = Color(0xFF0F172A),
+            border = BorderStroke(1.5.dp, Color(0xFFF97316).copy(alpha = 0.6f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFFF97316), Color(0xFFEA580C))
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Quiz,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Daily 10 Quizzes",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "365 Days • 10 Unique Non-Repeating MCQs",
+                                fontSize = 11.sp,
+                                color = Color(0xFFCBD5E1)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        color = Color(0xFFF97316).copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFF97316))
+                    ) {
+                        Text(
+                            text = "DAY $currentQuizDay / 365",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFF9800),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "ہر روز 10 بالکل منفرد گرائمر سوالات جو 10 مختلف اہم موضوعات (Tenses, Modals, Passive Voice, Conditionals, Reported Speech) سے خودکار تیار ہوتے ہیں اور کبھی نہیں دہرائے جاتے۔",
+                    fontSize = 13.sp,
+                    color = Color(0xFFE2E8F0),
+                    lineHeight = 20.sp
+                )
+
+                // Progress Bar
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "سالانہ پیشرفت: $completedDaysCount مکمل دن",
+                            fontSize = 12.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                        Text(
+                            text = "${(completedDaysCount * 100 / 365)}%",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFF8A65)
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { (completedDaysCount / 365f).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = Color(0xFFF97316),
+                        trackColor = Color(0xFF334155)
+                    )
+                }
+
+                // Beautiful Action Button connecting directly to the daily 10 quizzes page
+                Button(
+                    onClick = {
+                        viewModel.startDaily10QuizChallenge(currentQuizDay)
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFF97316),
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("start_daily_10_quizzes_direct_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "آج کے 10 کوئز شروع کریں (Day $currentQuizDay)",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -509,131 +650,233 @@ fun LisanDailyScreen(
                         )
                     }
                     
-                    // Practise / Note placeholder (button takes up rest of space)
-                    Spacer(modifier = Modifier.weight(1f))
+                    // Mark as Learned interactive button
+                    Button(
+                        onClick = { viewModel.completeDailyVerb() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDailyVerbCompleted) Color(0xFF10B981) else EditorialPrimary,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("mark_verb_learned_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isDailyVerbCompleted) Icons.Default.CheckCircle else Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isDailyVerbCompleted) "Learned • سیکھ لیا" else "Mark Learned • سیکھ لیا",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
 
         // --- Daily Idiom Component ---
-        dailyIdiom?.let { idiom ->
+        val effectiveIdiom = dailyIdiom ?: com.example.data.repository.IdiomRepository.idioms.firstOrNull()
+        effectiveIdiom?.let { idiom ->
             EditorialCard(
-                borderColor = if (isDailyIdiomCompleted) Color(0xFF81C784).copy(alpha = 0.5f) else EditorialBorder
+                borderColor = if (isDailyIdiomCompleted) Color(0xFF81C784).copy(alpha = 0.6f) else EditorialBorder
             ) {
+                // Header with icon, title, category, and audio listen button
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ChatBubbleOutline,
-                        contentDescription = null,
-                        tint = EditorialAccentPurple,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "DAILY IDIOM",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialAccentPurple,
-                        letterSpacing = 1.2.sp
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = "روزمرہ محاورہ",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(EditorialAccentPurple.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = EditorialAccentPurple,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "DAILY IDIOM",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple,
+                                letterSpacing = 1.2.sp
+                            )
+                            Surface(
+                                color = EditorialAccentPurple.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = idiom.category.label,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialAccentPurple,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "روزمرہ محاورہ مع تلفظ و اردو وضاحت",
+                            fontSize = 11.sp,
+                            color = EditorialTextSecondary
+                        )
+                    }
+
+                    // Pronunciation / Read Aloud Listen Button
+                    val isSpeakingThis = currentlySpeaking == idiom.id
+                    IconButton(
+                        onClick = { viewModel.playIdiomAudio(idiom.id) },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (isSpeakingThis) EditorialAccentPurple else EditorialContainer)
+                            .testTag("listen_idiom_button")
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeakingThis) Icons.Default.VolumeUp else Icons.Default.VolumeMute,
+                            contentDescription = "Listen to Idiom",
+                            tint = if (isSpeakingThis) Color.White else EditorialAccentPurple,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Idiom Expression Card
+                Surface(
+                    color = EditorialContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, EditorialBorderSoft),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "\"${idiom.expression}\"",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialPrimary,
+                            fontFamily = FontFamily.Serif
+                        )
+                        Text(
+                            text = idiom.simpleMeaning,
+                            fontSize = 14.sp,
+                            color = EditorialTextPrimary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Urdu Meaning Box
                 Surface(
-                    color = EditorialAccentPurple.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    color = EditorialAccentPurple.copy(alpha = 0.06f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = idiom.category.label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialAccentPurple,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "اردو مفہوم و معنی:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EditorialAccentPurple
+                        )
+                        Text(
+                            text = idiom.urduMeaning,
+                            fontSize = 15.sp,
+                            color = EditorialPrimary,
+                            fontWeight = FontWeight.Normal,
+                            lineHeight = 24.sp,
+                            textAlign = TextAlign.Right,
+                            style = TextStyle(textDirection = TextDirection.Rtl),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
 
-                Text(
-                    text = idiom.expression,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialPrimary,
-                    fontFamily = FontFamily.Serif
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Text(
-                    text = "Urdu meaning:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialTextMuted
-                )
-                Text(
-                    text = idiom.urduMeaning,
-                    fontSize = 15.sp,
-                    color = EditorialPrimary,
-                    fontWeight = FontWeight.Normal,
-                    lineHeight = 26.sp,
-                    textAlign = TextAlign.Right,
-                    style = TextStyle(textDirection = TextDirection.Rtl),
+                // Example Sentence
+                Surface(
+                    color = EditorialSurface,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, EditorialBorderSoft),
                     modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "English Explanation:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = EditorialTextMuted
-                )
-                Text(
-                    text = idiom.simpleMeaning,
-                    fontSize = 14.sp,
-                    color = EditorialTextPrimary
-                )
-
-                EditorialDivider()
-
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Example Sentence:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialTextMuted
-                    )
-                    Text(
-                        text = idiom.example,
-                        fontSize = 14.sp,
-                        color = EditorialTextPrimary,
-                        fontWeight = FontWeight.Medium
-                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatQuote,
+                                contentDescription = null,
+                                tint = EditorialAccentPurple,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Example in Real Conversation:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialTextMuted
+                            )
+                        }
+                        Text(
+                            text = idiom.example,
+                            fontSize = 13.sp,
+                            color = EditorialTextPrimary,
+                            fontStyle = FontStyle.Italic,
+                            lineHeight = 19.sp
+                        )
+                    }
                 }
 
                 if (idiom.arabicMeaning.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     Surface(
-                        color = Color(0xFFF3F2FF),
-                        shape = RoundedCornerShape(8.dp),
+                        color = EditorialAccentPurple.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                text = "جيسے آپ نے عربى میں سیکھا ہے (Arabic Connection):",
+                                text = "جیسے آپ نے عربی میں سیکھا ہے (Arabic Connection):",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EditorialAccentPurple
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = idiom.arabicMeaning,
                                 fontSize = 13.sp,
@@ -646,6 +889,7 @@ fun LisanDailyScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Action row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -658,7 +902,9 @@ fun LisanDailyScreen(
                         ),
                         shape = RoundedCornerShape(12.dp),
                         enabled = !isDailyIdiomCompleted,
-                        modifier = Modifier.testTag("complete_idiom_button")
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("complete_idiom_button")
                     ) {
                         Icon(
                             imageVector = if (isDailyIdiomCompleted) Icons.Default.CheckCircle else Icons.Default.Check,
@@ -1017,7 +1263,9 @@ fun LisanDailyScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = {
-                    viewModel.setChatInput("Can you explain today's daily task and grammar rules?")
+                    val prompt = "Can you explain today's daily task and grammar rules?"
+                    viewModel.setTutorChatActive(true)
+                    viewModel.sendChatMessage(prompt)
                     viewModel.setSelectedTab(2)
                 },
                 modifier = Modifier
@@ -1037,205 +1285,7 @@ fun LisanDailyScreen(
             }
         }
 
-        // --- 4. Spaced Repetition Revision Planner ---
-        EditorialCard {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.EventNote,
-                        contentDescription = null,
-                        tint = EditorialAccentPurple,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "REVISION PLANNER",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary,
-                        letterSpacing = 1.2.sp
-                    )
-                }
-                if (dueRevisionCount > 0) {
-                    Badge(containerColor = Color.Red, contentColor = Color.White) {
-                        Text(
-                            text = "$dueRevisionCount Due",
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-
-            val dueItems = revisionItems.filter { it.nextReviewAt <= System.currentTimeMillis() }
-
-            if (dueItems.isEmpty()) {
-                Text(
-                    text = "All clear! You are fully caught up with your scheduled revisions. ✨",
-                    fontSize = 14.sp,
-                    color = EditorialTextMuted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp)
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Spaced repetition assignments due for self-evaluation:",
-                        fontSize = 13.sp,
-                        color = EditorialTextSecondary
-                    )
-                    dueItems.take(3).forEach { item ->
-                        var isExpanded by remember { mutableStateOf(false) }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = EditorialContainer,
-                            border = BorderStroke(1.dp, EditorialBorder),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.topic,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = EditorialPrimary
-                                        )
-                                        Text(
-                                            text = "Source: ${item.sourceType.replace("_", " ")} • Reviewed ${item.timesReviewed} times",
-                                            fontSize = 11.sp,
-                                            color = EditorialTextMuted
-                                        )
-                                    }
-                                    TextButton(onClick = { isExpanded = !isExpanded }) {
-                                        Text(if (isExpanded) "Hide" else "Reveal")
-                                    }
-                                }
-
-                                AnimatedVisibility(visible = isExpanded) {
-                                    Column(
-                                        modifier = Modifier.padding(top = 8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        HorizontalDivider(color = EditorialBorder)
-                                        Text(
-                                            text = "Verify your memory of this topic. How did you do?",
-                                            fontSize = 13.sp,
-                                            color = EditorialTextSecondary
-                                        )
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Button(
-                                                onClick = {
-                                                    viewModel.reviewRevisionItem(item, isCorrect = false)
-                                                    isExpanded = false
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                                                shape = RoundedCornerShape(8.dp),
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Text("Need Review", fontSize = 12.sp)
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    viewModel.reviewRevisionItem(item, isCorrect = true)
-                                                    isExpanded = false
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                                shape = RoundedCornerShape(8.dp),
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Text("I Know This", fontSize = 12.sp)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- 5. Discuss with Lisan AI Tutor Quick Link ---
-        EditorialCard(
-            containerColor = EditorialPillBg,
-            borderColor = EditorialPrimary.copy(alpha = 0.15f)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(EditorialPrimary.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Chat,
-                        contentDescription = null,
-                        tint = EditorialPrimary
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Discuss with Lisan AI Tutor",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EditorialPrimary
-                    )
-                    Text(
-                        text = "Need personalized context, detailed practice, or explanations?",
-                        fontSize = 12.sp,
-                        color = EditorialTextSecondary
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = {
-                    val promptContext = buildString {
-                        append("Can you explain the Daily grammar concept")
-                        currentQuestion?.let { append(" about '${it.topic}' ('${it.questionText}')") }
-                        dailyVerb?.let { append(" or the Daily Verb '${it.baseForm}'") }
-                        append("?")
-                    }
-                    // Trigger deep conversation inside Tutor tab
-                    viewModel.setChatInput(promptContext)
-                    viewModel.setSelectedTab(2) // Navigate directly to AI Tutor Screen!
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .testTag("discuss_with_tutor_button"),
-                colors = ButtonDefaults.buttonColors(containerColor = EditorialPrimary),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text(
-                    text = "Start Dialogue with Tutor AI",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                )
-            }
-        }
-
-        // --- 6. Dynamic Achievements Ribbon List ---
+        // --- Dynamic Achievements Ribbon List ---
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = "YOUR MILESTONES & ACHIEVEMENTS",

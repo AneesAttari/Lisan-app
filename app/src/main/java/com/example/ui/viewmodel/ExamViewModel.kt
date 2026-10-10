@@ -218,8 +218,8 @@ class ExamViewModel(application: Application) : AndroidViewModel(application) {
                     .joinToString("; ") { it.take(80) }
 
                 val completedTopicsList = topicProgresses
-                    .filter { it.overallMastery > 20 || it.masteredCount > 0 }
-                    .map { "${it.topicId} (${it.overallMastery}% mastery)" }
+                    .filter { it.isCompleted || it.masteryScore > 0.2f }
+                    .map { "${it.topicId} (${(it.masteryScore * 100).toInt()}% mastery)" }
                     .joinToString(", ")
 
                 val noteTitles = savedNotes.take(5).joinToString(", ") { it.titleEn }

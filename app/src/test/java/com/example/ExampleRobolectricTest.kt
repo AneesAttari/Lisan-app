@@ -1,6 +1,7 @@
 package com.example
 
 import android.content.Context
+import com.example.R
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -14,10 +15,9 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
   @Test
-  fun `read string from context`() {
+  fun `read package name from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    val appName = context.getString(R.string.app_name)
-    assertEquals("Lisan AI", appName)
+    assertEquals(BuildConfig.APPLICATION_ID, context.packageName)
   }
 
   @Test

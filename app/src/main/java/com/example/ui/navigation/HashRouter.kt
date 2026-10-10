@@ -62,6 +62,7 @@ object HashRouter {
      */
     fun routeToTab(route: String): Int {
         if (route.startsWith("#/picture-vocabulary")) return 14
+        if (route.startsWith("#/lessons")) return 0
         return when (route) {
             "#/lessons" -> 0
             "#/analyzer" -> 1
@@ -70,7 +71,7 @@ object HashRouter {
             "#/library" -> 4
             "#/daily" -> 5
             "#/quizzes" -> 6
-            "#/revision" -> 7
+            "#/revision" -> 9
             "#/achievements", "#/lisan-journey" -> 8
             "#/progress" -> 9
             "#/settings" -> 10
@@ -84,6 +85,14 @@ object HashRouter {
             "#/haq-mehr", "#/silver-calculator", "#/silver-rate", "#/islamic-calculator", "#/zakat-calculator", "#/fitrana-calculator", "#/ushr-calculator" -> 18
             else -> 2
         }
+    }
+
+    /**
+     * Extracts an optional grammar topicId from a route like `#/lessons/present_simple`
+     */
+    fun extractTopicId(route: String): String? {
+        if (!route.startsWith("#/lessons/")) return null
+        return route.removePrefix("#/lessons/").substringBefore("?").substringBefore("/").trim().takeIf { it.isNotEmpty() }
     }
 
     /**

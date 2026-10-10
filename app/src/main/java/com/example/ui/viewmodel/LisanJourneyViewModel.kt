@@ -36,14 +36,8 @@ class LisanJourneyViewModel(application: Application) : AndroidViewModel(applica
     @Volatile
     private var hasInitialized = false
 
-    init {
-        if (!isLowRam) {
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                repository.initializeDefinitionsIfNeeded()
-                hasInitialized = true
-            }
-        }
-    }
+    // Definitions initialization is safely deferred until LisanJourney screen is opened
+    // and calls ensureInitialized()
 
     fun ensureInitialized() {
         if (hasInitialized) return

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 enum class PriceFreshnessStatus(val labelEn: String, val labelUr: String) {
     LIVE("LIVE Real-Time API Rate", "لائیو مارکیٹ ریٹ"),
+    GROUNDED_SEARCH("Grounded Web Search", "ویب سرچ ریٹ"),
     CACHED("CACHED Session Rate", "محفوظ شدہ مارکیٹ ریٹ"),
     FALLBACK("FALLBACK Market Benchmark", "مارکیٹ ریفرینس بینچ مارک")
 }

@@ -11,7 +11,8 @@ class PictureVocabularyRepository(private val dao: PictureVocabularyDao) {
     suspend fun initializeContentIfNeeded() {
         withContext(Dispatchers.IO) {
             val count = dao.getTotalCategoryCount()
-            if (count < 40) {
+            val hasEnglishArabic = dao.getAllItemsList().any { it.wordArabic.matches(Regex(".*[a-zA-Z].*")) }
+            if (count < 40 || hasEnglishArabic) {
                 seedAllContent()
             }
         }

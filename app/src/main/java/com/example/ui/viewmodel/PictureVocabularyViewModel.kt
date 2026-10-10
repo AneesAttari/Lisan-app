@@ -52,17 +52,8 @@ class PictureVocabularyViewModel(application: Application) : AndroidViewModel(ap
     @Volatile
     private var isInitializingContent = false
 
-    init {
-        if (!isLowRam) {
-            // Capable devices: initialize in background on IO dispatcher to keep startup snappy
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                repository.initializeContentIfNeeded()
-                repository.getAllCategories().collect { list ->
-                    _categories.value = list
-                }
-            }
-        }
-    }
+    // Content initialization is safely deferred until PictureVocabulary screen is opened
+    // and calls ensureContentInitialized()
 
     fun ensureContentInitialized() {
         if (_categories.value.isNotEmpty() || isInitializingContent) return

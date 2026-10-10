@@ -9,6 +9,8 @@ import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 
 object ImageOptimizer {
@@ -204,4 +206,88 @@ object ImageOptimizer {
         val pre = "KMGTPE"[exp - 1] + ""
         return String.format("%.1f %sB", bytes / Math.pow(1024.0, exp.toDouble()), pre)
     }
+
+    /**
+     * Persists generated/downloaded image bytes to internal persistent storage (`files/generated_images/`)
+     * to avoid holding large Base64 strings in memory while preventing unexpected cache deletion.
+     */
+    fun saveGeneratedImageBytes(context: Context, bytes: ByteArray, mimeType: String = "image/png"): File? {
+        return try {
+            val extension = if (mimeType.contains("jpeg") || mimeType.contains("jpg")) "jpg" else "png"
+            val dir = File(context.filesDir, "generated_images").apply { mkdirs() }
+            val file = File(dir, "lisan_img_${System.currentTimeMillis()}_${(1000..9999).random()}.$extension")
+            java.io.FileOutputStream(file).use { fos ->
+                fos.write(bytes)
+            }
+            file
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save generated image to persistent files: ${e.message}", e)
+            null
+        }
+    }
+
+    /**
+     * Safely saves a Base64 image string to persistent storage and returns its absolute file path.
+     * If the input is already a file path or URL, returns it directly.
+     */
+    fun saveGeneratedImageBase64(context: Context, base64OrPath: String, mimeType: String = "image/png"): String {
+        if (isLocalFilePathOrUri(base64OrPath)) {
+            return base64OrPath
+        }
+        return try {
+            val cleanBase64 = if (base64OrPath.contains(",")) {
+                base64OrPath.substringAfter(",")
+            } else {
+                base64OrPath
+            }
+            val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+            val file = saveGeneratedImageBytes(context, bytes, mimeType)
+            file?.absolutePath ?: base64OrPath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decode and save base64 image: ${e.message}", e)
+            base64OrPath
+        }
+    }
+
+    /**
+     * Determines whether the given string is a local file path, file URI, content URI, or web URL.
+     */
+    fun isLocalFilePathOrUri(source: String): Boolean {
+        val s = source.trim()
+        return s.startsWith("/") ||
+                s.startsWith("file:") ||
+                s.startsWith("content:") ||
+                s.startsWith("http:") ||
+                s.startsWith("https:") ||
+                s.startsWith("android.resource:")
+    }
+
+    /**
+     * Safely resolves image bytes from either a file path, content URI, or legacy Base64 string.
+     */
+    fun resolveImageBytes(context: Context, imageSource: String): ByteArray? {
+        val s = imageSource.trim()
+        return try {
+            when {
+                s.startsWith("content://") -> {
+                    context.contentResolver.openInputStream(Uri.parse(s))?.use { it.readBytes() }
+                }
+                s.startsWith("file://") -> {
+                    val path = s.removePrefix("file://")
+                    File(path).readBytes()
+                }
+                s.startsWith("/") -> {
+                    File(s).readBytes()
+                }
+                else -> {
+                    val clean = if (s.contains(",")) s.substringAfter(",") else s
+                    Base64.decode(clean, Base64.DEFAULT)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resolve image bytes: ${e.message}", e)
+            null
+        }
+    }
 }
+

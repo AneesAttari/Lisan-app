@@ -106,6 +106,7 @@ fun TutorChatScreen(
     val detectedInputLanguage by viewModel.detectedInputLanguage.collectAsState()
     val effectiveResponseLanguage by viewModel.effectiveResponseLanguage.collectAsState()
     val chatHistory by viewModel.chatHistory.collectAsState()
+    val streamingMessage by viewModel.streamingMessage.collectAsState()
     val isChatLoading by viewModel.isChatLoading.collectAsState()
     val chatError by viewModel.chatError.collectAsState()
     val currentlySpeakingText by viewModel.activeSpeakingId.collectAsState()
@@ -672,6 +673,16 @@ fun TutorChatScreen(
                                     .clickable {
                                         viewModel.setActiveTutorMode(modeTitle)
                                         viewModel.setTutorChatActive(true)
+                                        val prompt = when (modeTitle) {
+                                            "Explain Grammar" -> "I want to learn English grammar. Please pick a key grammar rule suitable for my level and explain it step-by-step with clear examples in English and Urdu."
+                                            "Correct My Sentence" -> "I want to practice writing English sentences. Please ask me to write a sentence on a given topic, then correct any mistakes I make with clear explanations in Urdu."
+                                            "Practice Conversation" -> "Let's practice an interactive English conversation! Start a friendly dialogue with me about an interesting daily life topic and guide me whenever I need help."
+                                            "Translate & Explain" -> "Please give me a useful English sentence, translate it into Urdu, and break down its sentence structure and grammar rules for me."
+                                            "Give Me a Quiz" -> "Please give me a quick interactive English quiz question. Present the prompt in Urdu/English and wait for my answer before revealing the solution!"
+                                            "Review My Mistakes" -> "Can you review common English grammar and pronunciation mistakes that Urdu speakers frequently make, and explain how to avoid them?"
+                                            else -> "I would like to practice in $modeTitle mode. Please start!"
+                                        }
+                                        viewModel.sendChatMessage(prompt)
                                     }
                             ) {
                                 Row(
@@ -749,6 +760,45 @@ fun TutorChatScreen(
                                 value = "${completedTopics.size} Topics",
                                 valueArabic = "${completedTopics.size} دروس مكتملة",
                                 icon = Icons.Default.CheckCircle
+                            )
+                        }
+
+                        EditorialDivider()
+
+                        val totalTopicsCount = com.example.data.model.CurriculumData.topics.size.coerceAtLeast(1)
+                        val progressFraction = (completedTopics.size.toFloat() / totalTopicsCount.toFloat()).coerceIn(0f, 1f)
+                        val progressPctInt = (progressFraction * 100).toInt()
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Grammar Course Progress • مجموعی گرامر پیشرفت",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialPrimary
+                                )
+                                Text(
+                                    text = "${completedTopics.size} / $totalTopicsCount Topics ($progressPctInt%)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialAccentPurple
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { progressFraction },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = EditorialAccentPurple,
+                                trackColor = EditorialAccentPurple.copy(alpha = 0.15f)
                             )
                         }
                     }
@@ -881,16 +931,21 @@ fun TutorChatScreen(
                     isUser || textContent.isNotBlank() || hasAttachments
                 }
             }
-            val totalChatItems = displayableChatHistory.size + (if (isChatLoading) 1 else 0) + (if (chatError != null) 1 else 0)
-            val lastMsgText = displayableChatHistory.lastOrNull()?.parts?.firstOrNull()?.text ?: ""
+            val hasStreamingOrLoading = streamingMessage != null || isChatLoading
+            val totalChatItems = displayableChatHistory.size + (if (hasStreamingOrLoading) 1 else 0) + (if (chatError != null) 1 else 0)
 
-            LaunchedEffect(Unit) {
-                // Initial welcome message handled locally by ViewModel without extra network delay
-            }
-
-            LaunchedEffect(totalChatItems, lastMsgText, isImeVisible) {
+            LaunchedEffect(totalChatItems, isImeVisible) {
                 if (totalChatItems > 0) {
                     listState.animateScrollToItem(totalChatItems - 1)
+                }
+            }
+
+            LaunchedEffect(streamingMessage) {
+                if (streamingMessage != null && totalChatItems > 0) {
+                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    if (lastVisible >= totalChatItems - 2) {
+                        listState.scrollToItem(totalChatItems - 1)
+                    }
                 }
             }
 
@@ -1278,8 +1333,15 @@ fun TutorChatScreen(
                                 }
                             }
 
-                            if (isChatLoading) {
-                                item {
+                            if (streamingMessage != null) {
+                                item(key = "active_streaming_response") {
+                                    StreamingTutorMessageBubble(
+                                        textContent = streamingMessage ?: "",
+                                        effectiveResponseLanguage = effectiveResponseLanguage
+                                    )
+                                }
+                            } else if (isChatLoading) {
+                                item(key = "active_chat_loading_glow") {
                                     Column(
                                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                         horizontalAlignment = Alignment.Start
@@ -3651,7 +3713,7 @@ fun TutorChatSidebar(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Settings,
+                                        imageVector = Icons.Default.Psychology,
                                         contentDescription = null,
                                         tint = colors.accentPurple,
                                         modifier = Modifier.size(16.dp)
@@ -4365,9 +4427,24 @@ fun cleanRecommendationTags(text: String): String {
 
 fun parseRecommendationRoute(text: String): String? {
     val match = Regex("\\[RECOMMEND:\\s*([^]]+)\\]").find(text)
-    val route = match?.groupValues?.get(1)?.trim() ?: return null
+    var route = match?.groupValues?.get(1)?.trim() ?: return null
+    if (!route.startsWith("#")) {
+        route = "#/$route"
+    }
+
+    // Check if it's a specific lesson topic
+    if (route.startsWith("#/lessons")) {
+        return route
+    }
     
-    // Strict allowlist validation of in-app navigation routes
+    // Check if route matches a topic ID directly, e.g. `#/present_simple`
+    val possibleTopicId = route.removePrefix("#/").removePrefix("lessons/")
+    val isTopic = com.example.data.model.CurriculumData.topics.any { it.id == possibleTopicId }
+    if (isTopic) {
+        return "#/lessons/$possibleTopicId"
+    }
+
+    // Strict allowlist validation of other in-app navigation routes
     val allowedRoutes = setOf(
         "#/lessons",
         "#/analyzer",
@@ -4388,7 +4465,11 @@ fun RecommendationActionChip(
     route: String,
     onClick: () -> Unit
 ) {
+    val topicId = com.example.ui.navigation.HashRouter.extractTopicId(route)
+    val specificTopic = topicId?.let { id -> com.example.data.model.CurriculumData.topics.find { it.id == id } }
+
     val (label, icon) = when {
+        specificTopic != null -> "${specificTopic.titleEn} (${specificTopic.titleUr}) • متعلقہ سبق کھولیں" to Icons.Default.School
         route.contains("lessons") -> "Practice Lessons • اسباق کی مشق" to Icons.Default.PlayArrow
         route.contains("analyzer") -> "Analyze Sentences • جملوں کا تجزیہ" to Icons.Default.Settings
         route.contains("quizzes") -> "Take Grammar Quiz • کوئز شروع کریں" to Icons.Default.CheckCircle
@@ -4741,9 +4822,13 @@ fun PdfDocumentBubbleCard(
     }
 }
 
-private fun saveImageToGallery(context: android.content.Context, base64Str: String, promptName: String) {
+private fun saveImageToGallery(context: android.content.Context, imageSource: String, promptName: String) {
     try {
-        val bytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
+        val bytes = com.example.utils.ImageOptimizer.resolveImageBytes(context, imageSource)
+        if (bytes == null || bytes.isEmpty()) {
+            android.widget.Toast.makeText(context, "Image data is not available.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         val filename = "Lisan_AI_${System.currentTimeMillis()}.png"
         
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
@@ -4791,13 +4876,11 @@ fun GeneratedImageBubbleCard(
     val context = androidx.compose.ui.platform.LocalContext.current
     var showFullscreenViewer by remember { mutableStateOf(false) }
 
-    val imageBitmap = remember(base64Data) {
-        try {
-            val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
-            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            bitmap?.asImageBitmap()
-        } catch (e: Exception) {
-            null
+    val imageModel = remember(base64Data) {
+        if (com.example.utils.ImageOptimizer.isLocalFilePathOrUri(base64Data)) {
+            if (base64Data.startsWith("/")) java.io.File(base64Data) else base64Data
+        } else {
+            "data:image/png;base64,$base64Data"
         }
     }
 
@@ -4836,80 +4919,112 @@ fun GeneratedImageBubbleCard(
                     )
                 }
 
-                if (imageBitmap != null) {
-                    IconButton(
-                        onClick = {
-                            saveImageToGallery(context, base64Data, prompt)
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = "Download Image",
-                            tint = EditorialAccentPurple,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                IconButton(
+                    onClick = {
+                        saveImageToGallery(context, base64Data, prompt)
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Download Image",
+                        tint = EditorialAccentPurple,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
 
-            if (imageBitmap != null) {
-                Box(
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { showFullscreenViewer = true }
+            ) {
+                coil.compose.SubcomposeAsyncImage(
+                    model = imageModel,
+                    contentDescription = prompt,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { showFullscreenViewer = true }
-                ) {
-                    Image(
-                        bitmap = imageBitmap,
-                        contentDescription = prompt,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 280.dp)
-                            .border(1.dp, Color(0xFFD8B4FE), RoundedCornerShape(10.dp)),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                    )
-
-                    // Click to enlarge indicator badge
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .heightIn(min = 120.dp, max = 280.dp)
+                        .border(1.dp, Color(0xFFD8B4FE), RoundedCornerShape(10.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    loading = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .background(Color(0xFFF3E8FF)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ZoomIn,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Tap to view • بڑا کریں",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = EditorialAccentPurple,
+                                strokeWidth = 2.dp
                             )
                         }
+                    },
+                    error = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
+                                .background(Color(0xFFFEF2F2)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BrokenImage,
+                                    contentDescription = null,
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Image unavailable • تصویر دستیاب نہیں",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFDC2626),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                )
+
+                // Click to enlarge indicator badge
+                Surface(
+                    color = Color.Black.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ZoomIn,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "Tap to view • بڑا کریں",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
-            } else {
-                Text(
-                    text = "Unable to render generated image.",
-                    fontSize = 12.sp,
-                    color = Color.Red
-                )
             }
         }
     }
 
     // Fullscreen Dialog Viewer
-    if (showFullscreenViewer && imageBitmap != null) {
+    if (showFullscreenViewer) {
         androidx.compose.ui.window.Dialog(
             onDismissRequest = { showFullscreenViewer = false },
             properties = androidx.compose.ui.window.DialogProperties(
@@ -4923,15 +5038,35 @@ fun GeneratedImageBubbleCard(
                 modifier = Modifier.fillMaxSize()
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Central Image
-                    Image(
-                        bitmap = imageBitmap,
+                    // Central Image with Coil
+                    coil.compose.SubcomposeAsyncImage(
+                        model = imageModel,
                         contentDescription = prompt,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(16.dp)
                             .align(Alignment.Center),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                        loading = {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = Color.White)
+                            }
+                        },
+                        error = {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Unable to load image in fullscreen",
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
                     )
 
                     // Top Custom Action Bar
@@ -4976,6 +5111,83 @@ fun GeneratedImageBubbleCard(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StreamingTutorMessageBubble(
+    textContent: String,
+    effectiveResponseLanguage: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp)
+            .testTag("streaming_tutor_bubble"),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.Top
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.92f),
+            color = EditorialContainer,
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = 2.dp,
+                bottomEnd = 16.dp
+            ),
+            border = BorderStroke(1.dp, EditorialBorder)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TUTOR • لسان ٹیوٹر",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        color = EditorialAccentPurple
+                    )
+                    Surface(
+                        color = EditorialAccentPurple.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "● Streaming",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = EditorialAccentPurple,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                val recommendationRoute = parseRecommendationRoute(textContent)
+                val displayableText = cleanRecommendationTags(textContent).replace("[KEY_GUIDE_ACTION]", "").trim()
+
+                if (displayableText.isNotBlank()) {
+                    FormattedMessageContent(
+                        text = displayableText,
+                        isUser = false
+                    )
+                }
+
+                recommendationRoute?.let { route ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    RecommendationActionChip(
+                        route = route,
+                        onClick = {
+                            com.example.ui.navigation.HashRouter.navigate(route)
+                        }
+                    )
                 }
             }
         }

@@ -15,6 +15,12 @@ interface DailyQuizChallengeDao {
     @Query("SELECT * FROM daily_quiz_assignments WHERE userId = :userId AND date = :date")
     suspend fun getAssignment(userId: String, date: String): DailyQuizAssignmentEntity?
 
+    @Query("SELECT * FROM daily_quiz_assignments WHERE userId = :userId")
+    suspend fun getAllAssignments(userId: String): List<DailyQuizAssignmentEntity>
+
+    @Query("SELECT * FROM daily_quiz_assignments WHERE userId = :userId AND date IN (:dates)")
+    suspend fun getAssignmentsForDates(userId: String, dates: List<String>): List<DailyQuizAssignmentEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAssignment(assignment: DailyQuizAssignmentEntity)
 

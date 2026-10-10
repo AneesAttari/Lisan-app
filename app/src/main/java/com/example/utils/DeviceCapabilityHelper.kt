@@ -25,9 +25,9 @@ object DeviceCapabilityHelper {
                     val memInfo = ActivityManager.MemoryInfo()
                     am.getMemoryInfo(memInfo)
                     val totalMemMb = memInfo.totalMem / (1024 * 1024)
-                    // If total device RAM <= 3072 MB (3GB) or memory class <= 192MB, treat as performance-constrained
-                    val isMemoryConstrained = totalMemMb <= 3072
-                    val isClassLow = am.memoryClass <= 192
+                    // If total device RAM <= 4096 MB (4GB) or memory class <= 256MB, treat as performance-constrained
+                    val isMemoryConstrained = totalMemMb <= 4096
+                    val isClassLow = am.memoryClass <= 256
                     isMemoryConstrained || isClassLow
                 }
             } else {

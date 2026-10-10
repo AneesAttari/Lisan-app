@@ -51,7 +51,7 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
             .background(Color(0xFF020617)) // Modern deep dark canvas
             .padding(16.dp)
     ) {
-        // Header Card with bottom blue gradient accent
+        // Header Card with Start Practice Action
         EditorialCard(
             modifier = Modifier.fillMaxWidth(),
             containerColor = Color(0xFF0F172A),
@@ -59,40 +59,31 @@ fun PictureVocabularyHomeScreen(viewModel: PictureVocabularyViewModel) {
             showBottomAccent = true,
             accentColor = Color(0xFF2563EB)
         ) {
-            Column(
-                modifier = Modifier.padding(4.dp)
+            Button(
+                onClick = {
+                    startQuizTriggered = true
+                    viewModel.startMixedQuiz()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
             ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Learn with Pictures • تصویری ذخیرہ الفاظ",
-                    fontSize = 22.sp,
+                    text = "Start Mixed Practice / ملا جلا مشق شروع کریں",
+                    color = Color.White,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    fontSize = 15.sp
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Build English vocabulary through rich images, native audio pronunciation, and smart interactive quizzes.",
-                    fontSize = 13.sp,
-                    color = Color(0xFF94A3B8)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = {
-                        startQuizTriggered = true
-                        viewModel.startMixedQuiz()
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "Start Mixed Practice / ملا جلا مشق شروع کریں", color = Color.White, fontWeight = FontWeight.Bold)
-                }
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
         Text(
-            text = "Vocabulary Categories (${categories.size} Topics)",
+            text = "Vocabulary Categories: ${categories.size.takeIf { it > 0 } ?: 40} Topics",
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White

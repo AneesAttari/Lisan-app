@@ -218,6 +218,12 @@ fun IslamicCalculatorScreen(viewModel: LisanViewModel) {
             ) {
                 IslamicCalculatorTab.values().forEach { tab ->
                     val isSelected = currentTab == tab
+                    val tabIcon = when (tab) {
+                        IslamicCalculatorTab.HAQ_MEHR -> Icons.Default.Favorite
+                        IslamicCalculatorTab.ZAKAT -> Icons.Default.AccountBalance
+                        IslamicCalculatorTab.FITRANA -> Icons.Default.CardGiftcard
+                        IslamicCalculatorTab.USHR -> Icons.Default.Spa
+                    }
                     Surface(
                         modifier = Modifier
                             .weight(1f)
@@ -227,17 +233,29 @@ fun IslamicCalculatorScreen(viewModel: LisanViewModel) {
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            Text(
-                                text = tab.iconEmoji,
-                                fontSize = 18.sp
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(
+                                        color = if (isSelected) Color.White.copy(alpha = 0.2f) else Color(0xFF0F766E).copy(alpha = 0.1f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = tabIcon,
+                                    contentDescription = tab.titleEn,
+                                    tint = if (isSelected) Color.White else Color(0xFF0F766E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                             Text(
                                 text = tab.titleEn,
-                                fontSize = 12.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Center
@@ -497,9 +515,11 @@ private fun HaqMehrTabContent(
     val activeCurrencySymbol = verifiedRate?.currencySymbol ?: selectedCurrencySymbol
 
     // Parse the silver price per tola from customRateInput or live rate
-    val silverPricePerTola: Double = customRateInput.replace(',', '.').trim().toDoubleOrNull()
-        ?: verifiedRate?.pricePerTola
-        ?: 0.0
+    val silverPricePerTola: Double = if (isCustomRateMode && customRateInput.isNotBlank()) {
+        customRateInput.replace(',', '.').trim().toDoubleOrNull() ?: (verifiedRate?.pricePerTola ?: 0.0)
+    } else {
+        verifiedRate?.pricePerTola ?: (customRateInput.replace(',', '.').trim().toDoubleOrNull() ?: 0.0)
+    }
 
     // Internal silver quantity resolution
     val requiredTola: Double = when (activePreset.id) {
@@ -716,6 +736,7 @@ private fun HaqMehrTabContent(
                             val rate = state.rate
                             val (badgeText, badgeBg, badgeTextColor) = when (rate.freshnessStatus) {
                                 com.example.data.model.PriceFreshnessStatus.LIVE -> Triple("✓ Live Rate", Color(0xFFDCFCE7), Color(0xFF15803D))
+                                com.example.data.model.PriceFreshnessStatus.GROUNDED_SEARCH -> Triple("🔍 Web Grounded", Color(0xFFE0F2FE), Color(0xFF0369A1))
                                 com.example.data.model.PriceFreshnessStatus.CACHED -> Triple("Cached Rate", Color(0xFFFEF3C7), Color(0xFF92400E))
                                 com.example.data.model.PriceFreshnessStatus.FALLBACK -> Triple("Reference Rate", Color(0xFFF1F5F9), Color(0xFF475569))
                             }
@@ -1669,8 +1690,8 @@ private fun FitranaTabContent(
     val pricePerMaund = effectivePricePerKg * 40.0
 
     val priceSource = currentInfo?.sourceName ?: "Pakistan Mandi Commodity Bulletin"
-    val freshnessStatus = currentInfo?.freshnessStatus ?: PriceFreshnessStatus.LIVE
-    val formattedTimestamp = currentInfo?.formattedTimestamp ?: "Live"
+    val freshnessStatus = currentInfo?.freshnessStatus ?: PriceFreshnessStatus.FALLBACK
+    val formattedTimestamp = currentInfo?.formattedTimestamp ?: "Unavailable"
 
     val personsCount = personsCountInput.toIntOrNull()?.coerceAtLeast(1) ?: 1
     val requiredKgPerPerson = selectedCommodity.requiredKgPerPerson
@@ -1714,11 +1735,14 @@ private fun FitranaTabContent(
                             border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) Color(0xFF0F766E) else EditorialBorder)
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Column(
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
                                     Text(
                                         text = "${commodity.nameUr} (${commodity.nameEn})",
                                         fontSize = 14.sp,
@@ -1740,6 +1764,7 @@ private fun FitranaTabContent(
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isSelected) Color.White else Color(0xFF334155),
+                                        maxLines = 1,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
@@ -1861,6 +1886,7 @@ private fun FitranaTabContent(
 
                     val (bgColor, textColor, label) = when (freshnessStatus) {
                         PriceFreshnessStatus.LIVE -> Triple(Color(0xFFDCFCE7), Color(0xFF15803D), "✓ LIVE Rate")
+                        PriceFreshnessStatus.GROUNDED_SEARCH -> Triple(Color(0xFFE0F2FE), Color(0xFF0369A1), "🔍 Web Grounded")
                         PriceFreshnessStatus.CACHED -> Triple(Color(0xFFFEF3C7), Color(0xFFB45309), "🕒 CACHED Rate")
                         PriceFreshnessStatus.FALLBACK -> Triple(Color(0xFFF3F4F6), Color(0xFF4B5563), "ℹ️ FALLBACK Benchmark")
                     }

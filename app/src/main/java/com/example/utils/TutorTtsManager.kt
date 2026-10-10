@@ -285,6 +285,7 @@ class TutorTtsManager(private val context: Context) {
 
     fun setPlaybackSpeed(speed: Float) {
         _playbackSpeed.value = speed
+        currentRate = speed
         prefs.edit().putFloat("playback_speed", speed).apply()
         // Apply to current playback if possible
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) { // Just for safety
@@ -292,8 +293,7 @@ class TutorTtsManager(private val context: Context) {
                  mediaPlayer?.let { 
                      if (it.isPlaying) {
                          val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
-                         val relativeSpeed = (speed / currentRate) * baseRateMultiplier
-                         it.playbackParams = it.playbackParams.setSpeed(relativeSpeed)
+                         it.playbackParams = it.playbackParams.setSpeed(speed * baseRateMultiplier)
                      }
                  }
                  nativeTts?.setSpeechRate(speed)
@@ -356,21 +356,7 @@ class TutorTtsManager(private val context: Context) {
     private var currentRate: Float = 1.0f
 
     private fun normalizeTextForTts(text: String): String {
-        // Remove emojis and other symbol/pictograph characters
-        val emojiRegex = Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+|[\\u2600-\\u27BF]")
-        val cleanFromEmojis = text.replace(emojiRegex, "")
-        
-        return cleanFromEmojis
-            .replace(":", " ")
-            .replace("؛", "،")
-            .replace(";", ",")
-            .replace("!", ".")
-            .replace("¡", ".")
-            .replace("-", " ")
-            .replace("—", " ")
-            .replace(Regex("[*#`|~^=+_\\\\/\\<\\>\\[\\]{}\\(\\)\"\'@$%&]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+        return TtsSanitizer.sanitizeForSpeech(text)
     }
 
     private fun preSynthesizeRemainingChunks() {
@@ -638,7 +624,7 @@ class TutorTtsManager(private val context: Context) {
                     try {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                             val baseRateMultiplier = if (currentSpeakerPreset == "Young Voice") 1.05f else 1.0f
-                            val speed = baseRateMultiplier
+                            val speed = currentRate * baseRateMultiplier
                             it.playbackParams = it.playbackParams.setSpeed(speed)
                         }
                     } catch (e: Exception) {

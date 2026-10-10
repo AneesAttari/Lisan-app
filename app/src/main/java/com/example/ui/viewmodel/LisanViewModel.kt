@@ -12,8 +12,6 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import com.example.data.local.*
 import com.example.data.model.*
-import com.example.data.model.DashboardSummary
-import com.example.data.model.AnswerResult
 import com.example.data.remote.RetrofitClient
 import com.example.data.model.CurriculumData
 import com.example.data.repository.DailyGrammarRepository
@@ -29,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -55,7 +54,6 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val dailyGrammarRepository = com.example.data.repository.DailyGrammarRepository(database.dailyChallengeAssignmentDao())
     private val dailyVerbRepository = com.example.data.repository.DailyVerbRepository(database.dailyVerbAssignmentDao())
     private val chatMessageRepository = com.example.data.local.ChatMessageRepository(database.chatMessageDao())
-    val revisionRepository = com.example.data.repository.RevisionRepository(database)
     val documentRepository = com.example.data.repository.DocumentRepository.getInstance(application)
 
     val allDocuments: StateFlow<List<com.example.data.model.DocumentEntity>> = documentRepository.allDocuments
@@ -84,11 +82,14 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         documentRepository.resetProcessingState()
     }
     
-    val topicProgress: StateFlow<List<TopicProgressEntity>> = revisionRepository.topicProgressFlow
+    val topicProgress: StateFlow<List<TopicProgressEntity>> = database.topicProgressDao().getAllTopicProgressFlow()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-        
-    private val _dashboardSummary = MutableStateFlow<DashboardSummary?>(null)
-    val dashboardSummary: StateFlow<DashboardSummary?> = _dashboardSummary.asStateFlow()
+
+    val learnedVerbsCount: StateFlow<Int> = database.dailyVerbAssignmentDao().getLearnedVerbsCountFlow("current-user-id")
+        .stateIn(viewModelScope, SharingStarted.Lazily, 0)
+
+    val learnedVerbIds: StateFlow<List<String>> = database.dailyVerbAssignmentDao().getLearnedVerbIdsFlow("current-user-id")
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _selectedImageStyle = MutableStateFlow(com.example.utils.ImageGeneratorHelper.ImageStyle.REALISTIC)
     val selectedImageStyle: StateFlow<com.example.utils.ImageGeneratorHelper.ImageStyle> = _selectedImageStyle.asStateFlow()
@@ -104,29 +105,14 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         _selectedImageAspectRatio.value = aspectRatio
     }
 
-    private val _activeSessionQuestions = MutableStateFlow<List<Pair<RevisionQuestionEntity, RevisionSessionQuestionEntity>>>(emptyList())
-    val activeSessionQuestions: StateFlow<List<Pair<RevisionQuestionEntity, RevisionSessionQuestionEntity>>> = _activeSessionQuestions.asStateFlow()
-
     private val _dailyChallengeProgress = MutableStateFlow<DailyQuizChallengeProgressEntity?>(null)
     val dailyChallengeProgress: StateFlow<DailyQuizChallengeProgressEntity?> = _dailyChallengeProgress.asStateFlow()
 
+    private val _weeklyProgression = MutableStateFlow(com.example.data.model.WeeklyQuizProgression())
+    val weeklyProgression: StateFlow<com.example.data.model.WeeklyQuizProgression> = _weeklyProgression.asStateFlow()
+
     private val _todayAssignment = MutableStateFlow<DailyQuizAssignmentEntity?>(null)
     val todayAssignment: StateFlow<DailyQuizAssignmentEntity?> = _todayAssignment.asStateFlow()
-
-    private val _currentSession = MutableStateFlow<RevisionSessionEntity?>(null)
-    val currentSession: StateFlow<RevisionSessionEntity?> = _currentSession.asStateFlow()
-
-    private val _currentQuestionIndex = MutableStateFlow(0)
-    val currentQuestionIndex: StateFlow<Int> = _currentQuestionIndex.asStateFlow()
-
-    private val _selectedOptionIndex = MutableStateFlow<Int?>(null)
-    val selectedOptionIndex: StateFlow<Int?> = _selectedOptionIndex.asStateFlow()
-
-    private val _answerResult = MutableStateFlow<AnswerResult?>(null)
-    val answerResult: StateFlow<AnswerResult?> = _answerResult.asStateFlow()
-
-    private val _isSessionCompleted = MutableStateFlow(false)
-    val isSessionCompleted: StateFlow<Boolean> = _isSessionCompleted.asStateFlow()
 
     val tutorAudioManager = TutorAudioManager(application)
     val learnerProfileManager = com.example.data.repository.LearnerProfileManager(application)
@@ -203,13 +189,13 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
 
                     try {
                         if (settings.dailyReminderEnabled) {
-                            com.example.utils.RevisionReminderScheduler.scheduleDailyReminder(
+                            com.example.utils.DailyReminderScheduler.scheduleDailyReminder(
                                 getApplication(),
                                 settings.reminderHour,
                                 settings.reminderMinute
                             )
                         } else {
-                            com.example.utils.RevisionReminderScheduler.cancelDailyReminder(getApplication())
+                            com.example.utils.DailyReminderScheduler.cancelDailyReminder(getApplication())
                         }
                     } catch (t: Throwable) {
                         Log.e("LisanViewModel", "Error updating daily reminder schedule", t)
@@ -217,12 +203,43 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        RetrofitClient.triggerPreWarm(application)
     }
 
     fun updateUserSettings(transform: (com.example.data.repository.UserSettings) -> com.example.data.repository.UserSettings) {
         viewModelScope.launch {
             settingsRepository.updateSettings(transform)
+        }
+    }
+
+    fun setManualLauncherIcon(iconKey: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.example.utils.IconRotationManager.setManualIcon(
+                getApplication(),
+                settingsRepository,
+                iconKey
+            )
+        }
+    }
+
+    fun setAutoIconRotationEnabled(enabled: Boolean) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.example.utils.IconRotationManager.setAutoRotationEnabled(
+                getApplication(),
+                settingsRepository,
+                enabled
+            )
+        }
+    }
+
+    fun simulateIconRotationTimeForTesting(hours: Long) {
+        if (com.example.BuildConfig.DEBUG) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.utils.IconRotationManager.simulateTimeElapsedForTesting(
+                    getApplication(),
+                    settingsRepository,
+                    hours
+                )
+            }
         }
     }
 
@@ -751,22 +768,67 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
         if (activeSpeakingId.value == verb.id) {
             ttsManager.stop()
         } else {
-            val textToSpeak = "${verb.baseForm}. ${verb.thirdPerson}. ${verb.presentParticiple}. ${verb.pastSimple}. ${verb.pastParticiple}. Example: ${verb.examples.firstOrNull()?.english ?: ""}"
-            ttsManager.speak(textToSpeak, verb.id)
+            val builder = java.lang.StringBuilder()
+            builder.append("${verb.baseForm}. ")
+            if (verb.urduMeaning.isNotBlank()) {
+                builder.append("اردو معنی: ${verb.urduMeaning}. [pause_short] ")
+            }
+            builder.append("Verb forms: ")
+            builder.append("Base form: ${verb.baseForm}. ")
+            builder.append("Third person singular: ${verb.thirdPerson}. ")
+            builder.append("Present participle: ${verb.presentParticiple}. ")
+            builder.append("Past simple: ${verb.pastSimple}. ")
+            builder.append("Past participle: ${verb.pastParticiple}. [pause_short] ")
+
+            if (verb.examples.isNotEmpty()) {
+                builder.append("Examples: [pause_short] ")
+                verb.examples.forEachIndexed { index, ex ->
+                    builder.append("Example ${index + 1}: ${ex.english}. ")
+                    if (ex.urdu.isNotBlank()) {
+                        builder.append("${ex.urdu}. [pause_short] ")
+                    }
+                }
+            }
+
+            if (verb.usageNoteEn.isNotBlank() || verb.usageNoteUr.isNotBlank()) {
+                builder.append("Usage note: [pause_short] ")
+                if (verb.usageNoteEn.isNotBlank()) {
+                    builder.append("${verb.usageNoteEn}. ")
+                }
+                if (verb.usageNoteUr.isNotBlank()) {
+                    builder.append("${verb.usageNoteUr}. ")
+                }
+            }
+            ttsManager.speak(builder.toString(), verb.id)
         }
     }
 
-    fun completeDailyVerb() {
-        val verb = _dailyVerb.value ?: return
+    fun completeDailyVerb(verbId: String? = null) {
+        val targetVerbId = verbId ?: _dailyVerb.value?.id ?: return
         viewModelScope.launch {
             val userId = learnerProfile.value.userId
             val dateKey = _selectedDailyDate.value
-            val assignment = database.dailyVerbAssignmentDao().getAssignmentByDateSync(userId, dateKey)
-            if (assignment != null && assignment.completedAt == null) {
+            var assignment = database.dailyVerbAssignmentDao().getAssignmentByDateSync(userId, dateKey)
+            if (assignment == null) {
+                assignment = DailyVerbAssignment(
+                    userId = userId,
+                    verbId = targetVerbId,
+                    assignedDate = dateKey,
+                    completedAt = System.currentTimeMillis()
+                )
+                database.dailyVerbAssignmentDao().insertAssignment(assignment)
+            } else if (assignment.completedAt == null) {
                 database.dailyVerbAssignmentDao().updateAssignment(assignment.copy(completedAt = System.currentTimeMillis()))
-                _isDailyVerbCompleted.value = true
-                triggerDailyCompletionRewardIfEligible()
             }
+            _isDailyVerbCompleted.value = true
+            lisanJourneyRepository.recordEvent(
+                eventType = "DAILY_VERB",
+                featureSource = "LisanDaily",
+                entityId = targetVerbId,
+                deduplicationKey = "daily_verb_${dateKey}_$targetVerbId"
+            )
+            incrementAchievementProgress("verb_completed")
+            triggerDailyCompletionRewardIfEligible()
         }
     }
 
@@ -917,38 +979,7 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
             
             // Automatic long-term learning memory update & profile challenge log
             learnerProfileManager.recordDailyChallengeActivity(currentQuestion.topic, isCorrect)
-            
-            // Add or update Revision Item for Daily Challenge
-            viewModelScope.launch {
-                val userId = learnerProfile.value.userId
-                val existing = revisionItemDao.getRevisionItemSync(userId, "daily_challenge", currentQuestion.id)
-                val times = existing?.timesReviewed ?: 0
-                val corrects = (existing?.correctCount ?: 0) + (if (isCorrect) 1 else 0)
-                val incorrects = (existing?.incorrectCount ?: 0) + (if (isCorrect) 0 else 1)
-                val nextReview = calculateNextReviewTime(isCorrect, times)
-                
-                val contentSnap = kotlinx.serialization.json.Json.encodeToString(DailyChallengeQuestion.serializer(), currentQuestion)
-                val revItem = RevisionItem(
-                    id = existing?.id ?: 0,
-                    userId = userId,
-                    sourceType = "daily_challenge",
-                    sourceId = currentQuestion.id,
-                    topic = currentQuestion.topic,
-                    contentSnapshot = contentSnap,
-                    learnerLevel = proficiencyLevel.value.name,
-                    difficulty = if (isCorrect) "easy" else "hard",
-                    status = if (isCorrect) "pending" else "review_due",
-                    timesReviewed = times + 1,
-                    correctCount = corrects,
-                    incorrectCount = incorrects,
-                    confidenceRating = if (isCorrect) 5 else 2,
-                    nextReviewAt = nextReview,
-                    lastReviewedAt = System.currentTimeMillis()
-                )
-                revisionItemDao.insertRevisionItem(revItem)
-                
-                triggerDailyCompletionRewardIfEligible()
-            }
+            triggerDailyCompletionRewardIfEligible()
         }
     }
 
@@ -1134,17 +1165,14 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
     private val _chatHistory = MutableStateFlow<List<com.example.data.model.Content>>(emptyList())
     val chatHistory: StateFlow<List<com.example.data.model.Content>> = _chatHistory.asStateFlow()
 
-    init {
-        // Cache initial lesson on startup
-        _activeLesson.value?.let { lesson ->
-            cacheLesson("verb_to_be", lesson)
-        }
-    }
+    private val _streamingMessage = MutableStateFlow<String?>(null)
+    val streamingMessage: StateFlow<String?> = _streamingMessage.asStateFlow()
 
     fun selectTopic(topicId: String) {
         _selectedTopicId.value = topicId
         val lesson = CurriculumData.getDefaultLesson(topicId)
         _activeLesson.value = lesson
+        resetLessonQuiz(topicId)
         learnerProfileManager.recordLessonActivity(topicId, false)
         cacheLesson(topicId, lesson)
     }
@@ -1156,7 +1184,13 @@ class LisanViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     val lesson = kotlinx.serialization.json.Json.decodeFromString(LessonContent.serializer(), cached.lessonJson)
                     _selectedTopicId.value = topicId
-                    _activeLesson.value = lesson
+                    val populatedLesson = if (lesson.mcqs.isEmpty()) {
+                        lesson.copy(mcqs = CurriculumData.getLessonMcqs(topicId))
+                    } else {
+                        lesson
+                    }
+                    _activeLesson.value = populatedLesson
+                    resetLessonQuiz(topicId)
                 } catch (e: Exception) {
                     selectTopic(topicId)
                 }
@@ -1528,13 +1562,13 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         _effectiveResponseLanguage.value = effective
 
         viewModelScope.launch {
-            var streamingMessageIndex = -1
             try {
                 if (!isRetry) {
                     chatMessageRepository.saveMessage("user", message, imageUri)
                 }
                 _isChatLoading.value = true
                 _chatError.value = null
+                _streamingMessage.value = null
 
                 // Image generation interception if in Create Image mode or user asked for an image
                 val hasImageIntent = isCreateImage || hasImageRequestIntent(message)
@@ -1600,11 +1634,18 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                             mimeType = generated.mimeType
                         }
 
+                        // Persist to local storage to avoid keeping massive Base64 in RAM
+                        val imagePathOrUri = com.example.utils.ImageOptimizer.saveGeneratedImageBase64(
+                            context = getApplication(),
+                            base64OrPath = base64Img,
+                            mimeType = mimeType
+                        )
+
                         val caption = "Here is the visual illustration for: \"$detailedPrompt\"\n(آپ کی تصویر تیار کر دی گئی ہے)"
                         val modelContent = com.example.data.model.Content(
                             role = "model",
                             parts = listOf(com.example.data.model.Part(text = caption)),
-                            generatedImageBase64 = base64Img,
+                            generatedImageBase64 = imagePathOrUri,
                             generatedImageMimeType = mimeType,
                             generatedImagePrompt = detailedPrompt
                         )
@@ -1612,7 +1653,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                         chatMessageRepository.saveMessage(
                             role = "model",
                             text = caption,
-                            generatedImageBase64 = base64Img,
+                            generatedImageBase64 = imagePathOrUri,
                             generatedImagePrompt = detailedPrompt
                         )
                         saveCurrentSessionToHistory()
@@ -1629,11 +1670,16 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                             style = _selectedImageStyle.value,
                             aspectRatio = _selectedImageAspectRatio.value
                         )
+                        val fallbackPathOrUri = com.example.utils.ImageOptimizer.saveGeneratedImageBase64(
+                            context = getApplication(),
+                            base64OrPath = generated.base64Data,
+                            mimeType = generated.mimeType
+                        )
                         val caption = "Here is the generated illustration for: \"$message\""
                         val modelContent = com.example.data.model.Content(
                             role = "model",
                             parts = listOf(com.example.data.model.Part(text = caption)),
-                            generatedImageBase64 = generated.base64Data,
+                            generatedImageBase64 = fallbackPathOrUri,
                             generatedImageMimeType = generated.mimeType,
                             generatedImagePrompt = message
                         )
@@ -1641,7 +1687,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                         chatMessageRepository.saveMessage(
                             role = "model",
                             text = caption,
-                            generatedImageBase64 = generated.base64Data,
+                            generatedImageBase64 = fallbackPathOrUri,
                             generatedImagePrompt = message
                         )
                         saveCurrentSessionToHistory()
@@ -1725,14 +1771,10 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     }
                 }
 
-                streamingMessageIndex = _chatHistory.value.size
-                val placeholderContent = com.example.data.model.Content(
-                    role = "model",
-                    parts = listOf(com.example.data.model.Part(text = ""))
-                )
-                _chatHistory.value = _chatHistory.value + placeholderContent
-
+                _streamingMessage.value = null
                 val accumulatedText = StringBuilder()
+                var lastEmittedLength = 0
+                val isStreamingActive = java.util.concurrent.atomic.AtomicBoolean(true)
 
                 Log.i("TutorDiag", "[1] Tutor request initiated: message='$message'")
 
@@ -1740,39 +1782,57 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                 val isWarm = RetrofitClient.ensureBackendReady()
                 Log.i("TutorDiag", "[2] Backend ready check completed: warm=$isWarm")
 
-                val result = RetrofitClient.getTutorResponseStream(
-                    context = getApplication<android.app.Application>(),
-                    history = _chatHistory.value.dropLast(1),
-                    mode = _activeTutorMode.value,
-                    language = _activeLanguage.value,
-                    userName = _userName.value,
-                    learnerProfileSummary = profileSummary,
-                    isStudyModeOn = _isStudyModeOn.value,
-                    learnerLevel = _proficiencyLevel.value.labelEn,
-                    imageCompressionPreset = userSettings.value.imageCompressionPreset,
-                    sessionId = activeConversationId
-                ) { chunk ->
-                    accumulatedText.append(chunk)
-                    val currentText = accumulatedText.toString()
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        val currentList = _chatHistory.value.toMutableList()
-                        if (streamingMessageIndex in currentList.indices) {
-                            currentList[streamingMessageIndex] = currentList[streamingMessageIndex].copy(
-                                parts = listOf(com.example.data.model.Part(text = currentText))
-                            )
-                            _chatHistory.value = currentList
+                // Dedicated flusher coroutine with controlled cadence (60ms) to avoid cloning or recomposing chat history
+                val flushJob = launch(kotlinx.coroutines.Dispatchers.Default) {
+                    while (isStreamingActive.get()) {
+                        kotlinx.coroutines.delay(60)
+                        val currentStr = synchronized(accumulatedText) {
+                            if (accumulatedText.length > lastEmittedLength) {
+                                lastEmittedLength = accumulatedText.length
+                                accumulatedText.toString()
+                            } else {
+                                null
+                            }
+                        }
+                        if (currentStr != null) {
+                            _streamingMessage.value = currentStr
                         }
                     }
                 }
-                
-                val currentList = _chatHistory.value.toMutableList()
-                if (streamingMessageIndex in currentList.indices) {
-                    currentList[streamingMessageIndex] = currentList[streamingMessageIndex].copy(
-                        parts = listOf(com.example.data.model.Part(text = result.responseText))
-                    )
-                    _chatHistory.value = currentList
+
+                val result = try {
+                    RetrofitClient.getTutorResponseStream(
+                        context = getApplication<android.app.Application>(),
+                        history = _chatHistory.value,
+                        mode = _activeTutorMode.value,
+                        language = _activeLanguage.value,
+                        userName = _userName.value,
+                        learnerProfileSummary = profileSummary,
+                        isStudyModeOn = _isStudyModeOn.value,
+                        learnerLevel = _proficiencyLevel.value.labelEn,
+                        imageCompressionPreset = userSettings.value.imageCompressionPreset,
+                        sessionId = activeConversationId
+                    ) { chunk ->
+                        val immediateText: String?
+                        synchronized(accumulatedText) {
+                            accumulatedText.append(chunk)
+                            if (lastEmittedLength == 0) {
+                                // First chunk arrived - emit immediately for snappy responsiveness
+                                lastEmittedLength = accumulatedText.length
+                                immediateText = accumulatedText.toString()
+                            } else {
+                                immediateText = null
+                            }
+                        }
+                        if (immediateText != null) {
+                            _streamingMessage.value = immediateText
+                        }
+                    }
+                } finally {
+                    isStreamingActive.set(false)
+                    flushJob.cancel()
                 }
-                
+
                 val modelContent = com.example.data.model.Content(
                     role = "model",
                     parts = listOf(com.example.data.model.Part(text = result.responseText)),
@@ -1825,12 +1885,9 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     }
                 }
 
-                val finalUpdatedList = _chatHistory.value.toMutableList()
-                if (streamingMessageIndex in finalUpdatedList.indices) {
-                    finalUpdatedList[streamingMessageIndex] = modelContent
-                    _chatHistory.value = finalUpdatedList
-                    Log.d("LisanViewModel", "BYOK_TUTOR_RESPONSE_UPDATED: response length = ${result.responseText.length}")
-                }
+                _chatHistory.value = _chatHistory.value + modelContent
+                _streamingMessage.value = null
+                Log.d("LisanViewModel", "BYOK_TUTOR_RESPONSE_UPDATED: response length = ${result.responseText.length}")
 
                 chatMessageRepository.saveMessage("model", result.responseText)
                 saveCurrentSessionToHistory()
@@ -1838,6 +1895,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                     incrementUsage()
                 }
             } catch (e: Exception) {
+                _streamingMessage.value = null
                 Log.e("LisanViewModel", "BYOK_REQUEST_ERROR: ${e.message}", e)
                 val errorMessage = if (e.message?.contains("API key", ignoreCase = true) == true || e.message?.contains("403") == true || e.message?.contains("401") == true) {
                     "براہ کرم سیٹنگز میں جا کر اپنی درست Gemini API کی درج کریں، یا انٹرنیٹ کنکشن چیک کریں۔\n(Please check your Gemini API key in Settings or your internet connection.)"
@@ -1859,16 +1917,11 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
                         errorMessage = e.message
                     )
                 )
-                val currentHistory = _chatHistory.value.toMutableList()
-                if (streamingMessageIndex in currentHistory.indices) {
-                    currentHistory[streamingMessageIndex] = modelContent
-                    _chatHistory.value = currentHistory
-                } else {
-                    _chatHistory.value = currentHistory + modelContent
-                }
+                _chatHistory.value = _chatHistory.value + modelContent
                 chatMessageRepository.saveMessage("model", errorMessage)
                 saveCurrentSessionToHistory()
             } finally {
+                _streamingMessage.value = null
                 _isChatLoading.value = false
                 synchronized(this@LisanViewModel) {
                     isSendingChatMessage = false
@@ -2063,6 +2116,7 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
             isSendingChatMessage = false
         }
         _isChatLoading.value = false
+        _streamingMessage.value = null
         pendingImagePrompt = null
         pendingMessageText = null
         pendingImageUri = null
@@ -2255,6 +2309,45 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         setupSpeechRecognizer()
     }
 
+    // --- Gemini 3.5 Transcribe Integration ---
+    private val _transcriptionResult = MutableStateFlow<String?>(null)
+    val transcriptionResult: StateFlow<String?> = _transcriptionResult.asStateFlow()
+
+    private val _isTranscribingAudio = MutableStateFlow(false)
+    val isTranscribingAudio: StateFlow<Boolean> = _isTranscribingAudio.asStateFlow()
+
+    fun transcribeAudioWithGemini35Transcribe(
+        audioBase64: String,
+        mimeType: String = "audio/wav",
+        customPrompt: String? = null,
+        onComplete: ((String) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            _isTranscribingAudio.value = true
+            try {
+                val apiKey = _geminiApiKey.value.ifBlank {
+                    prefs.getString("user_gemini_api_key", null)?.ifBlank { null } ?: ""
+                }
+                val response = RetrofitClient.executeTranscribeAudio(
+                    audioBase64 = audioBase64,
+                    mimeType = mimeType,
+                    promptInstruction = customPrompt ?: "Transcribe this audio accurately. If spoken in Urdu, Arabic, or English, output clean text transcription.",
+                    apiKey = apiKey
+                )
+                val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+                _transcriptionResult.value = text
+                if (text.isNotBlank() && onComplete != null) {
+                    onComplete(text)
+                }
+            } catch (e: Exception) {
+                Log.e("LisanViewModel", "Gemini 3.5 Transcribe failed: ${e.message}", e)
+                _transcriptionResult.value = "Transcription error: ${e.localizedMessage ?: e.message}"
+            } finally {
+                _isTranscribingAudio.value = false
+            }
+        }
+    }
+
     // --- Tab 4: Idioms & Expressions ---
     private val _idiomSearchQuery = MutableStateFlow("")
     val idiomSearchQuery: StateFlow<String> = _idiomSearchQuery.asStateFlow()
@@ -2315,13 +2408,16 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
 
     fun playIdiomAudio(idiomId: String) {
         val idiom = IdiomRepository.idioms.find { it.id == idiomId }
+            ?: _dailyIdiom.value?.takeIf { it.id == idiomId }
+            ?: _dailyIdiom.value
+            ?: IdiomRepository.idioms.firstOrNull()
         if (idiom != null) {
             val currentlySpeaking = activeSpeakingId.value
-            if (currentlySpeaking == idiomId) {
+            if (currentlySpeaking == idiom.id) {
                 stopSpeech()
             } else {
                 val exampleText = if (idiom.example.isNotBlank()) ". Example: ${idiom.example}" else ""
-                speak("${idiom.expression}$exampleText", idiomId)
+                speak("${idiom.expression}$exampleText", idiom.id)
             }
         }
     }
@@ -2348,14 +2444,110 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     private val _quizTotalAnswered = MutableStateFlow(0)
     val quizTotalAnswered: StateFlow<Int> = _quizTotalAnswered.asStateFlow()
 
+    private val _isDailyQuizChallengeActive = MutableStateFlow(false)
+    val isDailyQuizChallengeActive: StateFlow<Boolean> = _isDailyQuizChallengeActive.asStateFlow()
+
+    private val _selectedDailyChallengeDay = MutableStateFlow(1)
+    val selectedDailyChallengeDay: StateFlow<Int> = _selectedDailyChallengeDay.asStateFlow()
+
+    private val _selectedQuizWeekNumber = MutableStateFlow(1)
+    val selectedQuizWeekNumber: StateFlow<Int> = _selectedQuizWeekNumber.asStateFlow()
+
+    fun selectQuizWeek(weekNumber: Int) {
+        val boundedWeek = weekNumber.coerceIn(1, 53)
+        _selectedQuizWeekNumber.value = boundedWeek
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = "current_user"
+            val weekly = dailyQuizChallengeRepository.getWeeklyProgression(userId, boundedWeek)
+            _weeklyProgression.value = weekly
+        }
+    }
+
     fun getFilteredQuestions(): List<QuizQuestion> {
         return if (_quizCategoryFilter.value == "ALL") QuizData.questions
         else QuizData.questions.filter { it.category == _quizCategoryFilter.value }
     }
 
     fun setQuizCategoryFilter(category: String) {
+        _isDailyQuizChallengeActive.value = false
         _quizCategoryFilter.value = category
         restartQuiz()
+    }
+
+    fun startDaily10QuizChallenge(dayNumber: Int? = null) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = "current_user"
+            val currentProg = _weeklyProgression.value ?: dailyQuizChallengeRepository.getWeeklyProgression(userId)
+            val targetDay = (dayNumber ?: currentProg.currentActiveDayNumber).coerceIn(1, 365)
+
+            _selectedDailyChallengeDay.value = targetDay
+            _isDailyQuizChallengeActive.value = true
+            val targetWeek = ((targetDay - 1) / 7) + 1
+            _selectedQuizWeekNumber.value = targetWeek
+
+            val assignment = dailyQuizChallengeRepository.getAssignmentForDay(userId, targetDay)
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                _selectedQuizOption.value = null
+                _isQuizAnswerSubmitted.value = false
+                if (assignment != null && !assignment.completed && assignment.completedMcqsCount in 1..9) {
+                    // Resume at the next uncompleted MCQ index
+                    _currentQuizIndex.value = assignment.lastAnsweredIndex.coerceIn(0, 9)
+                    _quizScore.value = assignment.score
+                    _quizTotalAnswered.value = assignment.completedMcqsCount
+                } else if (assignment != null && assignment.completed) {
+                    // Already completed - start at 0 for review
+                    _currentQuizIndex.value = 0
+                    _quizScore.value = assignment.score
+                    _quizTotalAnswered.value = 10
+                } else {
+                    _currentQuizIndex.value = 0
+                    _quizScore.value = 0
+                    _quizTotalAnswered.value = 0
+                }
+                setSelectedTab(6)
+            }
+        }
+    }
+
+    fun exitDaily10QuizChallenge() {
+        _isDailyQuizChallengeActive.value = false
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = "current_user"
+            val updatedWeekly = dailyQuizChallengeRepository.getWeeklyProgression(userId, _selectedQuizWeekNumber.value)
+            _weeklyProgression.value = updatedWeekly
+        }
+        restartQuiz()
+    }
+
+    fun setDailyChallengeDay(dayNumber: Int) {
+        val bounded = dayNumber.coerceIn(1, 365)
+        _selectedDailyChallengeDay.value = bounded
+        val targetWeek = ((bounded - 1) / 7) + 1
+        _selectedQuizWeekNumber.value = targetWeek
+        startDaily10QuizChallenge(bounded)
+    }
+
+    fun completeDailyChallengeDay(dayNumber: Int, finalScore: Int = _quizScore.value) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val userId = "current_user"
+            val updatedWeekly = dailyQuizChallengeRepository.completeDay(userId, dayNumber, finalScore)
+            _weeklyProgression.value = updatedWeekly
+            val updatedProgress = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
+            _dailyChallengeProgress.value = updatedProgress
+
+            val questionIds = com.example.data.model.DailyQuiz365Generator.getQuestionsForDay(dayNumber).map { it.id }
+            val assignment = dailyQuizChallengeRepository.getOrCreateTodayAssignment(userId, questionIds)
+            _todayAssignment.value = assignment
+
+            // Record journey event and award points
+            lisanJourneyRepository.recordEvent(
+                eventType = "DAILY_QUIZ_COMPLETED",
+                featureSource = "DAILY_10_QUIZ",
+                entityId = "day_$dayNumber",
+                deduplicationKey = "daily_quiz_${dayNumber}_${System.currentTimeMillis() / (1000 * 3600 * 24)}"
+            )
+            loadLast7DaysActivity()
+        }
     }
 
     fun selectQuizOption(index: Int) {
@@ -2363,7 +2555,11 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         _selectedQuizOption.value = index
         _isQuizAnswerSubmitted.value = true
         _quizTotalAnswered.value++
-        val questions = getFilteredQuestions()
+        val questions = if (_isDailyQuizChallengeActive.value) {
+            com.example.data.model.DailyQuiz365Generator.getQuestionsForDay(_selectedDailyChallengeDay.value)
+        } else {
+            getFilteredQuestions()
+        }
         val current = questions.getOrNull(_currentQuizIndex.value)
         if (current != null) {
             val isCorrect = index == current.correctOptionIndex
@@ -2376,17 +2572,59 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
             val userAnswer = current.options.getOrNull(index) ?: index.toString()
             val correctAnswer = current.options.getOrNull(current.correctOptionIndex) ?: ""
             learnerProfileManager.recordQuestionResult(
-                type = "quiz",
+                type = if (_isDailyQuizChallengeActive.value) "daily_quiz_365" else "quiz",
                 topic = current.category,
                 isCorrect = isCorrect,
                 userAnswer = userAnswer,
                 correctAnswer = correctAnswer
             )
+
+            if (_isDailyQuizChallengeActive.value) {
+                val dayNum = _selectedDailyChallengeDay.value
+                val qIdx = _currentQuizIndex.value
+                val currentScore = _quizScore.value
+                val isLastQuestion = qIdx >= questions.size - 1
+
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val userId = "current_user"
+                    // Authoritatively persist MCQ completion in Room
+                    dailyQuizChallengeRepository.recordMcqAnswer(
+                        userId = userId,
+                        dayNumber = dayNum,
+                        questionIndex = qIdx,
+                        isCorrect = isCorrect,
+                        currentScore = currentScore
+                    )
+
+                    if (isLastQuestion) {
+                        val updatedWeekly = dailyQuizChallengeRepository.completeDay(userId, dayNum, currentScore)
+                        _weeklyProgression.value = updatedWeekly
+                        val updatedProgress = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
+                        _dailyChallengeProgress.value = updatedProgress
+
+                        lisanJourneyRepository.recordEvent(
+                            eventType = "DAILY_QUIZ_COMPLETED",
+                            featureSource = "DAILY_10_QUIZ",
+                            entityId = "day_$dayNum",
+                            deduplicationKey = "daily_quiz_${dayNum}_${System.currentTimeMillis() / (1000 * 3600 * 24)}"
+                        )
+                        loadLast7DaysActivity()
+                    } else {
+                        // Immediately update weekly progression to reflect partial progress (e.g. 3/10)
+                        val updatedWeekly = dailyQuizChallengeRepository.getWeeklyProgression(userId, _selectedQuizWeekNumber.value)
+                        _weeklyProgression.value = updatedWeekly
+                    }
+                }
+            }
         }
     }
 
     fun nextQuizQuestion() {
-        val questions = getFilteredQuestions()
+        val questions = if (_isDailyQuizChallengeActive.value) {
+            com.example.data.model.DailyQuiz365Generator.getQuestionsForDay(_selectedDailyChallengeDay.value)
+        } else {
+            getFilteredQuestions()
+        }
         if (_currentQuizIndex.value < questions.size - 1) {
             _currentQuizIndex.value++
             _selectedQuizOption.value = null
@@ -2403,22 +2641,101 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
         _quizTotalAnswered.value = 0
     }
 
+    // --- Embedded Lesson 10-MCQ Quiz State & Persistence ---
+    private val _lessonQuizSelectedOptions = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val lessonQuizSelectedOptions: StateFlow<Map<Int, Int>> = _lessonQuizSelectedOptions.asStateFlow()
+
+    private val _lessonQuizSubmitted = MutableStateFlow<Map<Int, Boolean>>(emptyMap())
+    val lessonQuizSubmitted: StateFlow<Map<Int, Boolean>> = _lessonQuizSubmitted.asStateFlow()
+
+    private val _lessonQuizScore = MutableStateFlow(0)
+    val lessonQuizScore: StateFlow<Int> = _lessonQuizScore.asStateFlow()
+
+    fun answerLessonQuizOption(
+        topicId: String,
+        questionIndex: Int,
+        selectedOption: Int,
+        correctOption: Int,
+        totalQuestions: Int = 10
+    ) {
+        if (_lessonQuizSubmitted.value[questionIndex] == true) return
+
+        val newSelected = _lessonQuizSelectedOptions.value.toMutableMap()
+        newSelected[questionIndex] = selectedOption
+        _lessonQuizSelectedOptions.value = newSelected
+
+        val newSubmitted = _lessonQuizSubmitted.value.toMutableMap()
+        newSubmitted[questionIndex] = true
+        _lessonQuizSubmitted.value = newSubmitted
+
+        if (selectedOption == correctOption) {
+            _lessonQuizScore.value += 1
+        }
+
+        // When all 10 MCQs for this lesson are completed, persist topic completion and mastery score
+        if (newSubmitted.size >= totalQuestions) {
+            val finalScore = _lessonQuizScore.value
+            val mastery = (finalScore.toFloat() / totalQuestions.coerceAtLeast(1)).coerceIn(0f, 1f)
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val existing = database.topicProgressDao().getTopicProgress(topicId)
+                val updatedEntity = existing?.copy(
+                    isCompleted = true,
+                    masteryScore = mastery,
+                    completedAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                ) ?: com.example.data.model.TopicProgressEntity(
+                    topicId = topicId,
+                    isCompleted = true,
+                    masteryScore = mastery,
+                    completedAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                )
+                database.topicProgressDao().insertTopicProgress(updatedEntity)
+                learnerProfileManager.recordLessonActivity(topicId, true)
+                lisanJourneyRepository.recordEvent(
+                    eventType = "LESSON_QUIZ_COMPLETED",
+                    featureSource = "GRAMMAR_LESSON_QUIZ",
+                    entityId = topicId,
+                    deduplicationKey = "lesson_quiz_${topicId}_${System.currentTimeMillis()}"
+                )
+                loadLast7DaysActivity()
+            }
+        }
+    }
+
+    fun resetLessonQuiz(topicId: String) {
+        _lessonQuizSelectedOptions.value = emptyMap()
+        _lessonQuizSubmitted.value = emptyMap()
+        _lessonQuizScore.value = 0
+    }
+
     // --- Progress & Saved Notes ---
-    private val _completedTopicIds = MutableStateFlow<Set<String>>(setOf())
-    val completedTopicIds: StateFlow<Set<String>> = _completedTopicIds.asStateFlow()
+    val completedTopicIds: StateFlow<Set<String>> = database.topicProgressDao().getCompletedTopicIdsFlow()
+        .map { list -> list.toSet() }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
 
     private val savedNoteDao = database.savedNoteDao()
     val savedNotes: StateFlow<List<SavedNote>> = savedNoteDao.getAllNotes()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     fun toggleTopicCompleted(id: String) {
-        val current = _completedTopicIds.value.toMutableSet()
-        val isCompleted = !current.contains(id)
-        if (current.contains(id)) current.remove(id) else current.add(id)
-        _completedTopicIds.value = current
-        learnerProfileManager.recordLessonActivity(id, isCompleted)
-        if (isCompleted) {
-            viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val existing = database.topicProgressDao().getTopicProgress(id)
+            val newIsCompleted = !(existing?.isCompleted ?: false)
+            val updatedEntity = existing?.copy(
+                isCompleted = newIsCompleted,
+                completedAt = if (newIsCompleted) System.currentTimeMillis() else null,
+                updatedAt = System.currentTimeMillis()
+            ) ?: com.example.data.model.TopicProgressEntity(
+                topicId = id,
+                isCompleted = newIsCompleted,
+                masteryScore = if (newIsCompleted) 1.0f else 0.0f,
+                completedAt = if (newIsCompleted) System.currentTimeMillis() else null,
+                updatedAt = System.currentTimeMillis()
+            )
+            database.topicProgressDao().insertTopicProgress(updatedEntity)
+            learnerProfileManager.recordLessonActivity(id, newIsCompleted)
+            if (newIsCompleted) {
                 lisanJourneyRepository.recordEvent(
                     eventType = "LESSON_COMPLETED",
                     featureSource = "GRAMMAR_LESSON",
@@ -2561,7 +2878,6 @@ Welcome to Lisan Grammar. I will help you learn English grammar by comparing it 
     private val dailyVerbAssignmentDao = database.dailyVerbAssignmentDao()
     private val dailyIdiomAssignmentDao = database.dailyIdiomAssignmentDao()
     private val dailyChallengeAssignmentDao = database.dailyChallengeAssignmentDao()
-    private val revisionItemDao = database.revisionItemDao()
     private val achievementUnlockDao = database.achievementUnlockDao()
     private val dailyCompletionRewardDao = database.dailyCompletionRewardDao()
 
@@ -2926,47 +3242,12 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
         loadAchievementsList()
     }
 
-    // --- Revision Planner Integration ---
-    val revisionItems: StateFlow<List<RevisionItem>> = revisionItemDao.getRevisionItems("current-user-id")
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val dueRevisionCount: StateFlow<Int> = revisionItems.map { items ->
-        items.count { it.nextReviewAt <= System.currentTimeMillis() }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
-    fun reviewRevisionItem(item: RevisionItem, isCorrect: Boolean) {
-        viewModelScope.launch {
-            val times = item.timesReviewed + 1
-            val corrects = item.correctCount + (if (isCorrect) 1 else 0)
-            val incorrects = item.incorrectCount + (if (isCorrect) 0 else 1)
-            val nextReview = calculateNextReviewTime(isCorrect, times)
-            
-            val updated = item.copy(
-                timesReviewed = times,
-                correctCount = corrects,
-                incorrectCount = incorrects,
-                confidenceRating = if (isCorrect) 5 else 2,
-                nextReviewAt = nextReview,
-                lastReviewedAt = System.currentTimeMillis(),
-                status = if (isCorrect && times >= 4) "mastered" else "pending"
-            )
-            revisionItemDao.updateRevisionItem(updated)
-            
-            incrementAchievementProgress("revision_completed")
-        }
-    }
-
     private val isLowRam = com.example.utils.DeviceCapabilityHelper.isLowRamDevice(application)
-
-    private val _isLoadingRevisionPlanner = MutableStateFlow(false)
-    val isLoadingRevisionPlanner: StateFlow<Boolean> = _isLoadingRevisionPlanner.asStateFlow()
 
     @Volatile
     private var hasLoadedChatHistory = false
     @Volatile
     private var hasLoadedDailyActivities = false
-    @Volatile
-    private var hasLoadedRevisionPlanner = false
     @Volatile
     private var hasLoadedProgressDashboard = false
     @Volatile
@@ -2979,51 +3260,16 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
             viewModelScope.launch { settingsRepository.updateSettings { it.copy(userApiKey = savedApiKey) } }
         }
 
-        if (!isLowRam) {
-            // High-RAM / capable devices: Eagerly pre-warm repositories and initialize in the background
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                com.example.data.repository.IdiomRepository.initialize(application)
-            }
-            loadDailyChallenge()
-            loadDailyVerb()
-            observeDailyChallengeResults()
-            loadStoredChatHistory()
-            loadLisanDaily()
-            loadAchievementsList()
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                revisionRepository.seedQuestionBankIfNeeded()
-                loadRevisionDashboard()
-            }
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                lisanJourneyRepository.initializeDefinitionsIfNeeded()
-                loadLast7DaysActivity()
-            }
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val userId = "current_user"
-                _dailyChallengeProgress.value = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
-            }
-            RetrofitClient.triggerPreWarm(application)
-        }
+        // All non-essential data loading (idioms, daily challenge, daily verb, chat history,
+        // journey achievements, 7-day activity, and network pre-warming) is safely deferred
+        // and initialized on-demand via ensure...Loaded() when the respective screens are opened.
     }
 
     fun ensureChatHistoryLoaded() {
         if (hasLoadedChatHistory && _chatHistory.value.isNotEmpty()) return
         hasLoadedChatHistory = true
         loadStoredChatHistory()
-    }
-
-    fun ensureRevisionPlannerLoaded() {
-        if (hasLoadedRevisionPlanner && _dashboardSummary.value != null) return
-        hasLoadedRevisionPlanner = true
-        _isLoadingRevisionPlanner.value = true
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                revisionRepository.seedQuestionBankIfNeeded()
-                _dashboardSummary.value = revisionRepository.getDashboardSummary()
-            } finally {
-                _isLoadingRevisionPlanner.value = false
-            }
-        }
+        RetrofitClient.triggerPreWarm(getApplication())
     }
 
     fun ensureLisanDailyLoaded(dateKey: String = _selectedDailyDate.value) {
@@ -3052,73 +3298,22 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
 
     fun ensureDailyChallengeProgressLoaded(userId: String = "current_user") {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            _dailyChallengeProgress.value = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
-        }
-    }
+            val progress = dailyQuizChallengeRepository.getDailyChallengeProgress(userId)
+            _dailyChallengeProgress.value = progress
 
-    fun loadRevisionDashboard() {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            _dashboardSummary.value = revisionRepository.getDashboardSummary()
-        }
-    }
+            val weekly = dailyQuizChallengeRepository.getWeeklyProgression(userId, _selectedQuizWeekNumber.value)
+            _weeklyProgression.value = weekly
 
-    fun startRevisionSession(sessionType: String, topicId: String?, count: Int) {
-        viewModelScope.launch {
-            try {
-                val session = revisionRepository.startRevisionSession(sessionType, topicId, count)
-                val questions = revisionRepository.getSessionQuestions(session.sessionId)
-                
-                _activeSessionQuestions.value = questions
-                _currentSession.value = session
-                _currentQuestionIndex.value = 0
-                _selectedOptionIndex.value = null
-                _answerResult.value = null
-                _isSessionCompleted.value = false
-            } catch (e: Exception) {
-                // Handle exception gracefully
+            if (_selectedDailyChallengeDay.value == 1 && weekly.currentActiveDayNumber > 1) {
+                _selectedDailyChallengeDay.value = weekly.currentActiveDayNumber
+                _selectedQuizWeekNumber.value = weekly.currentActiveWeekNumber
             }
-        }
-    }
 
-    fun submitRevisionAnswer(questionId: String, selectedIndex: Int) {
-        val session = _currentSession.value ?: return
-        viewModelScope.launch {
-            val result = revisionRepository.submitAnswer(session.sessionId, questionId, selectedIndex)
-            _selectedOptionIndex.value = selectedIndex
-            _answerResult.value = result
-            
-            loadRevisionDashboard()
+            val targetDay = _selectedDailyChallengeDay.value
+            val questionIds = com.example.data.model.DailyQuiz365Generator.getQuestionsForDay(targetDay).map { it.id }
+            val assignment = dailyQuizChallengeRepository.getOrCreateTodayAssignment(userId, questionIds)
+            _todayAssignment.value = assignment
         }
-    }
-
-    fun nextRevisionQuestion() {
-        val nextIdx = _currentQuestionIndex.value + 1
-        if (nextIdx < _activeSessionQuestions.value.size) {
-            _currentQuestionIndex.value = nextIdx
-            _selectedOptionIndex.value = null
-            _answerResult.value = null
-        } else {
-            finishRevisionSession()
-        }
-    }
-
-    fun finishRevisionSession() {
-        val session = _currentSession.value ?: return
-        viewModelScope.launch {
-            val completed = revisionRepository.completeRevisionSession(session.sessionId)
-            _currentSession.value = completed
-            _isSessionCompleted.value = true
-            incrementAchievementProgress("revision_completed")
-        }
-    }
-
-    fun exitRevisionSession() {
-        _currentSession.value = null
-        _activeSessionQuestions.value = emptyList()
-        _currentQuestionIndex.value = 0
-        _selectedOptionIndex.value = null
-        _answerResult.value = null
-        _isSessionCompleted.value = false
     }
 
     private val _createImageState = MutableStateFlow<CreateImageUiState>(CreateImageUiState.Idle)
@@ -3167,7 +3362,12 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
                 val inlineData = partWithImage?.inlineData
                 
                 if (inlineData != null && inlineData.data.isNotBlank()) {
-                    _createImageState.value = CreateImageUiState.Success(inlineData.data, inlineData.mimeType)
+                    val persistentPath = com.example.utils.ImageOptimizer.saveGeneratedImageBase64(
+                        context = getApplication(),
+                        base64OrPath = inlineData.data,
+                        mimeType = inlineData.mimeType ?: "image/png"
+                    )
+                    _createImageState.value = CreateImageUiState.Success(persistentPath, inlineData.mimeType ?: "image/png")
                 } else {
                     val errorMsg = response.error?.message ?: "No image was returned by the model. Make sure your description does not violate Gemini safety guidelines."
                     _createImageState.value = CreateImageUiState.Error(errorMsg)
@@ -3763,10 +3963,9 @@ private val _dailyIdiom = MutableStateFlow<Idiom?>(null)
             _silverRateState.value = result
             if (result is SilverRateUiState.Success) {
                 val tolaPrice = result.rate.pricePerTola
-                if (tolaPrice != null && tolaPrice > 0.0) {
+                if (tolaPrice != null && tolaPrice > 0.0 && _customRateInput.value.isBlank()) {
                     val formattedPrice = String.format(java.util.Locale.US, "%.0f", tolaPrice)
                     _customRateInput.value = formattedPrice
-                    _isCustomRateMode.value = true
                 }
             }
             if (forceRefresh) {

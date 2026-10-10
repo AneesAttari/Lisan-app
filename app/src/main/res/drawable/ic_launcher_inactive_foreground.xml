@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Same original Lisan AI Logo artwork -->
+    <item
+        android:width="108dp"
+        android:height="108dp"
+        android:drawable="@drawable/lisan_ai_app_icon_1786016999886"
+        android:gravity="center" />
+</layer-list>

@@ -45,13 +45,48 @@
             android:exported="true"
             android:label="@string/app_name"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.MyApplication">
+            android:theme="@style/Theme.MyApplication" />
+
+        <!-- Launcher Activity Aliases for Lisan AI Launcher Identity & 24h Inactivity Visual Effect -->
+        <!-- 1. Normal Base Lisan AI Icon -->
+        <activity-alias
+            android:name=".MainActivityAliasNormal"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <!-- 2. Subtle 24h Inactivity Variation (Same Lisan Icon with subtle gentle highlight) -->
+        <activity-alias
+            android:name=".MainActivityAliasInactive"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_inactive"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher_inactive_round"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Boot & Package Update Receiver for Restoring Background Inactivity Icon State -->
+        <receiver
+            android:name=".utils.IconBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".utils.DailyReminderReceiver"

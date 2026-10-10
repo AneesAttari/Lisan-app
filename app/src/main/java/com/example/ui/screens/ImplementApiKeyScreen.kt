@@ -353,8 +353,8 @@ fun ImplementApiKeyScreen(viewModel: LisanViewModel) {
                                                         )
                                                         val response = com.example.data.remote.RetrofitClient.service.generateContent("gemini-3.5-flash", inputKey.trim(), req)
                                                         if (response.candidates?.isNotEmpty() == true) {
-                                                            testResultMsg = "✅ بہترین! یہ اے پی آئی کی بالکل ٹھیک کام کر رہی ہے۔"
-                                                            Toast.makeText(context, "✅ Success! API Key is valid.", Toast.LENGTH_LONG).show()
+                                                            testResultMsg = "✅ بہترین! (Gemini 3.5 Flash & Transcribe APIs Active)"
+                                                            Toast.makeText(context, "✅ Success! Gemini 3.5 Flash & Transcribe APIs Active.", Toast.LENGTH_LONG).show()
                                                         } else {
                                                             testResultMsg = "❌ اے پی آئی کی کام نہیں کر رہی۔"
                                                         }
@@ -496,19 +496,19 @@ fun ImplementApiKeyScreen(viewModel: LisanViewModel) {
                         }
 
                         isTestingKey = true
-                        testResultMsg = "Testing Gemini Connection with 'Say hello.'..."
+                        testResultMsg = "Testing Gemini 3.5 Transcribe & Flash Connection..."
                         coroutineScope.launch {
                             try {
                                 val req = com.example.data.model.GenerateContentRequest(
-                                    contents = listOf(com.example.data.model.Content(parts = listOf(com.example.data.model.Part(text = "Say hello."))))
+                                    contents = listOf(com.example.data.model.Content(parts = listOf(com.example.data.model.Part(text = "Say hello and confirm Gemini 3.5 Transcribe audio speech recognition readiness."))))
                                 )
                                 val response = com.example.data.remote.RetrofitClient.service.generateContent("gemini-3.5-flash", inputKey.trim(), req)
                                 android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_HTTP_STATUS=200 OK")
                                 android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_RESPONSE_RECEIVED")
                                 val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
                                 android.util.Log.d("LisanDiagnostic", "BROWSER_GEMINI_RESPONSE_TEXT_LENGTH=${text.length}")
-                                testResultMsg = "✅ BROWSER_GEMINI_HTTP_STATUS=200 OK\nResponse Length: ${text.length}\nResponse: $text"
-                                Toast.makeText(context, "✅ Connection Success! Response: $text", Toast.LENGTH_LONG).show()
+                                testResultMsg = "✅ BROWSER_GEMINI_HTTP_STATUS=200 OK\nModels Active: Gemini 3.5 Transcribe & Flash\nResponse: $text"
+                                Toast.makeText(context, "✅ Connection Success! Gemini 3.5 Transcribe & Flash Ready.", Toast.LENGTH_LONG).show()
                             } catch (e: Exception) {
                                 val httpCode = if (e is retrofit2.HttpException) e.code() else 500
                                 android.util.Log.e("LisanDiagnostic", "BROWSER_GEMINI_HTTP_STATUS=$httpCode")

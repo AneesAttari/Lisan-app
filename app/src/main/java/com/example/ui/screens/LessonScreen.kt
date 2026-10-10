@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CurriculumData
 import com.example.ui.components.DailyGrammarCard
+import com.example.ui.components.LessonMcqSection
 import com.example.ui.components.EditorialCard
 import com.example.ui.components.EditorialComparisonGrid
 import com.example.ui.components.EditorialDarkPracticeBox
@@ -463,6 +464,16 @@ fun LessonScreen(
                             isChecking = isCheckingQuiz,
                             feedback = quizFeedback
                         )
+
+                        // 5. 10 MCQs Quiz Section
+                        if (lesson.mcqs.isNotEmpty()) {
+                            EditorialDivider()
+                            LessonMcqSection(
+                                topicId = selectedTopicId,
+                                mcqs = lesson.mcqs,
+                                viewModel = viewModel
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(12.dp))
                         val context = androidx.compose.ui.platform.LocalContext.current

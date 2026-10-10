@@ -27,16 +27,6 @@ object NotificationHelper {
                 enableVibration(true)
             }
             notificationManager.createNotificationChannel(dailyChannel)
-
-            val revisionChannel = NotificationChannel(
-                "revision_channel",
-                "Grammar Revision Alerts",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Reminders for grammar review sessions"
-                enableVibration(true)
-            }
-            notificationManager.createNotificationChannel(revisionChannel)
         }
     }
 
@@ -92,58 +82,6 @@ object NotificationHelper {
 
         try {
             notificationManager.notify(NOTIFICATION_ID, builder.build())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    fun showRevisionReminderNotification(context: Context) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                return
-            }
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Lisani Reminders"
-            val descriptionText = "Reminders for your grammar revision sessions"
-            val importance = NotificationManager.IMPORTANCE_HIGH
-            val channel = NotificationChannel("revision_channel", name, importance).apply {
-                description = descriptionText
-                enableVibration(true)
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
-
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            context, 1, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val builder = NotificationCompat.Builder(context, "revision_channel")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Lisani")
-            .setSubText("Al-Istiqamatu fawqa al-karama")
-            .setContentText("العلم نور، والدراسة دأب الصالحين.")
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("العلم نور، والدراسة دأب الصالحين. حان وقت مراجعة القواعد والتمارين اليومية.")
-            )
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-
-        try {
-            notificationManager.notify(1002, builder.build())
         } catch (e: Exception) {
             e.printStackTrace()
         }

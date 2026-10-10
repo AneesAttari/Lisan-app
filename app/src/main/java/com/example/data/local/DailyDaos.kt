@@ -8,10 +8,25 @@ import kotlinx.coroutines.flow.Flow
 interface DailyVerbAssignmentDao {
     @Query("SELECT * FROM daily_verb_assignments WHERE userId = :userId AND assignedDate = :date LIMIT 1")
     suspend fun getAssignmentByDateSync(userId: String, date: String): DailyVerbAssignment?
+
     @Query("SELECT * FROM daily_verb_assignments WHERE userId = :userId")
     suspend fun getAllAssignmentsSync(userId: String): List<DailyVerbAssignment>
+
+    @Query("SELECT COUNT(DISTINCT verbId) FROM daily_verb_assignments WHERE userId = :userId AND completedAt IS NOT NULL")
+    suspend fun getLearnedVerbsCount(userId: String): Int
+
+    @Query("SELECT COUNT(DISTINCT verbId) FROM daily_verb_assignments WHERE userId = :userId AND completedAt IS NOT NULL")
+    fun getLearnedVerbsCountFlow(userId: String): Flow<Int>
+
+    @Query("SELECT DISTINCT verbId FROM daily_verb_assignments WHERE userId = :userId AND completedAt IS NOT NULL")
+    suspend fun getLearnedVerbIds(userId: String): List<String>
+
+    @Query("SELECT DISTINCT verbId FROM daily_verb_assignments WHERE userId = :userId AND completedAt IS NOT NULL")
+    fun getLearnedVerbIdsFlow(userId: String): Flow<List<String>>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAssignment(assignment: DailyVerbAssignment): Long
+
     @Update
     suspend fun updateAssignment(assignment: DailyVerbAssignment)
 }
@@ -52,27 +67,6 @@ interface DailyChallengeAssignmentDao {
 
     @Update
     suspend fun updateAssignment(assignment: DailyChallengeAssignment)
-}
-
-@Dao
-interface RevisionItemDao {
-    @Query("SELECT * FROM revision_items WHERE userId = :userId ORDER BY nextReviewAt ASC")
-    fun getRevisionItems(userId: String): Flow<List<RevisionItem>>
-
-    @Query("SELECT * FROM revision_items WHERE userId = :userId AND sourceType = :sourceType AND sourceId = :sourceId LIMIT 1")
-    fun getRevisionItem(userId: String, sourceType: String, sourceId: String): Flow<RevisionItem?>
-
-    @Query("SELECT * FROM revision_items WHERE userId = :userId AND sourceType = :sourceType AND sourceId = :sourceId LIMIT 1")
-    suspend fun getRevisionItemSync(userId: String, sourceType: String, sourceId: String): RevisionItem?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertRevisionItem(item: RevisionItem)
-
-    @Update
-    suspend fun updateRevisionItem(item: RevisionItem)
-
-    @Delete
-    suspend fun deleteRevisionItem(item: RevisionItem)
 }
 
 @Dao

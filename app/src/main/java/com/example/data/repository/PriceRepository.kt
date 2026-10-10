@@ -128,7 +128,7 @@ object PriceRepository {
                 val rawRate = liveData.silverRate
                 val pTola = rawRate.pricePerTola ?: 0.0
                 val pGram = rawRate.pricePerGram ?: 0.0
-                if (pTola in 1500.0..15000.0 && pGram > 0.0) {
+                if (pTola in 1000.0..25000.0 && pGram > 0.0) {
                     val rate = rawRate.copy(
                         requestedCity = city,
                         requestedCountry = country,
@@ -151,7 +151,7 @@ object PriceRepository {
                     return@withContext SilverRateUiState.Success(rate)
                 }
             }
-            failureLogs.add("Tier 2 (Financial Feeds): No valid rate in 1500..15000 range")
+            failureLogs.add("Tier 2 (Financial Feeds): No valid rate returned")
         } catch (e: Exception) {
             val msg = "Tier 2 (Financial Feeds) failed: ${e.message}"
             Log.w(TAG, msg)
@@ -170,7 +170,7 @@ object PriceRepository {
                     val rate = result.rate
                     val pTola = rate.pricePerTola ?: 0.0
                     val pGram = rate.pricePerGram ?: 0.0
-                    if (pTola in 1500.0..15000.0 && pGram > 0.0) {
+                    if (pTola > 0.0 || pGram > 0.0) {
                         cachedSilverRate = rate
                         lastFetchTimestampMs = now
                         Log.i("PRICE_REFRESH", "PRICE_REFRESH: Tier 3 response received from ${rate.sourceWebsite}")
@@ -193,7 +193,7 @@ object PriceRepository {
         }
 
         // ====================================================================
-        // TIER 4: Verified Reference Benchmark / Cache Fallback
+        // TIER 4: Fallback / Error Handling
         // ====================================================================
         Log.w(TAG, "[SilverPrice] All live tiers failed. Logs: ${failureLogs.joinToString("; ")}")
 
@@ -206,26 +206,8 @@ object PriceRepository {
             return@withContext SilverRateUiState.Success(cached)
         }
 
-        if (!forceRefresh) {
-            val benchmark = getFallbackSilverRate(country, city, currency, now)
-            Log.i(TAG, "[SilverPrice] Returning offline verified reference benchmark.")
-            return@withContext SilverRateUiState.Success(benchmark)
-        }
-
-        // If forceRefresh was requested and all live tiers failed:
-        // Check if we have an active session cached rate
-        if (cachedSilverRate != null) {
-            val cached = cachedSilverRate!!.copy(
-                freshnessStatus = PriceFreshnessStatus.CACHED,
-                cityRateNote = "Live update failed across providers. Showing last verified session rate."
-            )
-            Log.i(TAG, "[SilverPrice] Live refresh failed across all tiers, using session cached rate.")
-            return@withContext SilverRateUiState.Success(cached)
-        }
-
-        // If no cache exists and all live tiers failed during forceRefresh:
-        Log.e("PRICE_REFRESH", "PRICE_REFRESH: All live tiers failed during forceRefresh. Returning Error state.")
-        return@withContext SilverRateUiState.Error("Unable to retrieve live silver rate across all providers. Please verify your internet connection.")
+        Log.e("PRICE_REFRESH", "PRICE_REFRESH: All live silver tiers failed and no valid session cache available. Returning Error state.")
+        return@withContext SilverRateUiState.Error("Unable to retrieve the current market price. Please retry or enter a price manually.")
     }
 
     /**
@@ -253,147 +235,117 @@ object PriceRepository {
             return@withContext GoldRateUiState.Success(cached)
         }
 
-        val isPakistan = country.equals("Pakistan", ignoreCase = true) || country.equals("PK", ignoreCase = true)
+        val failureLogs = mutableListOf<String>()
 
+        // ====================================================================
+        // TIER 1: Structured Live Financial Feeds (gold-api.com XAU + open.er-api.com USD/PKR)
+        // ====================================================================
         try {
-            val isGeminiAvailable = RetrofitClient.getApiKey().isNotEmpty() || RetrofitClient.isUsingBackend()
-            
-            if (isGeminiAvailable) {
-                if (isPakistan && forceRefresh) {
-                    Log.i("NETWORK_REQUEST_STARTED", "→ NETWORK_REQUEST_STARTED: requesting live gold price via Gemini search grounding")
-                    Log.i("SOURCE", "→ SOURCE = Gemini Search Grounding (Sarafa/HamariWeb)")
-                    // IMPLEMENT STRICT PRIORITY PIPELINE FOR REFRESH: Sarafa -> HamariWeb -> Error
-                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: requesting source=Sarafa")
-                    var result = RetrofitClient.fetchLiveGoldPrice(country, city, currency, specificSource = "Sarafa", forceRefresh = true)
-                    var rate: com.example.data.model.LiveGoldRate? = null
-                    
-                    if (result is GoldRateUiState.Success) {
-                        val r = result.rate
-                        if ((r.pricePerGram ?: 0.0) > 0.0 && (r.pricePerTola ?: 0.0) > 0.0) {
-                            rate = r
-                        }
-                    }
-
-                    if (rate == null) {
-                        Log.w(TAG, "[GoldPrice] Primary source (Sarafa) failed or returned invalid data. Trying HamariWeb fallback...")
-                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: requested source=Sarafa failed or was invalid. Trying HamariWeb...")
-                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: requesting source=HamariWeb")
-                        result = RetrofitClient.fetchLiveGoldPrice(country, city, currency, specificSource = "HamariWeb", forceRefresh = true)
-                        if (result is GoldRateUiState.Success) {
-                            val r = result.rate
-                            if ((r.pricePerGram ?: 0.0) > 0.0 && (r.pricePerTola ?: 0.0) > 0.0) {
-                                rate = r.copy(cityRateNote = "Primary source (Sarafa) unavailable. Using HamariWeb.")
-                            }
-                        }
-                    }
-
-                    if (rate != null) {
-                        cachedGoldRate = rate
-                        lastFetchTimestampMs = now
-                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received")
-                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${rate.pricePerTola} per tola")
-                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
-                        Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: gold rate fetched successfully")
-                        Log.i("PRICE_PARSED", "→ PRICE_PARSED = ${rate.pricePerTola} per tola (${rate.pricePerGram} per gram)")
-                        return@withContext GoldRateUiState.Success(rate)
-                    } else {
-                        Log.e("PRICE_REFRESH", "PRICE_REFRESH: request failed")
-                        throw Exception("Unable to retrieve current gold price from Sarafa or HamariWeb.")
-                    }
-                } else {
-                    if (forceRefresh) {
-                        Log.i("NETWORK_REQUEST_STARTED", "→ NETWORK_REQUEST_STARTED: requesting live gold price via Gemini search grounding")
-                        Log.i("SOURCE", "→ SOURCE = Gemini Search Grounding (Sarafa/HamariWeb)")
-                    }
-                    // Standard Gemini Search (forceRefresh = false or non-Pakistan)
-                    val result = RetrofitClient.fetchLiveGoldPrice(country, city, currency, specificSource = null, forceRefresh = forceRefresh)
-                    if (result is GoldRateUiState.Success) {
-                        val rate = result.rate
-                        if ((rate.pricePerGram ?: 0.0) <= 0.0 || (rate.pricePerTola ?: 0.0) <= 0.0) {
-                            throw Exception("Invalid prices returned: Gram=${rate.pricePerGram}, Tola=${rate.pricePerTola}")
-                        }
-                        cachedGoldRate = rate
-                        lastFetchTimestampMs = now
-                        if (forceRefresh) {
-                            Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received")
-                            Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${rate.pricePerTola} per tola")
-                            Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
-                            Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: gold rate fetched successfully")
-                            Log.i("PRICE_PARSED", "→ PRICE_PARSED = ${rate.pricePerTola} per tola (${rate.pricePerGram} per gram)")
-                        }
-                        return@withContext result
-                    } else if (result is GoldRateUiState.Error) {
-                        throw Exception(result.message)
-                    }
-                }
-            } else {
-                if (forceRefresh) {
-                    Log.i("NETWORK_REQUEST_STARTED", "→ NETWORK_REQUEST_STARTED: requesting live gold price via keyless direct APIs")
-                    Log.i("SOURCE", "→ SOURCE = gold-api.com & open.er-api.com")
-                }
-                val liveData = fetchLivePricesFromApi(country, currency, forceRefresh)
-                if (liveData != null && liveData.goldRate != null) {
-                    val rate = liveData.goldRate.copy(
+            Log.i("PRICE_REFRESH", "PRICE_REFRESH: Gold Tier 1 starting - Direct Financial Feeds (gold-api.com & open.er-api.com)")
+            Log.i("NETWORK_REQUEST_STARTED", "→ NETWORK_REQUEST_STARTED: requesting live gold price via financial feeds")
+            val liveData = fetchDirectFinancialApis(country, currency)
+            if (liveData != null && liveData.goldRate != null) {
+                val rawRate = liveData.goldRate
+                val pTola = rawRate.pricePerTola ?: 0.0
+                val pGram = rawRate.pricePerGram ?: 0.0
+                if (pTola > 0.0 && pGram > 0.0) {
+                    val rate = rawRate.copy(
                         requestedCity = city,
                         requestedCountry = country,
-                        appliedMarketCity = "$city / $country Sarafa Market",
+                        appliedMarketCity = "$city Market Spot",
+                        sourceWebsite = "Global Bullion Spot Feed (gold-api.com)",
                         freshnessStatus = PriceFreshnessStatus.LIVE,
                         timestampMs = now,
-                        cityRateNote = "Live market rate from ${liveData.goldRate.sourceWebsite} (Updated: ${formatTime(now)})"
+                        cityRateNote = "Live 24K gold market spot converted via live FX rate (${formatTime(now)})"
                     )
-                    if ((rate.pricePerGram ?: 0.0) <= 0.0 || (rate.pricePerTola ?: 0.0) <= 0.0) {
-                        throw Exception("Invalid prices returned by Financial Feed: Gram=${rate.pricePerGram}, Tola=${rate.pricePerTola}")
-                    }
                     cachedGoldRate = rate
                     lastFetchTimestampMs = now
-                    if (forceRefresh) {
-                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received from ${rate.sourceWebsite}")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${rate.pricePerTola} per tola")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
+                    Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: gold rate fetched successfully via Tier 1")
+                    Log.i("PRICE_PARSED", "→ PRICE_PARSED = ${rate.pricePerTola} per tola (${rate.pricePerGram} per gram)")
+                    return@withContext GoldRateUiState.Success(rate)
+                }
+            }
+            failureLogs.add("Tier 1 (Financial Feeds): Returned empty or invalid gold rate")
+        } catch (e: Exception) {
+            val msg = "Tier 1 (Financial Feeds) failed: ${e.message}"
+            Log.w(TAG, msg)
+            failureLogs.add(msg)
+        }
+
+        // ====================================================================
+        // TIER 2: Gemini Search Grounding / Web-Grounded Market Lookup
+        // ====================================================================
+        val isGeminiAvailable = RetrofitClient.getApiKey().isNotEmpty() || RetrofitClient.isUsingBackend()
+        if (isGeminiAvailable) {
+            try {
+                Log.i("PRICE_REFRESH", "PRICE_REFRESH: Gold Tier 2 starting - Gemini search grounding")
+                val result = RetrofitClient.fetchLiveGoldPrice(country, city, currency, specificSource = null, forceRefresh = forceRefresh)
+                if (result is GoldRateUiState.Success) {
+                    val rate = result.rate
+                    if ((rate.pricePerGram ?: 0.0) > 0.0 || (rate.pricePerTola ?: 0.0) > 0.0) {
+                        cachedGoldRate = rate
+                        lastFetchTimestampMs = now
+                        Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received from Gemini Search Grounding")
                         Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${rate.pricePerTola} per tola")
                         Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
-                        Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: gold rate fetched successfully")
+                        Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: gold rate fetched successfully via Gemini")
                         Log.i("PRICE_PARSED", "→ PRICE_PARSED = ${rate.pricePerTola} per tola (${rate.pricePerGram} per gram)")
+                        return@withContext result
                     }
+                } else if (result is GoldRateUiState.Error) {
+                    failureLogs.add("Tier 2 (Gemini): ${result.message}")
+                }
+            } catch (e: Exception) {
+                val msg = "Tier 2 (Gemini) failed: ${e.message}"
+                Log.w(TAG, msg)
+                failureLogs.add(msg)
+            }
+        } else {
+            failureLogs.add("Tier 2 (Gemini): Skipped (No API Key)")
+        }
+
+        // ====================================================================
+        // TIER 3: Backend proxy if configured
+        // ====================================================================
+        try {
+            val liveData = fetchLivePricesFromApi(country, currency, forceRefresh)
+            if (liveData != null && liveData.goldRate != null) {
+                val rate = liveData.goldRate.copy(
+                    requestedCity = city,
+                    requestedCountry = country,
+                    appliedMarketCity = "$city / $country Sarafa Market",
+                    freshnessStatus = PriceFreshnessStatus.LIVE,
+                    timestampMs = now
+                )
+                if ((rate.pricePerGram ?: 0.0) > 0.0 && (rate.pricePerTola ?: 0.0) > 0.0) {
+                    cachedGoldRate = rate
+                    lastFetchTimestampMs = now
                     return@withContext GoldRateUiState.Success(rate)
-                } else {
-                    throw Exception("Financial Feed API returned empty or invalid rate.")
                 }
             }
         } catch (e: Exception) {
-            val errMsg = e.localizedMessage ?: e.message ?: "Unknown error"
-            Log.e("PRICE_REFRESH", "PRICE_REFRESH: request failed")
-            Log.e("PRICE_REFRESH", "PRICE_REFRESH: error=$errMsg")
-            
-            if (forceRefresh) {
-                Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: fetch failed (Error: $errMsg)")
-                Log.i("PRICE_PARSED", "→ PRICE_PARSED = ERROR: Current gold price unavailable.")
-                return@withContext GoldRateUiState.Error("Current gold price unavailable. Please verify your internet connection or API key.")
-            }
-
-            if (!forceRefresh && cachedGoldRate != null) {
-                val cached = cachedGoldRate!!.copy(
-                    freshnessStatus = PriceFreshnessStatus.CACHED,
-                    cityRateNote = "Live lookup unavailable ($errMsg). Showing cached rate."
-                )
-                Log.i(TAG, "[GoldPrice] Returning CACHED price from ${formatTime(cached.timestampMs)}")
-                return@withContext GoldRateUiState.Success(cached)
-            }
-            
-            // Return baseline benchmark rate as FALLBACK (offline-friendly)
-            Log.i(TAG, "[GoldPrice] Fetch failed and no cache. Returning offline benchmark.")
-            val benchmark = getFallbackGoldRate(country, city, currency, now)
-            return@withContext GoldRateUiState.Success(benchmark)
+            failureLogs.add("Tier 3 (Backend): ${e.message}")
         }
 
-        if (cachedGoldRate != null) {
+        // ====================================================================
+        // Fallback / Error Handling
+        // ====================================================================
+        Log.w(TAG, "[GoldPrice] All live tiers failed. Logs: ${failureLogs.joinToString("; ")}")
+
+        if (!forceRefresh && cachedGoldRate != null) {
             val cached = cachedGoldRate!!.copy(
                 freshnessStatus = PriceFreshnessStatus.CACHED,
-                cityRateNote = "Using cached price from ${formatTime(cachedGoldRate!!.timestampMs)}"
+                cityRateNote = "Live lookup unavailable. Showing cached rate."
             )
+            Log.i(TAG, "[GoldPrice] Returning CACHED price from ${formatTime(cached.timestampMs)}")
             return@withContext GoldRateUiState.Success(cached)
         }
 
-        val benchmark = getFallbackGoldRate(country, city, currency, now)
-        return@withContext GoldRateUiState.Success(benchmark)
+        Log.e("PRICE_REFRESH", "PRICE_REFRESH: All live gold tiers failed and no valid session cache available. Returning Error state.")
+        return@withContext GoldRateUiState.Error("Unable to retrieve the current market price. Please retry or enter a price manually.")
     }
 
     /**
@@ -410,8 +362,7 @@ object PriceRepository {
             Log.i("PRICE_REFRESH", "PRICE_REFRESH: requested")
             Log.i("PRICE_REFRESH", "PRICE_REFRESH: forceNetwork=true")
             Log.i("PRICE_SERVICE_CALLED", "→ PRICE_SERVICE_CALLED: getCurrentCommodityPrices called (forceRefresh = true)")
-            Log.i("NETWORK_REQUEST_STARTED", "→ NETWORK_REQUEST_STARTED: requesting live commodity prices via Mandi API Batch Proxy / Financial Feeds")
-            Log.i("SOURCE", "→ SOURCE = Mandi API Batch Proxy & gold-api.com & open.er-api.com")
+            Log.i("NETWORK_REQUEST_STARTED", "→ NETWORK_REQUEST_STARTED: requesting live commodity prices")
         } else {
             Log.i(TAG, "[Commodities] Requesting commodity prices. Country: $country, Currency: $currency, ForceRefresh: false")
         }
@@ -427,84 +378,122 @@ object PriceRepository {
             )
         }
 
-        try {
-            if (forceRefresh) {
-                Log.i("PRICE_REFRESH", "PRICE_REFRESH: requesting source=Mandi API Batch Proxy / Financial Feeds")
-            }
+        val failureLogs = mutableListOf<String>()
 
+        // ====================================================================
+        // TIER 1: Gemini Grounded Search for Real-Time Mandi Rates
+        // ====================================================================
+        val isGeminiAvailable = RetrofitClient.getApiKey().isNotEmpty() || RetrofitClient.isUsingBackend()
+        if (isGeminiAvailable) {
+            try {
+                Log.i("PRICE_REFRESH", "PRICE_REFRESH: Commodity Tier 1 starting - Gemini Search Grounding")
+                val groundedPrices = RetrofitClient.fetchLiveCommodityPrices(country, currency, forceRefresh)
+                if (groundedPrices != null && groundedPrices.isNotEmpty()) {
+                    cachedCommodityPrices = groundedPrices
+                    lastFetchTimestampMs = now
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received from Gemini Search Grounding")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${groundedPrices.size} commodities updated")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
+                    Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: commodity prices fetched successfully via Gemini")
+                    val wheatInfo = groundedPrices[FitranaCommodity.WHEAT]
+                    val datesInfo = groundedPrices[FitranaCommodity.DATES]
+                    val wheatText = if (wheatInfo != null) "Wheat: ${wheatInfo.pricePerKg} $currency/kg" else "Wheat: N/A"
+                    val datesText = if (datesInfo != null) "Dates: ${datesInfo.pricePerKg} $currency/kg" else "Dates: N/A"
+                    Log.i("PRICE_PARSED", "→ PRICE_PARSED = $wheatText, $datesText")
+                    return@withContext CommodityPricesUiState.Success(
+                        prices = groundedPrices,
+                        freshnessStatus = PriceFreshnessStatus.GROUNDED_SEARCH,
+                        sourceName = "Pakistan Mandi Wholesale Market Bulletin (Web Search)",
+                        formattedTimestamp = formatTime(now)
+                    )
+                }
+                failureLogs.add("Tier 1 (Gemini): Grounded search returned no commodity rates")
+            } catch (e: Exception) {
+                val msg = "Tier 1 (Gemini) failed: ${e.message}"
+                Log.w(TAG, msg)
+                failureLogs.add(msg)
+            }
+        } else {
+            failureLogs.add("Tier 1 (Gemini): Skipped (No API Key)")
+        }
+
+        // ====================================================================
+        // TIER 2: Live Financial Feeds & Market Commodity Index
+        // ====================================================================
+        try {
+            Log.i("PRICE_REFRESH", "PRICE_REFRESH: Commodity Tier 2 starting - Financial & Market Index Feed")
+            val liveData = fetchDirectFinancialApis(country, currency)
+            if (liveData != null && liveData.commodityPrices.isNotEmpty()) {
+                val validPrices = liveData.commodityPrices.filterValues { it.pricePerKg > 0.0 }
+                if (validPrices.isNotEmpty()) {
+                    cachedCommodityPrices = validPrices
+                    lastFetchTimestampMs = now
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received from Financial & Mandi Index Feed")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${validPrices.size} commodities updated")
+                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
+                    Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: commodity prices fetched successfully via Tier 2")
+                    val wheatInfo = validPrices[FitranaCommodity.WHEAT]
+                    val datesInfo = validPrices[FitranaCommodity.DATES]
+                    val wheatText = if (wheatInfo != null) "Wheat: ${wheatInfo.pricePerKg} $currency/kg" else "Wheat: N/A"
+                    val datesText = if (datesInfo != null) "Dates: ${datesInfo.pricePerKg} $currency/kg" else "Dates: N/A"
+                    Log.i("PRICE_PARSED", "→ PRICE_PARSED = $wheatText, $datesText")
+                    return@withContext CommodityPricesUiState.Success(
+                        prices = validPrices,
+                        freshnessStatus = PriceFreshnessStatus.LIVE,
+                        sourceName = liveData.commoditySource,
+                        formattedTimestamp = formatTime(now)
+                    )
+                }
+            }
+            failureLogs.add("Tier 2 (Market Index Feed): No valid commodity rates")
+        } catch (e: Exception) {
+            val msg = "Tier 2 (Market Index Feed) failed: ${e.message}"
+            Log.w(TAG, msg)
+            failureLogs.add(msg)
+        }
+
+        // ====================================================================
+        // TIER 3: Backend proxy if configured
+        // ====================================================================
+        try {
             val liveData = fetchLivePricesFromApi(country, currency, forceRefresh)
             if (liveData != null && liveData.commodityPrices.isNotEmpty()) {
-                // Ensure these are actually live/meaningful and not fallback-overridden
-                var containsFallbacks = false
-                for ((commodity, info) in liveData.commodityPrices) {
-                    if (info.pricePerKg <= 0.0) {
-                        throw Exception("Invalid price returned for commodity ${commodity.id}: ${info.pricePerKg}")
+                val validPrices = liveData.commodityPrices.filterValues { it.pricePerKg > 0.0 }
+                if (validPrices.isNotEmpty()) {
+                    val status = validPrices.values.firstOrNull()?.freshnessStatus ?: PriceFreshnessStatus.FALLBACK
+                    if (status == PriceFreshnessStatus.LIVE || status == PriceFreshnessStatus.GROUNDED_SEARCH) {
+                        cachedCommodityPrices = validPrices
+                        lastFetchTimestampMs = now
+                        return@withContext CommodityPricesUiState.Success(
+                            prices = validPrices,
+                            freshnessStatus = status,
+                            sourceName = liveData.commoditySource,
+                            formattedTimestamp = formatTime(now)
+                        )
                     }
-                    if (info.freshnessStatus == PriceFreshnessStatus.FALLBACK) {
-                        containsFallbacks = true
-                    }
                 }
-                
-                // If forceRefresh is true and we received fallbacks (meaning real API was down/unconfigured), return an Error!
-                if (forceRefresh && containsFallbacks) {
-                    throw Exception("Live mandi commodity prices unavailable at this time.")
-                }
-
-                cachedCommodityPrices = liveData.commodityPrices
-                lastFetchTimestampMs = now
-                if (forceRefresh) {
-                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: response received")
-                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: price=${liveData.commodityPrices.size} commodities updated")
-                    Log.i("PRICE_REFRESH", "PRICE_REFRESH: timestamp=${formatTime(now)}")
-                    Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: commodity prices fetched successfully")
-                    val wheatInfo = liveData.commodityPrices[FitranaCommodity.WHEAT]
-                    val datesInfo = liveData.commodityPrices[FitranaCommodity.DATES]
-                    val wheatText = if (wheatInfo != null) "Wheat: ${wheatInfo.pricePerKg} PKR/kg" else "Wheat: N/A"
-                    val datesText = if (datesInfo != null) "Dates: ${datesInfo.pricePerKg} PKR/kg" else "Dates: N/A"
-                    Log.i("PRICE_PARSED", "→ PRICE_PARSED = $wheatText, $datesText")
-                }
-                
-                val finalFreshness = if (containsFallbacks) PriceFreshnessStatus.FALLBACK else PriceFreshnessStatus.LIVE
-                return@withContext CommodityPricesUiState.Success(
-                    prices = liveData.commodityPrices,
-                    freshnessStatus = finalFreshness,
-                    sourceName = liveData.commoditySource,
-                    formattedTimestamp = formatTime(now)
-                )
-            } else {
-                throw Exception("Mandi API returned empty or invalid commodity prices.")
             }
         } catch (e: Exception) {
-            val errMsg = e.localizedMessage ?: e.message ?: "Unknown error"
-            Log.e("PRICE_REFRESH", "PRICE_REFRESH: request failed")
-            Log.e("PRICE_REFRESH", "PRICE_REFRESH: error=$errMsg")
-            
-            if (forceRefresh) {
-                Log.i("NETWORK_RESPONSE_RECEIVED", "→ NETWORK_RESPONSE_RECEIVED: fetch failed (Error: $errMsg)")
-                Log.i("PRICE_PARSED", "→ PRICE_PARSED = ERROR: Current commodity prices unavailable.")
-                return@withContext CommodityPricesUiState.Error("Current commodity prices unavailable. Please verify your internet connection or API key.")
-            }
+            failureLogs.add("Tier 3 (Backend): ${e.message}")
+        }
 
-            if (!forceRefresh && cachedCommodityPrices != null) {
-                Log.i(TAG, "[Commodities] Returning CACHED commodity prices from ${formatTime(lastFetchTimestampMs)}")
-                return@withContext CommodityPricesUiState.Success(
-                    prices = cachedCommodityPrices!!,
-                    freshnessStatus = PriceFreshnessStatus.CACHED,
-                    sourceName = "Cached Market Bulletin",
-                    formattedTimestamp = formatTime(lastFetchTimestampMs)
-                )
-            }
-            
-            // Return baseline reference prices as FALLBACK
-            Log.i(TAG, "[Commodities] Fetch failed and no cache. Returning offline reference commodity prices.")
-            val fallbacks = getFallbackCommodityPrices(currency, now)
+        // ====================================================================
+        // Fallback / Error Handling
+        // ====================================================================
+        Log.w(TAG, "[Commodities] All live tiers failed. Logs: ${failureLogs.joinToString("; ")}")
+
+        if (!forceRefresh && cachedCommodityPrices != null) {
+            Log.i(TAG, "[Commodities] Returning CACHED commodity prices from ${formatTime(lastFetchTimestampMs)}")
             return@withContext CommodityPricesUiState.Success(
-                prices = fallbacks,
-                freshnessStatus = PriceFreshnessStatus.FALLBACK,
-                sourceName = "Offline Reference Mandi Bulletin",
-                formattedTimestamp = formatTime(now)
+                prices = cachedCommodityPrices!!,
+                freshnessStatus = PriceFreshnessStatus.CACHED,
+                sourceName = "Cached Market Bulletin",
+                formattedTimestamp = formatTime(lastFetchTimestampMs)
             )
         }
+
+        Log.e("PRICE_REFRESH", "PRICE_REFRESH: All live tiers failed and no valid session cache available for Commodity Prices.")
+        return@withContext CommodityPricesUiState.Error("Unable to retrieve current commodity prices. Please retry or enter a price manually.")
     }
 
     /**
@@ -545,8 +534,6 @@ object PriceRepository {
     )
 
     private fun fetchLivePricesFromApi(country: String, currency: String, forceRefresh: Boolean = false): ApiFetchResult? {
-        val isPakistan = country.equals("Pakistan", ignoreCase = true) || country.equals("PK", ignoreCase = true)
-        
         // Step 1: Try local backend proxy /api/prices endpoint
         val base = RetrofitClient.backendUrl
         val backendUrl = if (base.isNotBlank()) {
@@ -578,13 +565,7 @@ object PriceRepository {
             Log.d(TAG, "[ApiFetch] Backend proxy endpoint unavailable (${e.message}).")
         }
 
-        // Step 2: Fallback to direct keyless financial endpoints only if NOT Pakistan OR NOT forcing refresh
-        if (isPakistan && forceRefresh) {
-            Log.w(TAG, "[ApiFetch] Local Pakistan live prices cannot be fetched from direct financial APIs (global spot is not Pakistani retail). Bypassing direct fallback.")
-            return null
-        }
-
-        // Fallback to direct keyless financial endpoints (gold-api.com & exchangerate API)
+        // Step 2: Fallback to direct keyless financial endpoints
         return fetchDirectFinancialApis(country, currency)
     }
 
@@ -645,6 +626,12 @@ object PriceRepository {
                         val item = cObj.getJSONObject(key)
                         val pKg = item.optDouble("price_per_kg", commodity.defaultPricePerKgPkr)
                         val pMaund = item.optDouble("price_per_maund", pKg * 40.0)
+                        val freshness = when (item.optString("freshness_status", "")) {
+                            "LIVE" -> PriceFreshnessStatus.LIVE
+                            "GROUNDED_SEARCH" -> PriceFreshnessStatus.GROUNDED_SEARCH
+                            "CACHED" -> PriceFreshnessStatus.CACHED
+                            else -> PriceFreshnessStatus.FALLBACK
+                        }
                         commoditiesMap[commodity] = CommodityPriceInfo(
                             commodityId = commodity.id,
                             commodityNameEn = commodity.nameEn,
@@ -654,7 +641,7 @@ object PriceRepository {
                             currency = currency,
                             currencySymbol = if (currency == "PKR") "Rs." else currency,
                             sourceName = item.optString("source", "Pakistan Mandi Commodity Bulletin"),
-                            freshnessStatus = PriceFreshnessStatus.LIVE,
+                            freshnessStatus = freshness,
                             timestampMs = now,
                             formattedTimestamp = formatTime(now)
                         )
@@ -662,12 +649,12 @@ object PriceRepository {
                 }
             }
 
-            if (commoditiesMap.isNotEmpty()) {
+            if (goldRate != null || silverRate != null || commoditiesMap.isNotEmpty()) {
                 return ApiFetchResult(
                     goldRate = goldRate,
                     silverRate = silverRate,
                     commodityPrices = commoditiesMap,
-                    commoditySource = "Pakistan Mandi & Market Bulletin"
+                    commoditySource = "Backend Price Feed"
                 )
             }
         } catch (e: Exception) {
@@ -679,101 +666,125 @@ object PriceRepository {
     private fun fetchDirectFinancialApis(country: String, currency: String): ApiFetchResult? {
         try {
             val now = System.currentTimeMillis()
-            var xauUsd = 2500.0
-            var xagUsd = 29.50
-            var usdToPkr = 278.50
+            var xauUsd: Double? = null
+            var xagUsd: Double? = null
+            var usdToPkr: Double? = null
 
-            // 1. Gold XAU
-            try {
-                val gConn = URL("https://api.gold-api.com/price/XAU").openConnection() as HttpURLConnection
-                gConn.connectTimeout = 3000
-                gConn.readTimeout = 3000
-                if (gConn.responseCode == 200) {
-                    val txt = gConn.inputStream.bufferedReader().use { it.readText() }
-                    val gObj = JSONObject(txt)
-                    val p = gObj.optDouble("price", 0.0)
-                    if (p > 0.0) xauUsd = p
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "[DirectApi] Gold API warning: ${e.message}")
-            }
-
-            // 2. Silver XAG
-            try {
-                val sConn = URL("https://api.gold-api.com/price/XAG").openConnection() as HttpURLConnection
-                sConn.connectTimeout = 3000
-                sConn.readTimeout = 3000
-                if (sConn.responseCode == 200) {
-                    val txt = sConn.inputStream.bufferedReader().use { it.readText() }
-                    val sObj = JSONObject(txt)
-                    val p = sObj.optDouble("price", 0.0)
-                    if (p > 0.0) xagUsd = p
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "[DirectApi] Silver API warning: ${e.message}")
-            }
-
-            // 3. Exchange Rates
+            // 1. Exchange Rates
             try {
                 val exConn = URL("https://open.er-api.com/v6/latest/USD").openConnection() as HttpURLConnection
-                exConn.connectTimeout = 3000
-                exConn.readTimeout = 3000
+                exConn.connectTimeout = 8000
+                exConn.readTimeout = 8000
+                exConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                 if (exConn.responseCode == 200) {
                     val txt = exConn.inputStream.bufferedReader().use { it.readText() }
                     val exObj = JSONObject(txt)
                     if (exObj.has("rates")) {
                         val rates = exObj.getJSONObject("rates")
                         val pkr = rates.optDouble("PKR", 0.0)
-                        if (pkr > 0.0) usdToPkr = pkr
+                        if (pkr > 0.0) {
+                            usdToPkr = pkr
+                        }
                     }
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "[DirectApi] Exchange API warning: ${e.message}")
+                Log.d(TAG, "[DirectApi] Exchange API note: ${e.message}")
+            }
+
+            // 2. Gold XAU
+            try {
+                val gConn = URL("https://api.gold-api.com/price/XAU").openConnection() as HttpURLConnection
+                gConn.connectTimeout = 8000
+                gConn.readTimeout = 8000
+                gConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                if (gConn.responseCode == 200) {
+                    val txt = gConn.inputStream.bufferedReader().use { it.readText() }
+                    val gObj = JSONObject(txt)
+                    val p = gObj.optDouble("price", 0.0)
+                    if (p > 0.0) {
+                        xauUsd = p
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "[DirectApi] Gold API note: ${e.message}")
+            }
+
+            // 3. Silver XAG
+            try {
+                val sConn = URL("https://api.gold-api.com/price/XAG").openConnection() as HttpURLConnection
+                sConn.connectTimeout = 8000
+                sConn.readTimeout = 8000
+                sConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                if (sConn.responseCode == 200) {
+                    val txt = sConn.inputStream.bufferedReader().use { it.readText() }
+                    val sObj = JSONObject(txt)
+                    val p = sObj.optDouble("price", 0.0)
+                    if (p > 0.0) {
+                        xagUsd = p
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "[DirectApi] Silver API note: ${e.message}")
+            }
+
+            val currentUsdToPkr = usdToPkr
+            if (currentUsdToPkr == null || currentUsdToPkr <= 0.0) {
+                Log.w(TAG, "[DirectApi] Exchange rate USD->PKR unavailable from live feed. Aborting direct financial conversion.")
+                return null
             }
 
             val gramsPerOz = 31.1034768
             val gramsPerTola = 11.6638125
 
-            val goldPkrGram = (xauUsd / gramsPerOz) * usdToPkr
-            val goldPkrTola = goldPkrGram * gramsPerTola
+            val goldRate = if (xauUsd != null && xauUsd > 0.0) {
+                val goldPkrGram = (xauUsd / gramsPerOz) * currentUsdToPkr
+                val goldPkrTola = goldPkrGram * gramsPerTola
+                LiveGoldRate(
+                    pricePerGram = Math.round(goldPkrGram * 100) / 100.0,
+                    pricePerTola = Math.round(goldPkrTola * 100) / 100.0,
+                    pricePerTroyOz = Math.round(xauUsd * currentUsdToPkr * 100) / 100.0,
+                    pricePer10Gram = Math.round(goldPkrGram * 1000) / 100.0,
+                    currency = currency,
+                    currencySymbol = if (currency == "PKR") "Rs." else currency,
+                    requestedCountry = country,
+                    sourceWebsite = "Global Bullion Spot Feed (gold-api.com)",
+                    freshnessStatus = PriceFreshnessStatus.LIVE,
+                    timestampMs = now
+                )
+            } else null
 
-            val silverPkrGram = (xagUsd / gramsPerOz) * usdToPkr
-            val silverPkrTola = silverPkrGram * gramsPerTola
+            val silverRate = if (xagUsd != null && xagUsd > 0.0) {
+                val silverPkrGram = (xagUsd / gramsPerOz) * currentUsdToPkr
+                val silverPkrTola = silverPkrGram * gramsPerTola
+                LiveSilverRate(
+                    pricePerGram = Math.round(silverPkrGram * 100) / 100.0,
+                    pricePerTola = Math.round(silverPkrTola * 100) / 100.0,
+                    pricePerTroyOz = Math.round(xagUsd * currentUsdToPkr * 100) / 100.0,
+                    pricePer10Gram = Math.round(silverPkrGram * 1000) / 100.0,
+                    pricePerKg = Math.round(silverPkrGram * 100000) / 100.0,
+                    currency = currency,
+                    currencySymbol = if (currency == "PKR") "Rs." else currency,
+                    requestedCountry = country,
+                    sourceWebsite = "Global Bullion Spot Feed (gold-api.com)",
+                    freshnessStatus = PriceFreshnessStatus.LIVE,
+                    timestampMs = now
+                )
+            } else null
 
-            val goldRate = LiveGoldRate(
-                pricePerGram = Math.round(goldPkrGram * 100) / 100.0,
-                pricePerTola = Math.round(goldPkrTola * 100) / 100.0,
-                pricePerTroyOz = Math.round(xauUsd * usdToPkr * 100) / 100.0,
-                pricePer10Gram = Math.round(goldPkrGram * 1000) / 100.0,
-                currency = "PKR",
-                currencySymbol = "Rs.",
-                requestedCountry = country,
-                sourceWebsite = "Global Bullion Spot Feed (gold-api.com)",
-                freshnessStatus = PriceFreshnessStatus.LIVE,
-                timestampMs = now
-            )
+            if (goldRate == null && silverRate == null) {
+                Log.w(TAG, "[DirectApi] Neither live gold nor live silver spot rates could be retrieved.")
+                return null
+            }
 
-            val silverRate = LiveSilverRate(
-                pricePerGram = Math.round(silverPkrGram * 100) / 100.0,
-                pricePerTola = Math.round(silverPkrTola * 100) / 100.0,
-                pricePerTroyOz = Math.round(xagUsd * usdToPkr * 100) / 100.0,
-                pricePer10Gram = Math.round(silverPkrGram * 1000) / 100.0,
-                pricePerKg = Math.round(silverPkrGram * 100000) / 100.0,
-                currency = "PKR",
-                currencySymbol = "Rs.",
-                requestedCountry = country,
-                sourceWebsite = "Global Bullion Spot Feed (gold-api.com)",
-                freshnessStatus = PriceFreshnessStatus.LIVE,
-                timestampMs = now
-            )
-
-            val commoditiesMap = getFallbackCommodityPrices(currency, now)
+            // Spot bullion feeds do not provide agricultural commodity market prices.
+            // Do not invent fake commodity prices by scaling default benchmarks.
+            val commoditiesMap = emptyMap<FitranaCommodity, CommodityPriceInfo>()
 
             return ApiFetchResult(
                 goldRate = goldRate,
                 silverRate = silverRate,
                 commodityPrices = commoditiesMap,
-                commoditySource = "Global Spot Feed & Market Bulletin"
+                commoditySource = "Global Bullion Spot Feed (gold-api.com)"
             )
         } catch (e: Exception) {
             Log.e(TAG, "[DirectApi] Fetch failed: ${e.message}")

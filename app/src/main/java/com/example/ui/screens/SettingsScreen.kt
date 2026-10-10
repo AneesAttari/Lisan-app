@@ -741,6 +741,168 @@ fun SettingsScreen(
                         )
                     }
                 }
+
+                Divider(color = EditorialTheme.colors.divider, modifier = Modifier.padding(vertical = 12.dp))
+
+                // App Launcher Icon & 24h Inactivity Visual Effect Section
+                Text("App Launcher Icon & 24h Inactivity Effect", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = EditorialPrimary)
+                Text(
+                    "Lisan AI keeps its permanent icon. If the app is not opened for 24 hours, the icon receives a subtle visual effect. Opening the app immediately restores the base icon.",
+                    fontSize = 11.sp,
+                    color = EditorialTheme.colors.textSecondary
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                SettingsSwitchRow(
+                    title = "Automatic 24-Hour Visual Effect",
+                    subtitle = "After 24h of inactivity, apply subtle lighting variation to the Lisan icon. Opening the app restores normal icon.",
+                    checked = userSettings.autoIconRotationEnabled,
+                    onCheckedChange = { isChecked ->
+                        viewModel.setAutoIconRotationEnabled(isChecked)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val isCurrentlyInactive = userSettings.currentIconKey.equals("Inactive", ignoreCase = true)
+                Surface(
+                    color = EditorialTheme.colors.container,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, EditorialTheme.colors.divider),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "Permanent Lisan AI Launcher Icon",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EditorialPrimary
+                                )
+                                Text(
+                                    if (isCurrentlyInactive) "Current: Subtle 24h Inactivity Highlight" else "Current: Normal Base Appearance",
+                                    fontSize = 11.sp,
+                                    color = if (isCurrentlyInactive) Color(0xFFF59E0B) else EditorialAccentPurple,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Surface(
+                                color = (if (isCurrentlyInactive) Color(0xFFF59E0B) else EditorialAccentPurple).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (isCurrentlyInactive) Color(0xFFF59E0B) else EditorialAccentPurple)
+                            ) {
+                                Text(
+                                    text = if (isCurrentlyInactive) "INACTIVE (24H+)" else "NORMAL (ACTIVE)",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCurrentlyInactive) Color(0xFFD97706) else EditorialAccentPurple,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            "Preview or test the visual states on your device:",
+                            fontSize = 11.sp,
+                            color = EditorialTheme.colors.textSecondary
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.setManualLauncherIcon("Normal") },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (!isCurrentlyInactive) EditorialAccentPurple else EditorialTheme.colors.surface,
+                                    contentColor = if (!isCurrentlyInactive) Color.White else EditorialPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, if (!isCurrentlyInactive) EditorialAccentPurple else EditorialTheme.colors.divider),
+                                modifier = Modifier.weight(1f).testTag("launcher_icon_state_normal")
+                            ) {
+                                Text("Normal Base Icon", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { viewModel.setManualLauncherIcon("Inactive") },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isCurrentlyInactive) Color(0xFFF59E0B) else EditorialTheme.colors.surface,
+                                    contentColor = if (isCurrentlyInactive) Color.White else EditorialPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, if (isCurrentlyInactive) Color(0xFFF59E0B) else EditorialTheme.colors.divider),
+                                modifier = Modifier.weight(1f).testTag("launcher_icon_state_inactive")
+                            ) {
+                                Text("Subtle Inactive Effect", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                if (com.example.BuildConfig.DEBUG) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = EditorialAccentPurple.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, EditorialAccentPurple.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                "🛠️ Debug: Inactivity Time Simulation",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EditorialAccentPurple
+                            )
+                            Text(
+                                "Simulate elapsed inactivity without waiting 24 hours.",
+                                fontSize = 11.sp,
+                                color = EditorialTheme.colors.textSecondary
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.simulateIconRotationTimeForTesting(12L) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("debug_simulate_12h")
+                                ) {
+                                    Text("Sim 12h (<24h)", fontSize = 10.sp, color = Color.White)
+                                }
+                                Button(
+                                    onClick = { viewModel.simulateIconRotationTimeForTesting(24L) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("debug_simulate_24h")
+                                ) {
+                                    Text("Sim 24h (=24h)", fontSize = 10.sp, color = Color.White)
+                                }
+                                Button(
+                                    onClick = { viewModel.simulateIconRotationTimeForTesting(48L) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).testTag("debug_simulate_48h")
+                                ) {
+                                    Text("Sim 48h (>24h)", fontSize = 10.sp, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

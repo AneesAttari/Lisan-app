@@ -98,7 +98,13 @@ data class UserSettings(
     val usageCount: Int = 0,
     val lastUsageDate: String = "",
     val activeUsersCount: Int = 100,
-    val dailyLimit: Int = 15
+    val dailyLimit: Int = 15,
+
+    // App Launcher Icon Rotation
+    val currentIconKey: String = "Original",
+    val lastAppOpenTimestamp: Long = 0L,
+    val lastIconChangeTimestamp: Long = 0L,
+    val autoIconRotationEnabled: Boolean = true
 ) {
     val fontScale: Float
         get() = when (fontSize) {
@@ -190,6 +196,11 @@ class SettingsRepository(private val context: Context) {
         val LAST_USAGE_DATE = stringPreferencesKey("last_usage_date")
         val ACTIVE_USERS_COUNT = intPreferencesKey("active_users_count")
         val DAILY_LIMIT = intPreferencesKey("daily_limit")
+
+        val CURRENT_ICON_KEY = stringPreferencesKey("current_icon_key")
+        val LAST_APP_OPEN_TIMESTAMP = longPreferencesKey("last_app_open_timestamp")
+        val LAST_ICON_CHANGE_TIMESTAMP = longPreferencesKey("last_icon_change_timestamp")
+        val AUTO_ICON_ROTATION_ENABLED = booleanPreferencesKey("auto_icon_rotation_enabled")
     }
 
     val userSettingsFlow: Flow<UserSettings> = context.dataStore.data
@@ -283,7 +294,12 @@ class SettingsRepository(private val context: Context) {
             usageCount = preferences[PreferencesKeys.USAGE_COUNT] ?: 0,
             lastUsageDate = preferences[PreferencesKeys.LAST_USAGE_DATE] ?: "",
             activeUsersCount = preferences[PreferencesKeys.ACTIVE_USERS_COUNT] ?: 100,
-            dailyLimit = preferences[PreferencesKeys.DAILY_LIMIT] ?: 15
+            dailyLimit = preferences[PreferencesKeys.DAILY_LIMIT] ?: 15,
+
+            currentIconKey = preferences[PreferencesKeys.CURRENT_ICON_KEY] ?: "Original",
+            lastAppOpenTimestamp = preferences[PreferencesKeys.LAST_APP_OPEN_TIMESTAMP] ?: 0L,
+            lastIconChangeTimestamp = preferences[PreferencesKeys.LAST_ICON_CHANGE_TIMESTAMP] ?: 0L,
+            autoIconRotationEnabled = preferences[PreferencesKeys.AUTO_ICON_ROTATION_ENABLED] ?: true
         )
     }
 
@@ -371,6 +387,11 @@ class SettingsRepository(private val context: Context) {
             preferences[PreferencesKeys.LAST_USAGE_DATE] = updated.lastUsageDate
             preferences[PreferencesKeys.ACTIVE_USERS_COUNT] = updated.activeUsersCount
             preferences[PreferencesKeys.DAILY_LIMIT] = updated.dailyLimit
+
+            preferences[PreferencesKeys.CURRENT_ICON_KEY] = updated.currentIconKey
+            preferences[PreferencesKeys.LAST_APP_OPEN_TIMESTAMP] = updated.lastAppOpenTimestamp
+            preferences[PreferencesKeys.LAST_ICON_CHANGE_TIMESTAMP] = updated.lastIconChangeTimestamp
+            preferences[PreferencesKeys.AUTO_ICON_ROTATION_ENABLED] = updated.autoIconRotationEnabled
         }
     }
 

@@ -807,7 +807,9 @@ fun VoiceTutorDialog(
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
-                        handleNoSpeechDetected()
+                        Log.e("VoiceTutorDialog", "Tutor API error: ${e.message}", e)
+                        errorMessage = e.localizedMessage ?: e.message ?: "Voice Tutor API connection failed."
+                        viewModel.setVoiceSessionState(VoiceSessionState.ERROR)
                     }
                 }
             }
@@ -1243,9 +1245,14 @@ fun VoiceTutorDialog(
     DisposableEffect(Unit) {
         initSpeechRecognizer()
         onDispose {
+            stopSpeaking()
+            listeningTimeoutJob?.cancel()
+            turnEndDebounceJob?.cancel()
+            bargeInJob?.cancel()
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
             speechRecognizer?.destroy()
+            viewModel.setVoiceSessionState(VoiceSessionState.READY)
         }
     }
 

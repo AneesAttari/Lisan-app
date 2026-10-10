@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -127,7 +128,12 @@ fun DailyChallengeScreen(viewModel: LisanViewModel) {
                         isAnswered = state == DailyChallengeState.ANSWERED,
                         isCorrect = isCorrect,
                         feedback = feedback,
-                        onNext = { viewModel.nextDailyQuestion() }
+                        onNext = { viewModel.nextDailyQuestion() },
+                        onAskTutor = { prompt ->
+                            viewModel.setTutorChatActive(true)
+                            viewModel.sendChatMessage(prompt)
+                            viewModel.setSelectedTab(2)
+                        }
                     )
                 }
             }
@@ -144,7 +150,8 @@ fun QuestionView(
     isAnswered: Boolean,
     isCorrect: Boolean?,
     feedback: String?,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onAskTutor: (String) -> Unit = {}
 ) {
     EditorialCard {
         Text(
@@ -312,6 +319,21 @@ fun QuestionView(
                             fontStyle = FontStyle.Italic,
                             color = EditorialAccentPurple
                         )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            val prompt = "Can you explain this question from today's challenge in detail: '${question.questionText}'? (Current explanation: ${question.explanationEn})"
+                            onAskTutor(prompt)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = EditorialAccentPurple),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Ask AI Tutor to Explain More (ٹیوٹر سے پوچھیں)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

@@ -18,7 +18,12 @@ data class QuizQuestion(
     val explanationUr: String,
     val arabicReference: String? = null,
     val extraExample: String? = null,
-    val commonMistake: String
+    val commonMistake: String,
+    val optionExplanations: List<String> = emptyList(), // 4 option-specific explanations (A, B, C, D)
+    val ruleUr: String = "",
+    val howToSolveUr: String = "",
+    val conceptType: String = "GENERAL",
+    val hintUr: String = ""
 )
 
 object QuizData {
@@ -66,8 +71,8 @@ object QuizData {
             options = listOf("box", "boxes", "boxs", "boxing"),
             correctOptionIndex = 1,
             explanationEn = "Nouns ending in -x, -ch, -sh, -s, or -z form their plural by adding -es.",
-            explanationUr = "انگریزی میں جن الفاظ کے آخر میں x، ch، sh یا s ہو، ان کی جمع بنانے کے لیے '-es' کا اضافہ کرتے ہیں۔ عربی میں جمع کے اپنے اوزان ہوتے ہیں (جیسے 'صُنْدُوقٌ' سے 'صَنَادِيقُ')، لیکن انگریزی میں زیادہ تر صرف s یا es کا اضافہ ہوتا ہے۔",
-            commonMistake = "صرف s لگانا جیسے 'boxs' لکھنا املا کی بڑی غلطی ہے۔"
+            explanationUr = "انگریزی گرامر کا اصول: جن اسمائے ذات کے آخر میں \"s\"، \"x\"، \"ch\"، \"sh\" یا \"z\" آئے، ان کی جمع (Plural) \"es-\" لگا کر بنائی جاتی ہے۔\nعربی گرامر میں جمع کے اپنے اوزان ہوتے ہیں (جیسے 'صُنْدُوقٌ' سے 'صَنَادِيقُ')، جبکہ انگریزی میں اسم کے آخر میں \"es-\" کا اضافہ ہوتا ہے۔",
+            commonMistake = "جمع بناتے وقت \"box\" کے ساتھ صرف \"s\" لگانا (مثلاً \"boxs\") املا کی بڑی غلطی ہے۔ درست جمع \"boxes\" ہے۔"
         ),
         QuizQuestion(
             id = "q_b4",
